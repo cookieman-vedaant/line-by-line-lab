@@ -1,4 +1,4 @@
-import SearchForm from "@/components/SearchForm";
+import EvidenceWorkbench from "@/components/EvidenceWorkbench";
 
 export default function Home() {
   return (
@@ -9,7 +9,7 @@ export default function Home() {
           Find reputable evidence. Cut debate-ready cards. In minutes.
         </p>
       </header>
-      <SearchForm />
+      <EvidenceWorkbench />
     </main>
   );
 }

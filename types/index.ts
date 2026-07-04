@@ -55,7 +55,7 @@ export interface SearchParams {
   cardLength?: CardLength;
 }
 
-/** A ranked article returned by the Article Finder (Phase 2). Shape from the Tech Design. */
+/** A ranked article returned by the Article Finder. Shape from the Tech Design. */
 export interface Article {
   title: string;
   author: string;
@@ -64,4 +64,28 @@ export interface Article {
   date: string;
   explanation: string;
   credibilityScore: number;
+}
+
+/**
+ * A debate-ready card produced by the Card Cutter.
+ * `body` is verbatim author text; `**...**` spans mark the emphasized warrants
+ * (rendered bold + underlined) and `[...]` marks omitted text. Formatting
+ * conventions follow standard Verbatim style until a sample card is provided.
+ */
+export interface Card {
+  /** One-line tag stating what the evidence proves (based on the user's claim). */
+  tag: string;
+  /** Short cite read in-round, e.g. `Rodríguez '24`. */
+  cite: string;
+  /** Full citation: author + qualifications, publication, date, URL. */
+  citeDetails: string;
+  /** Verbatim extracted evidence with emphasis + omission markers. */
+  body: string;
+}
+
+/** What `/api/cut` accepts. */
+export interface CutRequest {
+  article: Article;
+  claim: string;
+  cardLength: CardLength;
 }

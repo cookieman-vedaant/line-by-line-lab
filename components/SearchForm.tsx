@@ -16,18 +16,21 @@ const inputClasses =
 
 const labelClasses = "mb-1.5 block text-sm font-medium text-zinc-700 dark:text-zinc-300";
 
-export default function SearchForm() {
+interface SearchFormProps {
+  onSearch: (params: SearchParams) => void;
+  busy: boolean;
+}
+
+export default function SearchForm({ onSearch, busy }: SearchFormProps) {
   const [evidenceType, setEvidenceType] = useState("");
   const [claim, setClaim] = useState("");
   const [sourceType, setSourceType] = useState("Any");
   const [publicationAge, setPublicationAge] = useState("Any");
   const [cardLength, setCardLength] = useState("Medium");
   const [error, setError] = useState<string | null>(null);
-  const [submitted, setSubmitted] = useState<SearchParams | null>(null);
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setSubmitted(null);
 
     // Validate the two required fields at the boundary.
     if (!evidenceType) {
@@ -40,16 +43,13 @@ export default function SearchForm() {
     }
     setError(null);
 
-    const params: SearchParams = {
+    onSearch({
       evidenceType: evidenceType as SearchParams["evidenceType"],
       claim: claim.trim(),
       sourceType: sourceType as SearchParams["sourceType"],
       publicationAge: publicationAge as SearchParams["publicationAge"],
       cardLength: cardLength as SearchParams["cardLength"],
-    };
-
-    // Phase 1: capture and display the params. Phase 2 wires this to /api/search.
-    setSubmitted(params);
+    });
   }
 
   return (
@@ -155,35 +155,13 @@ export default function SearchForm() {
 
       <button
         type="submit"
+        disabled={busy}
         className="rounded-md bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white transition
-          hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+          hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60
+          dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
       >
-        Search
+        {busy ? "Searching…" : "Search"}
       </button>
-
-      {submitted && (
-        <div className="rounded-md border border-zinc-200 bg-zinc-50 p-4 text-sm dark:border-zinc-800 dark:bg-zinc-900">
-          <p className="font-medium text-zinc-900 dark:text-zinc-100">
-            Search captured — article search arrives in Phase 2.
-          </p>
-          <dl className="mt-2 space-y-1 text-zinc-600 dark:text-zinc-400">
-            <div>
-              <dt className="inline font-medium">Evidence type:</dt>{" "}
-              <dd className="inline">{submitted.evidenceType}</dd>
-            </div>
-            <div>
-              <dt className="inline font-medium">Claim:</dt>{" "}
-              <dd className="inline">{submitted.claim}</dd>
-            </div>
-            <div>
-              <dt className="inline font-medium">Filters:</dt>{" "}
-              <dd className="inline">
-                {submitted.sourceType} · {submitted.publicationAge} · {submitted.cardLength}
-              </dd>
-            </div>
-          </dl>
-        </div>
-      )}
     </form>
   );
 }

@@ -69,10 +69,10 @@ These rules apply across all AI coding assistants (Claude Code, Cursor, Copilot,
 
 ## Current State
 **Last Updated:** 2026-07-03
-**Current Phase:** Phase 1 — Foundation (built & verified; pending human browser check)
-**Working On:** Ready to start Phase 2 — Article Finder.
-**Recently Completed:** Next.js 16 scaffold at root, folder structure (`services/`, `lib/`, `components/`, `types/`), env placeholder files, Search screen shell with validation.
-**Blocked By:** `ANTHROPIC_API_KEY` must be added to `.env.local` before Phase 2 search can work.
+**Current Phase:** Phase 2 — Core Features (code-complete; lint/tsc/build/unit tests pass, error paths verified in browser)
+**Working On:** End-to-end verification of search + cut with a real API key.
+**Recently Completed:** Article Finder (Claude Opus 4.8 + web_search server tool), Card Cutter (web_fetch + verbatim extraction), full search→results→cut→card UI, unit tests for JSON extraction.
+**Blocked By:** (1) `ANTHROPIC_API_KEY` must be added to `.env.local` for end-to-end testing. (2) Sample card from the user to refine debate formatting (standard Verbatim conventions used meanwhile).
 
 ## Roadmap
 
@@ -81,13 +81,15 @@ These rules apply across all AI coding assistants (Claude Code, Cursor, Copilot,
 - [x] Set up environment variable placeholders for Claude API key and Supabase (`.env.example` + `.env.local`)
 - [x] Build the Search screen shell (Evidence Type, Claim, optional filters)
 
-### Phase 2: Core Features
-- [ ] **Article Finder** — API route that takes search params, calls Claude to find/verify/rank real articles, returns ranked results with explanations
-- [ ] **Search results UI** — ranked cards showing title, author, publication, date, source quality, and why-it-matches explanation
-- [ ] **Card Cutter** — API route that takes a selected article + card length + claim, extracts the strongest warrant, preserves author wording, applies debate formatting
-- [ ] **Card length controls** — Short / Medium / Long / Entire Article
-- [ ] **Card output UI** — display the finished, debate-ready card
-- [ ] Connect Supabase PostgreSQL for cached article metadata (deferred from Phase 1 — not on the critical path)
+### Phase 2: Core Features (code-complete — E2E verification pending API key)
+- [x] **Article Finder** — `/api/search` + `services/articleFinder.ts`: Claude Opus 4.8 with web_search server tool, debate-aware ranking prompt, structured JSON output, honest empty state
+- [x] **Search results UI** — ranked cards with title, author, publication, date, credibility badge, and why-it-matches explanation
+- [x] **Card Cutter** — `/api/cut` + `services/cardCutter.ts`: web_fetch reads the article, verbatim extraction of the strongest warrant, Verbatim-style formatting, honest failure states
+- [x] **Card length controls** — Short / Medium / Long / Entire Article (form default + per-cut picker)
+- [x] **Card output UI** — tag, cite, emphasized body, copy button
+- [ ] **End-to-end verification** — real search + cut in the browser (needs `ANTHROPIC_API_KEY`)
+- [ ] Apply the user's sample card as the formatting reference (prompt tweak in `services/cardCutter.ts`)
+- [ ] Connect Supabase PostgreSQL for cached article metadata (still deferred — add only if repeated-search caching proves needed)
 
 ### Phase 3: Polish
 - [ ] Error handling (no sources found, article can't be parsed, no strong warrant)
