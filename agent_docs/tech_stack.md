@@ -1,89 +1,70 @@
 # Tech Stack & Tools
 
-- **Frontend:** Next.js (App Router) + React + TypeScript. Uses Server Components to reduce complexity.
-- **Backend:** Next.js Route Handlers (API routes) — no separate backend server.
-- **Database:** Supabase PostgreSQL. Stores cached article metadata now; search history and user preferences are future-only.
-- **Styling:** Tailwind CSS. Fast, responsive, zero CSS maintenance.
-- **AI:** Claude API (Anthropic). Powers article discovery/ranking and card cutting. Use a current Claude model (e.g. Claude Sonnet for speed on search, Claude Opus if deeper reasoning is needed for card cutting). Model choice can be tuned later.
-- **Authentication:** None for MVP. (Future: Supabase Auth or Clerk.)
-- **Hosting:** Vercel, with automatic deployments from GitHub.
+**The golden rule of this stack: $0. No paid APIs.** The Claude API was removed by user decision (2026-07-04) because it costs money.
 
-## Setup Commands
-```bash
-# 1. Scaffold (first time only)
-npx create-next-app@latest line-by-line-lab --typescript --tailwind --app --eslint
-
-# 2. Install the Claude + Supabase SDKs
-npm install @anthropic-ai/sdk @supabase/supabase-js
-
-# 3. Run locally
-npm run dev
-```
+- **Frontend:** Next.js 16 (App Router) + React 19 + TypeScript. Server Components by default; interactive pieces are `"use client"` components.
+- **Backend:** Next.js Route Handlers (`app/api/*/route.ts`) — no separate server.
+- **Article search:** OpenAlex (`api.openalex.org`, no key, ~100k req/day) + Semantic Scholar (`api.semanticscholar.org`, no key, shared rate pool). Free scholarly databases — every result is a real paper.
+- **AI:** Google Gemini API **free tier** via `@google/genai`. Default model `gemini-2.5-flash` (override with `GEMINI_MODEL` env var). Used for: debate-aware query expansion, candidate ranking + explanations, and card cutting. Free tier ≈ 10-15 req/min with daily caps — handle 429s gracefully (`RateLimitedError`).
+- **Article extraction:** `@mozilla/readability` + `jsdom` — turns a URL into clean article text server-side (same engine as Firefox Reader Mode).
+- **Validation:** zod at every boundary (form → API → model output).
+- **Styling:** Tailwind CSS 4 (CSS-based config in `app/globals.css`).
+- **Database:** Supabase PostgreSQL — DEFERRED. Add only if repeated-search caching proves needed.
+- **Testing:** Vitest (`npm test`).
+- **Hosting:** Vercel free tier, auto-deploy from GitHub. Set `GEMINI_API_KEY` in Vercel env.
+- **Authentication:** None for MVP.
 
 ## Environment Variables
-Store these in `.env.local` (never commit; never expose to the client):
+`.env.local` (never commit; never expose to the client):
 ```
-ANTHROPIC_API_KEY=...            # server-side only
-NEXT_PUBLIC_SUPABASE_URL=...     # safe to expose
-SUPABASE_SERVICE_ROLE_KEY=...    # server-side only — never send to the browser
+GEMINI_API_KEY=...   # free key from https://aistudio.google.com — server-side only
+# GEMINI_MODEL=gemini-2.5-flash   # optional override
 ```
 
-## Calling Claude (server-side Route Handler pattern)
+## Where things live
+```
+lib/gemini.ts        # Gemini client + generateJson() + typed errors
+lib/json.ts          # extractJson() — tolerant JSON extraction from model text
+lib/verbatim.ts      # programmatic verbatim verification of card bodies
+lib/apiClient.ts     # browser-side fetch helpers for the two routes
+services/academicSearch.ts  # OpenAlex + Semantic Scholar fetchers (real articles only)
+services/articleFinder.ts   # expand → retrieve → rank pipeline
+services/articleExtract.ts  # URL → clean text via Readability
+services/cardCutter.ts      # cut + sample-card formatting + verbatim check
+```
+
+## Calling Gemini (the one pattern to copy)
 ```typescript
-// app/api/search/route.ts — logic lives in services/, this route just wires it up
-import { NextResponse } from "next/server";
-import { findArticles } from "@/services/articleFinder";
+import { generateJson } from "@/lib/gemini";
+import { z } from "zod";
 
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
-    // Validate input at the boundary before doing any work.
-    if (!body.claim || !body.evidenceType) {
-      return NextResponse.json(
-        { error: "Claim and evidence type are required." },
-        { status: 400 },
-      );
-    }
-    const results = await findArticles(body); // Claude call happens inside the service
-    return NextResponse.json({ results });
-  } catch (err) {
-    // Never leak internals to the client; log server-side.
-    console.error("search failed", err);
-    return NextResponse.json(
-      { error: "Something went wrong. Please try again." },
-      { status: 500 },
-    );
-  }
+const schema = z.object({ queries: z.array(z.string()) });
+
+const raw = await generateJson({
+  system: "You are ... Return ONLY JSON: {\"queries\": [...]}",
+  prompt: `Claim: ${claim}`,
+  maxOutputTokens: 1024,
+});
+const parsed = schema.safeParse(raw);
+if (!parsed.success) {
+  // fail honestly — never fabricate a fallback result
 }
 ```
 
 ## Error Handling Pattern
+Typed error classes thrown by services, mapped to responses in thin routes:
 ```typescript
-// Normalize errors at the service boundary. Return user-safe messages; log detail server-side.
-export async function findArticles(params: SearchParams): Promise<Article[]> {
-  const articles = await callClaudeForArticles(params);
-  // If Claude finds nothing real, return the honest message — do NOT fabricate a source.
-  if (articles.length === 0) {
-    throw new NoSourcesFoundError(
-      "No reputable sources were found matching your criteria.",
-    );
-  }
-  return articles;
-}
+// service
+if (articles.length === 0) throw new NoSourcesFoundError();
+
+// route
+if (err instanceof NoSourcesFoundError) return NextResponse.json({ articles: [], notice: err.message });
+if (err instanceof RateLimitedError)    return NextResponse.json({ error: err.message }, { status: 429 });
+if (err instanceof MissingApiKeyError)  return NextResponse.json({ error: err.message }, { status: 500 });
+// everything else: log server-side, return a generic user-safe message
 ```
 
-## Styling & Component Example
-```tsx
-// A simple, clean, fast card — the app should feel like a tool, not a workspace.
-function ArticleResult({ article }: { article: Article }) {
-  return (
-    <div className="rounded-lg border border-gray-200 p-4 hover:border-gray-400 transition">
-      <h3 className="font-semibold text-gray-900">{article.title}</h3>
-      <p className="text-sm text-gray-500">
-        {article.author} · {article.publication} · {article.date}
-      </p>
-      <p className="mt-2 text-sm text-gray-700">{article.explanation}</p>
-    </div>
-  );
-}
-```
+## The No-Fabrication Architecture (why this stack is trustworthy)
+1. Articles can't be invented: they come from scholarly databases; the AI only ranks retrieved candidates by index.
+2. Card bodies can't be invented: `verifyVerbatim()` checks every chunk against the source text server-side; failures get one retry with feedback, then an honest rejection.
+3. Empty results stay empty: "No reputable sources were found matching your criteria." — never padded.

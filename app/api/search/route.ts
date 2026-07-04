@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { MissingApiKeyError } from "@/lib/claude";
+import { MissingApiKeyError, RateLimitedError } from "@/lib/gemini";
 import { NoSourcesFoundError, findArticles } from "@/services/articleFinder";
 import { CARD_LENGTHS, EVIDENCE_TYPES, PUBLICATION_AGES, SOURCE_TYPES } from "@/types";
 
-// Search can take a while (Claude + real web searches); don't let the platform cut it off early.
+// Search fans out to two databases + two AI calls; don't cut it off early.
 export const maxDuration = 60;
 
 const searchRequestSchema = z.object({
@@ -38,6 +38,9 @@ export async function POST(req: Request) {
     // An honest empty result, not a server failure.
     if (err instanceof NoSourcesFoundError) {
       return NextResponse.json({ articles: [], notice: err.message });
+    }
+    if (err instanceof RateLimitedError) {
+      return NextResponse.json({ error: err.message }, { status: 429 });
     }
     if (err instanceof MissingApiKeyError) {
       return NextResponse.json({ error: err.message }, { status: 500 });

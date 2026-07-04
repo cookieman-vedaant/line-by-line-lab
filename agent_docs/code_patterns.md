@@ -6,7 +6,7 @@ Prefer these patterns over inventing new ones.
 
 ## Architecture Pattern
 - **Primary pattern:** Feature-based + thin transport layer.
-- **Rule:** Route Handlers (`app/api/**/route.ts`) handle request/response ONLY. No Claude calls, no ranking, no formatting logic inside them.
+- **Rule:** Route Handlers (`app/api/**/route.ts`) handle request/response ONLY. No AI calls, no ranking, no formatting logic inside them.
 - **Rule:** All business logic (article finding, ranking, card cutting, debate formatting) lives in `services/` or `lib/`. Route handlers call these.
 - **Rule:** Keep domain logic separate from UI. Reuse existing modules before creating new abstractions.
 
@@ -18,14 +18,17 @@ app/
     search/route.ts     # Article Finder endpoint (thin)
     cut/route.ts        # Card Cutter endpoint (thin)
 services/
-  articleFinder.ts      # Claude search + verify + rank
-  cardCutter.ts         # Claude extract + debate formatting
+  academicSearch.ts     # OpenAlex + Semantic Scholar fetchers (real articles only)
+  articleFinder.ts      # expand → retrieve → rank pipeline
+  articleExtract.ts     # URL → clean text (Readability)
+  cardCutter.ts         # Gemini cut + sample-card formatting + verbatim check
 lib/
-  claude.ts             # Claude client setup
-  debate.ts             # Debate knowledge (evidence types, formatting helpers)
-  supabase.ts           # Supabase client
-components/              # UI components (SearchForm, ArticleResult, CardOutput)
-types/                  # Shared TypeScript types (Article, SearchParams, Card)
+  gemini.ts             # Gemini client + generateJson + typed errors
+  json.ts               # tolerant JSON extraction from model output
+  verbatim.ts           # programmatic verbatim verification
+  apiClient.ts          # browser-side fetch helpers
+components/              # SearchForm, ArticleResults, CardCutterPanel, CardView, EvidenceWorkbench
+types/                  # Shared TypeScript types (Article, SearchParams, Card, CutRequest)
 ```
 
 ## Data Fetching
@@ -57,7 +60,7 @@ types/                  # Shared TypeScript types (Article, SearchParams, Card)
 - **Files:** kebab-case (Next.js default) e.g. `article-finder.ts`. Match existing convention once the project is scaffolded.
 - **Components / classes / types:** PascalCase (`ArticleResult`, `SearchParams`).
 - **Functions / variables:** camelCase (`findArticles`, `cardLength`).
-- **Constants / env vars:** UPPER_SNAKE_CASE (`ANTHROPIC_API_KEY`).
+- **Constants / env vars:** UPPER_SNAKE_CASE (`GEMINI_API_KEY`).
 
 ## The Core Domain Rule (most important pattern in this app)
 - The Card Cutter **extracts**, it does not summarize or paraphrase. Preserve the author's original wording exactly, except for omitted text.

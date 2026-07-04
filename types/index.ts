@@ -68,24 +68,41 @@ export interface Article {
 
 /**
  * A debate-ready card produced by the Card Cutter.
- * `body` is verbatim author text; `**...**` spans mark the emphasized warrants
- * (rendered bold + underlined) and `[...]` marks omitted text. Formatting
- * conventions follow standard Verbatim style until a sample card is provided.
+ * Formatting replicates the user's sample card (Rodrigues 16):
+ *
+ * Markup conventions in `tag` and `body` (verbatim author text in `body`):
+ *   ==text==   highlighted key warrant — rendered cyan highlight + bold + underline
+ *   __text__   underlined read-aloud text — rendered underlined
+ *   plain      kept-but-unread context — rendered small and de-emphasized
+ *   [...]      omitted text (body only)
  */
 export interface Card {
-  /** One-line tag stating what the evidence proves (based on the user's claim). */
+  /** Tag stating what the evidence proves; bold overall, `__...__` marks key phrases. */
   tag: string;
-  /** Short cite read in-round, e.g. `Rodríguez '24`. */
+  /** Short cite read in-round, sample-card style without apostrophe: `Rodrigues 16`. */
   cite: string;
-  /** Full citation: author + qualifications, publication, date, URL. */
+  /** Bracketed full cite content: author (+ quals), "Title," publication, date, URL. */
   citeDetails: string;
   /** Verbatim extracted evidence with emphasis + omission markers. */
   body: string;
 }
 
-/** What `/api/cut` accepts. */
+/** Where the article to cut comes from — a URL to fetch, or pasted text. */
+export interface CutSource {
+  /** Fetch + extract this URL server-side. */
+  url?: string;
+  /** Pasted article text, used as-is. */
+  text?: string;
+  /** Optional metadata (known from search results, or user-supplied for pasted text). */
+  title?: string;
+  author?: string;
+  publication?: string;
+  date?: string;
+}
+
+/** What `/api/cut` accepts. Exactly one of source.url / source.text is required. */
 export interface CutRequest {
-  article: Article;
+  source: CutSource;
   claim: string;
   cardLength: CardLength;
 }

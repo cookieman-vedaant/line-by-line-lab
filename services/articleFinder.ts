@@ -1,6 +1,9 @@
-import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { CLAUDE_MODEL, extractJson, getClaude, textFromContent } from "@/lib/claude";
+import { generateJson } from "@/lib/gemini";
+import {
+  searchAcademic,
+  type CandidateArticle,
+} from "@/services/academicSearch";
 import type { Article, SearchParams } from "@/types";
 
 /** Honest failure — no reputable sources exist. Never fabricate one instead. */
@@ -11,117 +14,125 @@ export class NoSourcesFoundError extends Error {
   }
 }
 
-const articleSchema = z.object({
-  title: z.string().min(1),
-  author: z.string().min(1),
-  url: z.string().url(),
-  publication: z.string().min(1),
-  date: z.string().min(1),
-  explanation: z.string().min(1),
-  credibilityScore: z.number().min(0).max(100),
-});
+/**
+ * Pipeline: (1) Gemini expands the claim into academic search queries,
+ * (2) OpenAlex + Semantic Scholar retrieve REAL papers, (3) Gemini ranks the
+ * retrieved candidates for debate usefulness and explains each pick.
+ * The AI never supplies an article — it only chooses among database results.
+ */
 
-const finderOutputSchema = z.object({
-  articles: z.array(articleSchema),
-});
-
-// Static system prompt (no dates/IDs interpolated) so it prompt-caches cleanly.
-const FINDER_SYSTEM_PROMPT = `You are the Article Finder inside Line by Line Lab, an evidence-discovery engine for competitive debate (Lincoln-Douglas). You are NOT a chatbot. Users give a debate claim and an evidence type; you return real, reputable articles ranked by debate usefulness.
-
-## Debate knowledge
-You natively understand debate semantics and use them to expand searches and rank results:
+const DEBATE_KNOWLEDGE = `You understand competitive debate (Lincoln-Douglas) natively:
 - Evidence functions: Link, Internal Link, Impact, Uniqueness, Solvency, Framework, Theory, K Link, Alternative Solvency.
-- Structures: tags, warrants, extensions, overviews. Argument types: disadvantages, counterplans, kritiks, theory, framework. Reasoning: turns, offense, defense, weighing.
-- The evidence type changes what makes an article useful. A "Link" needs causal connection between actions and outcomes. An "Impact" needs magnitude/probability of harm. "Uniqueness" needs status-quo trend evidence. "Solvency" needs evidence a mechanism works. "Framework" needs normative/philosophical grounding. A "K Link" needs critical-theory engagement with the claim's assumptions.
+- The evidence type changes what makes a source useful. A "Link" needs causal connection between actions and outcomes. An "Impact" needs magnitude/probability of harm. "Uniqueness" needs status-quo trend evidence. "Solvency" needs evidence a mechanism works. "Framework" needs normative/philosophical grounding. A "K Link" needs critical-theory engagement with the claim's assumptions.
+- Structures: tags, warrants, extensions, overviews. Argument types: disadvantages, counterplans, kritiks, theory, framework. Reasoning: turns, offense, defense, weighing.`;
 
-## Search behavior
-1. Interpret the debate context of the claim. 2. Expand the query into the underlying academic/policy concepts. 3. Search the web (multiple searches if needed). 4. Filter out low-credibility sources. 5. Rank what remains. 6. Explain each result.
+const EXPANDER_SYSTEM = `${DEBATE_KNOWLEDGE}
 
-## Source quality tiers
-- Highest: peer-reviewed journals, university publications.
-- High: reputable news organizations.
-- Medium: major research organizations / institutes.
-- Lower: government reports, think tanks, books.
-- NEVER include: Reddit, forums, social media, random blogs, AI-generated content, content farms.
+You turn a debate claim into search queries for scholarly databases (OpenAlex, Semantic Scholar). Academic papers don't use debate phrasing — translate the claim into the underlying academic and policy concepts, shaped by the evidence type.
 
-## Ranking factors (in order)
-1. Relevance to the exact claim, 2. debate usefulness for the given evidence type, 3. publication credibility, 4. author expertise, 5. recency (prefer the last year unless older literature is canonical).
+Return ONLY JSON: {"queries": ["...", "..."]} — 2 to 3 keyword-style queries (3-8 words each), no boolean operators, each attacking the claim from a different scholarly angle.`;
 
-## Hard rules
-- ONLY return articles you actually found via search, with their real URLs. Never invent an article, author, date, or URL. An article you cannot verify exists is worse than no article.
-- Each explanation must state exactly what claim the article supports and why it is useful for this evidence type — 1-2 sentences, concrete, no fluff.
-- credibilityScore: 0-100 reflecting the source-quality tiers and author expertise.
-- Return 3-6 articles when good ones exist. If NOTHING reputable matches, return {"articles": []} — do not pad with weak sources.
+const expanderSchema = z.object({
+  queries: z.array(z.string().min(3)).min(1).max(4),
+});
 
-## Output format
-After searching, your FINAL message must be ONLY a JSON object — no prose before or after:
-{"articles": [{"title": "...", "author": "...", "url": "...", "publication": "...", "date": "YYYY-MM-DD or best known", "explanation": "...", "credibilityScore": 87}, ...]}`;
+const RANKER_SYSTEM = `${DEBATE_KNOWLEDGE}
 
-function buildUserPrompt(params: SearchParams): string {
-  const lines = [
-    `Evidence type: ${params.evidenceType}`,
-    `Claim to support: ${params.claim}`,
-  ];
-  if (params.sourceType && params.sourceType !== "Any") {
-    lines.push(`Preferred source type: ${params.sourceType} (prioritize, don't exclude others)`);
-  }
-  if (params.publicationAge && params.publicationAge !== "Any") {
-    lines.push(`Maximum publication age: ${params.publicationAge}`);
-  }
-  lines.push(`Today's date: ${new Date().toISOString().slice(0, 10)}`);
-  return lines.join("\n");
+You are the ranking stage of a debate evidence search engine. You receive a claim, an evidence type, and a numbered list of REAL articles retrieved from scholarly databases. Your job is to pick the articles a debater should actually read.
+
+Rules:
+- Select ONLY from the provided candidates, by their index number. Never invent an article.
+- Judge debate usefulness for THIS claim and THIS evidence type from each abstract — not just topical overlap. An article that argues the claim is better than one that merely mentions it.
+- Ranking factors in order: relevance to the exact claim, debate usefulness for the evidence type, publication credibility (peer-reviewed journals and university publications highest), author expertise, recency.
+- Drop candidates that are off-topic, that argue AGAINST the claim (unless nothing supports it — then return none), or that are too weak to cut.
+- explanation: 1-2 concrete sentences on exactly what claim the article supports and why it's useful for this evidence type.
+- credibilityScore: 0-100 from venue quality, citation count, and author expertise.
+- Pick 3-6 when good candidates exist. If NONE genuinely support the claim, return {"selections": []}.
+
+Return ONLY JSON: {"selections": [{"index": 2, "explanation": "...", "credibilityScore": 87}, ...]} ordered best-first.`;
+
+const rankerSchema = z.object({
+  selections: z.array(
+    z.object({
+      index: z.number().int().min(0),
+      explanation: z.string().min(1),
+      credibilityScore: z.number().min(0).max(100),
+    }),
+  ),
+});
+
+function candidateToPromptLine(c: CandidateArticle, index: number): string {
+  const abstract = c.abstract.length > 700 ? `${c.abstract.slice(0, 700)}…` : c.abstract;
+  return [
+    `[${index}] ${c.title}`,
+    `  Authors: ${c.authors.slice(0, 4).join(", ") || "unknown"}`,
+    `  Venue: ${c.venue || "unknown"} | Date: ${c.date || "unknown"} | Citations: ${c.citationCount}`,
+    `  Abstract: ${abstract || "(none)"}`,
+  ].join("\n");
 }
 
-/**
- * Search the real web for reputable articles supporting the claim,
- * ranked by debate usefulness. Throws NoSourcesFoundError on an honest miss.
- */
+function candidateToArticle(
+  c: CandidateArticle,
+  explanation: string,
+  credibilityScore: number,
+): Article {
+  return {
+    title: c.title,
+    author: c.authors.length > 1 ? `${c.authors[0]} et al.` : c.authors[0] ?? c.venue,
+    url: c.url,
+    publication: c.venue || c.source,
+    date: c.date || "unknown",
+    explanation,
+    credibilityScore,
+  };
+}
+
 export async function findArticles(params: SearchParams): Promise<Article[]> {
-  const claude = getClaude();
-
-  const tools: Anthropic.Messages.ToolUnion[] = [
-    { type: "web_search_20260209", name: "web_search", max_uses: 8 },
-  ];
-
-  let messages: Anthropic.MessageParam[] = [
-    { role: "user", content: buildUserPrompt(params) },
-  ];
-
-  let response = await claude.messages.create({
-    model: CLAUDE_MODEL,
-    max_tokens: 16000,
-    thinking: { type: "adaptive" },
-    system: FINDER_SYSTEM_PROMPT,
-    tools,
-    messages,
+  // 1. Debate-aware query expansion (Gemini, free tier).
+  const expansionRaw = await generateJson({
+    system: EXPANDER_SYSTEM,
+    prompt: `Evidence type: ${params.evidenceType}\nClaim: ${params.claim}`,
+    maxOutputTokens: 1024,
   });
+  const expansion = expanderSchema.safeParse(expansionRaw);
+  // If expansion fails, fall back to the raw claim as the query.
+  const queries = expansion.success ? expansion.data.queries : [params.claim];
 
-  // Server-side tool loops can pause; resume until done (bounded).
-  let continuations = 0;
-  while (response.stop_reason === "pause_turn" && continuations < 5) {
-    messages = [...messages, { role: "assistant", content: response.content }];
-    response = await claude.messages.create({
-      model: CLAUDE_MODEL,
-      max_tokens: 16000,
-      thinking: { type: "adaptive" },
-      system: FINDER_SYSTEM_PROMPT,
-      tools,
-      messages,
-    });
-    continuations++;
+  // 2. Retrieve real articles from the free scholarly databases.
+  const candidates = await searchAcademic(queries, params.publicationAge);
+  if (candidates.length === 0) {
+    throw new NoSourcesFoundError();
   }
 
-  const raw = extractJson(textFromContent(response.content));
-  const parsed = finderOutputSchema.safeParse(raw);
-  if (!parsed.success) {
-    console.error("articleFinder: unparseable model output", parsed.error.message);
+  // 3. Debate-aware ranking over ONLY the retrieved candidates.
+  const shortlist = candidates.slice(0, 24);
+  const rankingPrompt = [
+    `Evidence type: ${params.evidenceType}`,
+    `Claim to support: ${params.claim}`,
+    params.sourceType && params.sourceType !== "Any"
+      ? `Preferred source type: ${params.sourceType} (prioritize, don't exclude)`
+      : "",
+    "",
+    "Candidates:",
+    ...shortlist.map(candidateToPromptLine),
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const rankingRaw = await generateJson({
+    system: RANKER_SYSTEM,
+    prompt: rankingPrompt,
+    maxOutputTokens: 4096,
+  });
+  const ranking = rankerSchema.safeParse(rankingRaw);
+  if (!ranking.success) {
+    console.error("articleFinder: unparseable ranking output", ranking.error.message);
     throw new Error("The search completed but returned an unreadable result. Please try again.");
   }
 
-  // Belt-and-braces: drop anything without a plausible http(s) URL, then rank.
-  const articles = parsed.data.articles
-    .filter((a) => a.url.startsWith("http"))
-    .sort((a, b) => b.credibilityScore - a.credibilityScore);
+  const articles = ranking.data.selections
+    .filter((s) => s.index < shortlist.length)
+    .map((s) => candidateToArticle(shortlist[s.index], s.explanation, s.credibilityScore));
 
   if (articles.length === 0) {
     throw new NoSourcesFoundError();

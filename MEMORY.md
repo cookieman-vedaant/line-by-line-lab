@@ -5,38 +5,37 @@ DO NOT delete historical context if it is still relevant. Compress older complet
 -->
 
 ## 🏗️ Active Phase & Goal
-**Current Phase:** Phase 2 — Core Features (code-complete; E2E verification pending)
-**Current Task:** Awaiting from the human: (1) `ANTHROPIC_API_KEY` in `.env.local`, (2) a sample debate card to use as the formatting reference.
+**Current Phase:** Phase 2 — Core Features ✅ complete and live-verified on the $0 stack (2026-07-04).
+**Current Task:** Ready for Phase 3 polish (error handling, performance). UI personality pass is deliberately the VERY LAST phase — the user said so explicitly.
 **Next Steps:**
-1. Human adds API key → run a real search + cut end-to-end in the browser.
-2. Human provides sample card → adjust the formatting section of `CUTTER_SYSTEM_PROMPT` in `services/cardCutter.ts` and the `CardView` renderer to match.
-3. Then Phase 3 polish: performance tuning (search <10s target), UI personality pass (user wants this as the very last phase).
+1. Phase 3: tune search latency (2 Gemini calls + 2 database fan-outs per search), responsive layout check.
+2. Phase 4: security pass, deploy to Vercel (set `GEMINI_API_KEY` in Vercel env).
+3. Last: UI personality pass with the user.
 
 ## 📂 Architectural Decisions
 *(Log specific choices made during the build here so future agents respect them)*
-- 2026-07-03 — Chose Next.js App Router + Route Handlers over a separate backend, to keep infra minimal and deploy simply to Vercel.
-- 2026-07-03 — Scaffolded with `create-next-app` (Next 16.2.10, React 19.2.4, Tailwind 4, TS, ESLint, no src dir, `@/*` alias) directly at project root, alongside the planning docs.
-- 2026-07-03 — **Deferred Supabase to Phase 2** — DB only caches article metadata; not on the critical path for the core Claude search/cut flow.
-- 2026-07-03 — Kept `docs/` (full PRD + Tech Design) as source of truth; `agent_docs/` holds condensed working summaries. The `prompt_eng/` toolkit was deleted after instantiation.
-- 2026-07-03 — Shared domain types (`EvidenceType`, `CardLength`, `SourceType`, `PublicationAge`, `SearchParams`, `Article`, `Card`) live in `types/index.ts` as const arrays + derived unions, so form options and types never drift apart.
-- 2026-07-03 — All Claude calls and business logic live in `services/`/`lib/`, never in route handlers or components.
-- 2026-07-03 — **Claude API server tools** power both jobs: `web_search_20260209` (Article Finder — real articles, real URLs, no separate search API) and `web_fetch_20260209` (Card Cutter reads the selected URL). Model: `claude-opus-4-8` with adaptive thinking for both; drop the finder to a faster model later only if latency demands it.
-- 2026-07-03 — Model output contract: final message is pure JSON, extracted by `extractJson()` in `lib/claude.ts` (tolerates fences/prose) and validated with zod. `pause_turn` stop reason handled with a bounded continuation loop (server tools can pause mid-loop).
-- 2026-07-03 — Card body emphasis convention: `**...**` marks read-aloud warrants (rendered bold+underline), `[...]` marks omissions, unmarked text renders small — standard Verbatim style pending the user's sample card.
-- 2026-07-03 — Honest-failure contract as typed errors: `NoSourcesFoundError` (200 + notice), `ArticleUnreadableError`/`NoWarrantFoundError` (422), `MissingApiKeyError` (500 with setup hint). Routes map errors; services throw them.
+- 2026-07-04 — **THE COST PIVOT: no paid APIs, Claude API removed entirely** (user decision — it costs money). Replaced by: **OpenAlex + Semantic Scholar** (free, keyless academic search — real articles only), **Gemini API free tier** (`gemini-2.5-flash` default, override via `GEMINI_MODEL`) for query expansion, ranking, and cutting, and **Mozilla Readability + jsdom** for URL→text extraction.
+- 2026-07-04 — **Fabrication is structurally impossible**: articles come only from scholarly databases (AI just ranks them), and card bodies are **programmatically verified verbatim** (`lib/verbatim.ts`) against source text — non-verbatim cuts get one retry with feedback, then honest rejection.
+- 2026-07-04 — **Card Cutter is standalone**: accepts a URL *or* pasted article text (+ optional cite metadata) via the "Cut a Card" tab; search results just pre-fill the same `/api/cut` endpoint. Not limited to found articles (user requirement).
+- 2026-07-04 — **Card format replicates the user's sample card** (the "Rodrigues 16" avidya card, provided in chat — not in the repo; the full spec is encoded in `CUTTER_SYSTEM_PROMPT`): tag bold with `__underlined__` key phrases; cite `AuthorLastName YY` (no apostrophe) + small bracketed full cite + `//vedaant` initials (constant in `CardView.tsx`); body three layers — plain-small (unread), `__underline__` (read aloud), `==highlight==` (cyan, key warrants; must read coherently alone).
+- 2026-07-03 — Next.js App Router + Route Handlers, no separate backend; scaffolded at repo root (Next 16.2.10, React 19.2.4, Tailwind 4, `@/*` alias).
+- 2026-07-03 — Supabase deferred — only for repeated-search caching if ever needed.
+- 2026-07-03 — Shared domain types in `types/index.ts` as const arrays + derived unions. All AI/search/cutting logic in `services/`/`lib/`, never in routes or components.
+- 2026-07-03 — Model JSON contract: `extractJson()` (`lib/json.ts`) tolerates fences/prose; zod validates everything.
 
 ## 🐛 Known Issues & Quirks
 *(Log current bugs or weird workarounds here)*
-- `create-next-app`'s generated AGENTS.md/CLAUDE.md **overwrote** our root docs during scaffold move (2026-07-03); both restored from session context. Lesson recorded in AGENTS.md Agent Behaviors #6: check filename collisions before bulk-moving into root.
-- npm reported 2 moderate vulnerabilities in scaffold transitive deps; not force-fixed (breaking changes). Revisit before launch.
-- `npm test` has no runner yet — Vitest gets installed when the first pure logic lands (Phase 2 ranking helpers).
-- Watch for: Claude must NEVER fabricate articles/citations. If retrieval returns nothing real, return the "No reputable sources were found" message rather than inventing one.
+- Search coverage is academic-first; reputable *news* is thin (no free general web-search APIs exist in 2026 — Brave and Google CSE both killed their free tiers). Revisit (GDELT?) only if the user asks.
+- Gemini free tier: ~10-15 req/min, daily caps. 429s surface as a friendly "wait a minute" message (`RateLimitedError`).
+- Cite metadata (author/date) comes from page bylines or user input — NOT covered by the verbatim check. E2E test cited "Wilcox 16" where the user's sample card said "Rodrigues 16" (the page byline is likely more accurate than the sample's site-admin username). Users should eyeball cites.
+- Paywalled/blocked URLs fail honestly with a "try pasting the text" hint — the paste path is the designed fallback.
+- `create-next-app` once clobbered AGENTS.md/CLAUDE.md during scaffold (2026-07-03); restored. Never bulk-move into root without checking collisions.
+- npm: 2 moderate vulns in scaffold transitive deps; revisit before launch.
 
 ## 📜 Completed Phases
-- [x] Initial scaffold (Next.js 16 + TS + Tailwind 4 at root; lint/tsc/build all pass; dev server verified HTTP 200)
-- [x] Env setup (`.env.example` committed, `.env.local` git-ignored, keys still blank)
-- [x] Search screen shell (SearchForm: Evidence Type + Claim required with validation; Source/Age/Length optional; submit captures params — API wiring is Phase 2)
-- [ ] Supabase connection (deferred to Phase 2)
-- [ ] Article Finder
-- [ ] Card Cutter
-- [ ] Deploy to Vercel
+- [x] Phase 1 — Foundation (scaffold, env, Search screen shell)
+- [x] Phase 2 — Core Features v1 (Claude API build; superseded same week by the cost pivot)
+- [x] Phase 2 — Core Features v2 ($0 stack; live E2E verified: real search returned SSRN/journal papers with explanations; cuts verified on the sample card's own source article and on pasted text; 26 unit tests pass)
+- [ ] Phase 3 — Polish (error handling done during Phase 2; performance + responsiveness remain)
+- [ ] Phase 4 — Launch (security pass, Vercel deploy)
+- [ ] Final — UI personality pass (user's explicit last step)

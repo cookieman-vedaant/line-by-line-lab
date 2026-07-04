@@ -1,30 +1,50 @@
 "use client";
 
 import { useState } from "react";
-import type { Article, Card } from "@/types";
+import type { Card } from "@/types";
+
+/** Shown after the cite, replicating the sample card's cutter initials. */
+const CUTTER_INITIALS = "//vedaant";
 
 interface CardViewProps {
   card: Card;
-  article: Article;
+  /** Where the article came from, for the footer link (optional for pasted text). */
+  sourceUrl?: string;
+  sourceName?: string;
 }
 
 /**
- * Render the card body: `**...**` spans are emphasized warrants (bold +
- * underline, standard debate convention); everything else is kept-but-unread
- * text rendered smaller, exactly as a cut card reads.
+ * Render emphasis markup, replicating the sample card (Rodrigues 16):
+ *   ==text==  → cyan highlight + bold + underline (key warrants)
+ *   __text__  → underline (read-aloud text)
+ *   plain     → small, de-emphasized (kept but unread)
  */
-function renderBody(body: string) {
-  return body.split(/(\*\*[^*]+\*\*)/g).map((part, i) => {
-    if (part.startsWith("**") && part.endsWith("**")) {
+function renderSpans(text: string, plainClass: string) {
+  const tokens = text.split(/(==(?:(?!==)[\s\S])+==|__(?:(?!__)[\s\S])+__)/g);
+  return tokens.map((token, i) => {
+    if (token.startsWith("==") && token.endsWith("==")) {
       return (
-        <strong key={i} className="font-semibold underline decoration-2">
-          {part.slice(2, -2)}
-        </strong>
+        <mark
+          key={i}
+          className="bg-cyan-300 font-bold underline decoration-2 dark:bg-cyan-600 dark:text-zinc-50"
+        >
+          {token.slice(2, -2)}
+        </mark>
       );
     }
+    if (token.startsWith("__") && token.endsWith("__")) {
+      return (
+        <span key={i} className="underline">
+          {token.slice(2, -2)}
+        </span>
+      );
+    }
+    // Strip any stray markers the model left unbalanced.
+    const plain = token.replaceAll("==", "").replaceAll("__", "");
+    if (!plain) return null;
     return (
-      <span key={i} className="text-[0.8em] text-zinc-500 dark:text-zinc-400">
-        {part}
+      <span key={i} className={plainClass}>
+        {plain}
       </span>
     );
   });
@@ -32,10 +52,11 @@ function renderBody(body: string) {
 
 /** Plain-text version for the clipboard — markers stripped, structure kept. */
 function cardToPlainText(card: Card): string {
-  return `${card.tag}\n${card.cite} — ${card.citeDetails}\n\n${card.body.replaceAll("**", "")}`;
+  const strip = (s: string) => s.replaceAll("==", "").replaceAll("__", "");
+  return `${strip(card.tag)}\n${card.cite} [${strip(card.citeDetails)}] ${CUTTER_INITIALS}\n\n${strip(card.body)}`;
 }
 
-export default function CardView({ card, article }: CardViewProps) {
+export default function CardView({ card, sourceUrl, sourceName }: CardViewProps) {
   const [copied, setCopied] = useState(false);
 
   async function handleCopy() {
@@ -44,13 +65,18 @@ export default function CardView({ card, article }: CardViewProps) {
     setTimeout(() => setCopied(false), 2000);
   }
 
+  const paragraphs = card.body.split(/\n+/).filter((p) => p.trim().length > 0);
+
   return (
     <section
       aria-label="Debate card"
       className="rounded-lg border border-zinc-200 p-5 dark:border-zinc-800"
     >
+      {/* Tag: bold overall, underlined key phrases */}
       <div className="flex items-start justify-between gap-4">
-        <h2 className="text-lg font-bold leading-snug">{card.tag}</h2>
+        <h2 className="text-base font-bold leading-snug">
+          {renderSpans(card.tag, "")}
+        </h2>
         <button
           type="button"
           onClick={handleCopy}
@@ -62,25 +88,42 @@ export default function CardView({ card, article }: CardViewProps) {
         </button>
       </div>
 
-      <p className="mt-2 text-sm">
-        <span className="font-bold">{card.cite}</span>{" "}
-        <span className="text-zinc-500 dark:text-zinc-400">— {card.citeDetails}</span>
+      {/* Cite: bold short cite + bracketed details + cutter initials */}
+      <p className="mt-3 leading-snug">
+        <span className="text-lg font-bold">{card.cite}</span>{" "}
+        <span className="text-xs text-zinc-500 dark:text-zinc-400">
+          [{card.citeDetails.replaceAll("==", "").replaceAll("__", "")}] {CUTTER_INITIALS}
+        </span>
       </p>
 
-      <div className="mt-4 leading-relaxed">{renderBody(card.body)}</div>
+      {/* Body: three-layer emphasis */}
+      <div className="mt-4 flex flex-col gap-3 leading-relaxed">
+        {paragraphs.map((paragraph, i) => (
+          <p key={i}>
+            {renderSpans(paragraph, "text-[0.72em] text-zinc-500 dark:text-zinc-400")}
+          </p>
+        ))}
+      </div>
 
-      <p className="mt-4 text-xs text-zinc-400 dark:text-zinc-500">
-        Cut from{" "}
-        <a
-          href={article.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="underline hover:text-zinc-600 dark:hover:text-zinc-300"
-        >
-          {article.publication}
-        </a>
-        . Verify the evidence before you run it — the AI recommends, you decide.
-      </p>
+      {sourceUrl && (
+        <p className="mt-4 text-xs text-zinc-400 dark:text-zinc-500">
+          Cut from{" "}
+          <a
+            href={sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-zinc-600 dark:hover:text-zinc-300"
+          >
+            {sourceName ?? sourceUrl}
+          </a>
+          . Verify the evidence before you run it — the AI recommends, you decide.
+        </p>
+      )}
+      {!sourceUrl && (
+        <p className="mt-4 text-xs text-zinc-400 dark:text-zinc-500">
+          Verify the evidence before you run it — the AI recommends, you decide.
+        </p>
+      )}
     </section>
   );
 }

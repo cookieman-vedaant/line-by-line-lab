@@ -2,8 +2,10 @@
 
 import { useState } from "react";
 import ArticleResults from "@/components/ArticleResults";
+import CardCutterPanel from "@/components/CardCutterPanel";
 import CardView from "@/components/CardView";
 import SearchForm from "@/components/SearchForm";
+import { requestCut, requestSearch } from "@/lib/apiClient";
 import type { Article, Card, CardLength, SearchParams } from "@/types";
 
 type SearchState =
@@ -13,7 +15,10 @@ type SearchState =
   | { status: "empty"; notice: string }
   | { status: "error"; message: string };
 
+type Tab = "find" | "cut";
+
 export default function EvidenceWorkbench() {
+  const [tab, setTab] = useState<Tab>("find");
   const [search, setSearch] = useState<SearchState>({ status: "idle" });
   const [lastParams, setLastParams] = useState<SearchParams | null>(null);
   const [cutLength, setCutLength] = useState<CardLength>("Medium");
@@ -28,28 +33,13 @@ export default function EvidenceWorkbench() {
     setResult(null);
     setCutError(null);
 
-    try {
-      const res = await fetch("/api/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(params),
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        setSearch({ status: "error", message: data.error ?? "Search failed. Please try again." });
-        return;
-      }
-      if (!data.articles || data.articles.length === 0) {
-        setSearch({
-          status: "empty",
-          notice: data.notice ?? "No reputable sources were found matching your criteria.",
-        });
-        return;
-      }
-      setSearch({ status: "results", articles: data.articles });
-    } catch {
-      setSearch({ status: "error", message: "Could not reach the server. Is it running?" });
+    const outcome = await requestSearch(params);
+    if (!outcome.ok) {
+      setSearch({ status: "error", message: outcome.error });
+    } else if (outcome.articles.length === 0) {
+      setSearch({ status: "empty", notice: "notice" in outcome ? outcome.notice : "" });
+    } else {
+      setSearch({ status: "results", articles: outcome.articles });
     }
   }
 
@@ -59,71 +49,106 @@ export default function EvidenceWorkbench() {
     setCutError(null);
     setResult(null);
 
-    try {
-      const res = await fetch("/api/cut", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ article, claim: lastParams.claim, cardLength: cutLength }),
-      });
-      const data = await res.json();
+    const outcome = await requestCut({
+      source: {
+        url: article.url,
+        title: article.title,
+        author: article.author,
+        publication: article.publication,
+        date: article.date,
+      },
+      claim: lastParams.claim,
+      cardLength: cutLength,
+    });
+    setCuttingUrl(null);
 
-      if (!res.ok || !data.card) {
-        setCutError(data.error ?? "Card cutting failed. Try another article.");
-        return;
-      }
-      setResult({ card: data.card, article });
-    } catch {
-      setCutError("Could not reach the server. Is it running?");
-    } finally {
-      setCuttingUrl(null);
+    if (!outcome.ok) {
+      setCutError(outcome.error);
+      return;
     }
+    setResult({ card: outcome.card, article });
   }
 
+  const tabButton = (value: Tab, label: string) => (
+    <button
+      type="button"
+      onClick={() => setTab(value)}
+      className={`border-b-2 px-4 py-2 text-sm font-semibold transition ${
+        tab === value
+          ? "border-zinc-900 text-zinc-900 dark:border-zinc-100 dark:text-zinc-100"
+          : "border-transparent text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+      }`}
+    >
+      {label}
+    </button>
+  );
+
   return (
-    <div className="flex flex-col gap-10">
-      <SearchForm onSearch={handleSearch} busy={search.status === "searching"} />
+    <div className="flex flex-col gap-8">
+      <nav
+        aria-label="Tool"
+        className="flex justify-center border-b border-zinc-200 dark:border-zinc-800"
+      >
+        {tabButton("find", "Find Articles")}
+        {tabButton("cut", "Cut a Card")}
+      </nav>
 
-      {search.status === "searching" && (
-        <p className="animate-pulse text-center text-sm text-zinc-500 dark:text-zinc-400">
-          Searching reputable sources… this can take up to a minute.
-        </p>
+      {tab === "cut" ? (
+        <CardCutterPanel initialClaim={lastParams?.claim} />
+      ) : (
+        <div className="flex flex-col gap-10">
+          <SearchForm onSearch={handleSearch} busy={search.status === "searching"} />
+
+          {search.status === "searching" && (
+            <p className="animate-pulse text-center text-sm text-zinc-500 dark:text-zinc-400">
+              Searching scholarly databases…
+            </p>
+          )}
+
+          {search.status === "empty" && (
+            <p role="status" className="text-center text-sm text-zinc-600 dark:text-zinc-400">
+              {search.notice} Try broadening the claim or relaxing the filters — or paste an
+              article you already have into the Cut a Card tab.
+            </p>
+          )}
+
+          {search.status === "error" && (
+            <p role="alert" className="text-center text-sm text-red-600 dark:text-red-400">
+              {search.message}
+            </p>
+          )}
+
+          {search.status === "results" && (
+            <ArticleResults
+              articles={search.articles}
+              cutLength={cutLength}
+              onCutLengthChange={setCutLength}
+              onCut={handleCut}
+              cuttingUrl={cuttingUrl}
+            />
+          )}
+
+          {cuttingUrl && (
+            <p className="animate-pulse text-center text-sm text-zinc-500 dark:text-zinc-400">
+              Reading the article and cutting your card…
+            </p>
+          )}
+
+          {cutError && (
+            <p role="alert" className="text-center text-sm text-red-600 dark:text-red-400">
+              {cutError}
+            </p>
+          )}
+
+          {result && (
+            <CardView
+              card={result.card}
+              sourceUrl={result.article.url}
+              sourceName={result.article.publication}
+            />
+          )}
+        </div>
       )}
-
-      {search.status === "empty" && (
-        <p role="status" className="text-center text-sm text-zinc-600 dark:text-zinc-400">
-          {search.notice} Try broadening the claim or relaxing the filters.
-        </p>
-      )}
-
-      {search.status === "error" && (
-        <p role="alert" className="text-center text-sm text-red-600 dark:text-red-400">
-          {search.message}
-        </p>
-      )}
-
-      {search.status === "results" && (
-        <ArticleResults
-          articles={search.articles}
-          cutLength={cutLength}
-          onCutLengthChange={setCutLength}
-          onCut={handleCut}
-          cuttingUrl={cuttingUrl}
-        />
-      )}
-
-      {cuttingUrl && (
-        <p className="animate-pulse text-center text-sm text-zinc-500 dark:text-zinc-400">
-          Reading the article and cutting your card… this can take up to a minute.
-        </p>
-      )}
-
-      {cutError && (
-        <p role="alert" className="text-center text-sm text-red-600 dark:text-red-400">
-          {cutError}
-        </p>
-      )}
-
-      {result && <CardView card={result.card} article={result.article} />}
     </div>
   );
 }

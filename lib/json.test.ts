@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractJson, getClaude, MissingApiKeyError } from "./claude";
+import { extractJson } from "./json";
 
 describe("extractJson", () => {
   it("parses a message that is pure JSON", () => {
@@ -20,7 +20,7 @@ describe("extractJson", () => {
   });
 
   it("parses JSON embedded in prose", () => {
-    const text = 'I found these articles. {"articles": []} Let me know if you need more.';
+    const text = 'I found these. {"articles": []} Let me know if you need more.';
     expect(extractJson(text)).toEqual({ articles: [] });
   });
 
@@ -41,17 +41,5 @@ describe("extractJson", () => {
 
   it("returns null for empty input", () => {
     expect(extractJson("")).toBeNull();
-  });
-});
-
-describe("getClaude", () => {
-  it("fails loudly when ANTHROPIC_API_KEY is missing", () => {
-    const saved = process.env.ANTHROPIC_API_KEY;
-    delete process.env.ANTHROPIC_API_KEY;
-    try {
-      expect(() => getClaude()).toThrow(MissingApiKeyError);
-    } finally {
-      if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved;
-    }
   });
 });

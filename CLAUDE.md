@@ -4,7 +4,7 @@
 
 ## Project Context
 **App:** Line by Line Lab — debate-aware evidence discovery & card cutting
-**Stack:** Next.js 16 (App Router) + React 19 + TypeScript, Tailwind CSS 4, Supabase PostgreSQL, Claude API, Vercel
+**Stack:** Next.js 16 (App Router) + React 19 + TypeScript, Tailwind CSS 4, OpenAlex + Semantic Scholar (free search), Gemini API free tier (AI), Supabase PostgreSQL (deferred), Vercel. No paid APIs.
 **Stage:** MVP Development
 **User Level:** A — Vibe-coder (AI does the coding; the human guides and tests). Explain concepts simply and focus on "what to do next."
 

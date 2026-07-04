@@ -1,29 +1,33 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { MissingApiKeyError } from "@/lib/claude";
+import { MissingApiKeyError, RateLimitedError } from "@/lib/gemini";
 import {
   ArticleUnreadableError,
   NoWarrantFoundError,
+  VerbatimCheckFailedError,
   cutCard,
 } from "@/services/cardCutter";
 import { CARD_LENGTHS } from "@/types";
 
-// Reading a full article + cutting can take a while; don't cut it off early.
+// Fetching an article + cutting can take a while; don't cut it off early.
 export const maxDuration = 120;
 
-const cutRequestSchema = z.object({
-  article: z.object({
-    title: z.string().min(1),
-    author: z.string().min(1),
-    url: z.string().url().startsWith("http"),
-    publication: z.string().min(1),
-    date: z.string().min(1),
-    explanation: z.string(),
-    credibilityScore: z.number(),
-  }),
-  claim: z.string().trim().min(3).max(500),
-  cardLength: z.enum(CARD_LENGTHS),
-});
+const cutRequestSchema = z
+  .object({
+    source: z.object({
+      url: z.string().url().startsWith("http").optional(),
+      text: z.string().max(300000).optional(),
+      title: z.string().max(500).optional(),
+      author: z.string().max(300).optional(),
+      publication: z.string().max(300).optional(),
+      date: z.string().max(50).optional(),
+    }),
+    claim: z.string().trim().min(3).max(500),
+    cardLength: z.enum(CARD_LENGTHS),
+  })
+  .refine((r) => Boolean(r.source.url) !== Boolean(r.source.text?.trim()), {
+    message: "Provide either an article URL or pasted article text (not both).",
+  });
 
 export async function POST(req: Request) {
   let body: unknown;
@@ -36,7 +40,7 @@ export async function POST(req: Request) {
   const parsed = cutRequestSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "An article, claim, and card length are required." },
+      { error: "A claim, a card length, and either an article URL or pasted text are required." },
       { status: 400 },
     );
   }
@@ -46,8 +50,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ card });
   } catch (err) {
     // Honest, user-facing failures — surface the exact message.
-    if (err instanceof ArticleUnreadableError || err instanceof NoWarrantFoundError) {
+    if (
+      err instanceof ArticleUnreadableError ||
+      err instanceof NoWarrantFoundError ||
+      err instanceof VerbatimCheckFailedError
+    ) {
       return NextResponse.json({ error: err.message }, { status: 422 });
+    }
+    if (err instanceof RateLimitedError) {
+      return NextResponse.json({ error: err.message }, { status: 429 });
     }
     if (err instanceof MissingApiKeyError) {
       return NextResponse.json({ error: err.message }, { status: 500 });

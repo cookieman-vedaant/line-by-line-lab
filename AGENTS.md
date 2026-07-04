@@ -9,7 +9,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 ## Project Overview & Stack
 **App:** Line by Line Lab
 **Overview:** Line by Line Lab is a web app that automates the two most time-consuming parts of competitive debate prep: (1) finding high-quality, reputable articles and (2) cutting debate-ready evidence ("cards") from them. Unlike generic AI tools, it is *debate-aware* — it understands links, impacts, solvency, framework, kritiks, theory, counterplans, and disadvantages. Primary users are high school Lincoln-Douglas debaters, from beginners to national-circuit competitors. The goal is to eliminate repetitive evidence collection, NOT to write arguments or replace debaters.
-**Stack:** Next.js 16 (App Router) + React 19 + TypeScript, Tailwind CSS 4, Next.js Route Handlers (no separate backend), Supabase PostgreSQL, Claude API, deployed on Vercel.
+**Stack:** Next.js 16 (App Router) + React 19 + TypeScript, Tailwind CSS 4, Next.js Route Handlers (no separate backend), OpenAlex + Semantic Scholar (free academic search), Google Gemini API free tier (ranking + card cutting), Mozilla Readability (article extraction), Supabase PostgreSQL (deferred), deployed on Vercel. **No paid APIs — the Claude API was dropped for cost.**
 **Critical Constraints:**
 - **Web only.** No mobile app.
 - **~$0 budget** outside Claude Code. Prefer free tiers (Vercel, Supabase free tier).
@@ -28,13 +28,13 @@ Execute these commands for standard development workflows. Do not invent new pac
 
 ## Protected Areas
 Do NOT modify these areas without explicit human approval:
-- **Secrets & Environment:** `.env*` files and any file holding the Claude API key or Supabase keys. Never expose secrets to the client.
+- **Secrets & Environment:** `.env*` files and any file holding the Gemini API key or Supabase keys. Never expose secrets to the client.
 - **Database Migrations:** Existing Supabase migration files.
 - **Infrastructure:** Vercel deployment config and `.github/workflows/` (if added later).
 
 ## Coding Conventions
 - **Formatting:** Follow ESLint/Prettier defaults from `create-next-app`. No lint warnings in new code.
-- **Architecture rules:** Keep API Route Handlers thin — request/response only. All Claude calls, search logic, and card-cutting logic live in `services/` or `lib/`, never inline in route handlers or components.
+- **Architecture rules:** Keep API Route Handlers thin — request/response only. All AI calls, search logic, and card-cutting logic live in `services/` or `lib/`, never inline in route handlers or components.
 - **Testing Expectations:** Unit-test pure logic (ranking, formatting helpers). Manually verify the two core flows (search, cut card) in the browser before marking a task complete.
 - **Type Safety:** Strict TypeScript. Avoid `any`; use `unknown` with type guards. Validate all external inputs (form fields, API payloads, env vars). Shared domain types live in `types/index.ts`.
 
@@ -68,28 +68,31 @@ These rules apply across all AI coding assistants (Claude Code, Cursor, Copilot,
 - `docs/` — Original PRD and Tech Design (source of truth; load only if the summaries are insufficient)
 
 ## Current State
-**Last Updated:** 2026-07-03
-**Current Phase:** Phase 2 — Core Features (code-complete; lint/tsc/build/unit tests pass, error paths verified in browser)
-**Working On:** End-to-end verification of search + cut with a real API key.
-**Recently Completed:** Article Finder (Claude Opus 4.8 + web_search server tool), Card Cutter (web_fetch + verbatim extraction), full search→results→cut→card UI, unit tests for JSON extraction.
-**Blocked By:** (1) `ANTHROPIC_API_KEY` must be added to `.env.local` for end-to-end testing. (2) Sample card from the user to refine debate formatting (standard Verbatim conventions used meanwhile).
+**Last Updated:** 2026-07-04
+**Current Phase:** Phase 2 — Core Features ✅ (rebuilt on the $0 stack; live E2E verified: real search + real cuts, incl. against the user's sample-card source article)
+**Working On:** Ready for Phase 3 — error-handling polish and performance. UI personality pass is deliberately the LAST phase (user preference).
+**Recently Completed:** Cost pivot off the Claude API. Article Finder v2 (Gemini query expansion → OpenAlex + Semantic Scholar retrieval → Gemini debate-aware ranking). Card Cutter v2 (URL via Readability or pasted text; sample-card three-layer formatting; programmatic verbatim verification). Tabbed UI (Find Articles / Cut a Card).
+**Blocked By:** Nothing.
 
 ## Roadmap
 
 ### Phase 1: Foundation ✅
 - [x] Initialize Next.js (App Router) + TypeScript + Tailwind project
-- [x] Set up environment variable placeholders for Claude API key and Supabase (`.env.example` + `.env.local`)
+- [x] Set up environment variable placeholders (`.env.example` + `.env.local`)
 - [x] Build the Search screen shell (Evidence Type, Claim, optional filters)
 
-### Phase 2: Core Features (code-complete — E2E verification pending API key)
-- [x] **Article Finder** — `/api/search` + `services/articleFinder.ts`: Claude Opus 4.8 with web_search server tool, debate-aware ranking prompt, structured JSON output, honest empty state
+### Phase 2: Core Features ✅ (v2 — $0 stack, live-verified 2026-07-04)
+- [x] **Article Finder** — `/api/search` + `services/articleFinder.ts` + `services/academicSearch.ts`: Gemini expands the claim → OpenAlex + Semantic Scholar return real papers → Gemini ranks for debate usefulness and explains each pick; honest empty state
 - [x] **Search results UI** — ranked cards with title, author, publication, date, credibility badge, and why-it-matches explanation
-- [x] **Card Cutter** — `/api/cut` + `services/cardCutter.ts`: web_fetch reads the article, verbatim extraction of the strongest warrant, Verbatim-style formatting, honest failure states
-- [x] **Card length controls** — Short / Medium / Long / Entire Article (form default + per-cut picker)
-- [x] **Card output UI** — tag, cite, emphasized body, copy button
-- [ ] **End-to-end verification** — real search + cut in the browser (needs `ANTHROPIC_API_KEY`)
-- [ ] Apply the user's sample card as the formatting reference (prompt tweak in `services/cardCutter.ts`)
+- [x] **Card Cutter** — `/api/cut` + `services/cardCutter.ts` + `services/articleExtract.ts`: article from URL (Readability) or pasted text; Gemini cuts the strongest warrant; body **programmatically verified verbatim** against the source (rejected + retried if not)
+- [x] **Standalone "Cut a Card" tab** — bring-your-own article (URL or paste + optional cite metadata), not limited to search results
+- [x] **Card formatting from the user's sample card** — tag with underlined phrases; `AuthorLastName YY` cite + bracketed details + `//vedaant`; three-layer body (plain-small / underline / cyan highlight)
+- [x] **Card length controls** — Short / Medium / Long / Entire Article
 - [ ] Connect Supabase PostgreSQL for cached article metadata (still deferred — add only if repeated-search caching proves needed)
+
+### Known trade-offs (accepted)
+- Search coverage is academic-first (scholarly databases). Reputable *news* coverage is thin — free general web-search APIs no longer exist in 2026. Revisit with GDELT or a paid API only if the user asks.
+- Gemini free tier limits: ~10-15 requests/min. A search uses 2 AI calls; a cut uses 1-2. Fine for personal use; heavy sessions may hit brief 429s (surfaced with a friendly retry message).
 
 ### Phase 3: Polish
 - [ ] Error handling (no sources found, article can't be parsed, no strong warrant)
