@@ -102,8 +102,8 @@ const markerSchema = z.object({
   tag: z.string().min(1),
   cite: z.string().min(1),
   citeDetails: z.string().min(1),
-  underlines: z.array(z.string()).max(80),
-  highlights: z.array(z.string()).max(60),
+  underlines: z.array(z.string()).max(300),
+  highlights: z.array(z.string()).max(250),
 });
 
 const MARKER_SYSTEM = `You are the emphasis marker inside a debate card-cutting tool (Lincoln-Douglas). You receive a claim and a passage extracted VERBATIM from an article. You do NOT rewrite anything — you return metadata that the app applies to the original text.
@@ -111,8 +111,11 @@ const MARKER_SYSTEM = `You are the emphasis marker inside a debate card-cutting 
 Return ONLY JSON:
 {"tag": "...", "cite": "...", "citeDetails": "...", "underlines": ["...", ...], "highlights": ["...", ...]}
 
-- underlines: the read-aloud text — full clauses/sentences COPIED EXACTLY from the passage, character for character. A debater reading only the underlined text should hear a complete argument for the claim. Underline generously across the passage (typically 30-60% of it). Each string must stay within one paragraph.
-- highlights: the punchiest words INSIDE underlined stretches — the key warrants read with emphasis. COPIED EXACTLY from the passage. The highlighted words alone must read as a coherent, grammatical mini-argument. Highlight selectively (roughly a third of the underlined text). Each string must stay within one paragraph.
+Your #1 job is DETAILED, CLAIM-DRIVEN emphasis. Work through the passage from beginning to end and mark every place that supports the claim — do not stop after the first paragraph or two. A well-cut card is densely marked throughout, so the whole argument is visible at a glance.
+
+- underlines: the read-aloud text — full clauses/sentences COPIED EXACTLY from the passage, character for character. Underline EVERY sentence or clause that bears on the claim, in EVERY paragraph that relates to it — aim for roughly 50-75% of the passage, distributed from start to finish (not clustered at the top). A debater reading only the underlined text should hear the complete argument for the claim. Each string must stay within one paragraph.
+- highlights: the punchiest words INSIDE underlined stretches — the specific WARRANTS (the reasons/mechanisms that prove the claim), read with vocal emphasis. COPIED EXACTLY from the passage. Highlight generously — roughly half of the underlined text — and pull out MULTIPLE warrant phrases per paragraph wherever the reasoning is dense. Every distinct reason, mechanism, statistic, or causal link that supports the claim should be highlighted. The highlighted words read in sequence must still form a coherent, grammatical argument. Each string must stay within one paragraph.
+- Prioritize by the claim: highlight most heavily the passages that most directly prove the user's claim. A phrase that states WHY or HOW the claim is true is always worth highlighting.
 - tag: a punchy 1-2 sentence statement of what the evidence proves, phrased from the user's claim (this is YOUR wording). Mark 1-3 key phrases with __underline__ markers.
 - cite: AuthorLastName YY, no apostrophe (e.g. "Rodrigues 16"). Multiple authors: "FirstAuthor et al. YY". No known author: publication name + YY.
 - citeDetails: full cite content WITHOUT brackets: author (+ qualifications if known), "Article Title." Publication, date, URL if known.
@@ -236,7 +239,9 @@ export async function cutCard(req: CutRequest): Promise<Card> {
   const markerRaw = await generateJson({
     system: MARKER_SYSTEM,
     prompt: buildMarkerPrompt(req.claim, article, passage),
-    maxOutputTokens: 16384,
+    // Dense emphasis on a long/entire card means many substrings — give the
+    // JSON room so it isn't truncated (which would drop later warrants).
+    maxOutputTokens: 40000,
   });
   const marker = markerSchema.safeParse(markerRaw);
   if (!marker.success) {
