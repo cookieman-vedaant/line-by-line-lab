@@ -57,6 +57,11 @@ export async function generateJson(opts: GenerateJsonOptions): Promise<unknown> 
         responseMimeType: "application/json",
         temperature: 0.2,
         maxOutputTokens: opts.maxOutputTokens ?? 8192,
+        // Our calls are structured extraction/selection, not open reasoning.
+        // Disabling thinking keeps the whole token budget for the JSON answer
+        // (2.5-flash otherwise spends it thinking and truncates output), and
+        // uses fewer tokens per call — easing free-tier rate limits.
+        thinkingConfig: { thinkingBudget: 0 },
       },
     });
     return extractJson(response.text ?? "");

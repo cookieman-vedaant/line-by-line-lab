@@ -44,10 +44,11 @@ Rules:
 - Select ONLY from the provided candidates, by their index number. Never invent an article.
 - Judge debate usefulness for THIS claim and THIS evidence type from each abstract — not just topical overlap. An article that argues the claim is better than one that merely mentions it.
 - Ranking factors in order: relevance to the exact claim, debate usefulness for the evidence type, publication credibility (peer-reviewed journals and university publications highest), author expertise, recency.
-- Drop candidates that are off-topic, that argue AGAINST the claim (unless nothing supports it — then return none), or that are too weak to cut.
+- Drop candidates that are clearly off-topic or that argue AGAINST the claim (unless nothing supports it — then return none).
+- ERR TOWARD INCLUSION: a debater can skim a marginal article, but can't read one you hid. Include partial or indirect support and note the limits in the explanation.
 - explanation: 1-2 concrete sentences on exactly what claim the article supports and why it's useful for this evidence type.
 - credibilityScore: 0-100 from venue quality, citation count, and author expertise.
-- Pick 3-6 when good candidates exist. If NONE genuinely support the claim, return {"selections": []}.
+- Pick 5-8 whenever plausible candidates exist (fewer only if the pool is genuinely thin). If NONE relate to the claim at all, return {"selections": []}.
 
 Return ONLY JSON: {"selections": [{"index": 2, "explanation": "...", "credibilityScore": 87}, ...]} ordered best-first.`;
 
@@ -105,7 +106,7 @@ export async function findArticles(params: SearchParams): Promise<Article[]> {
   }
 
   // 3. Debate-aware ranking over ONLY the retrieved candidates.
-  const shortlist = candidates.slice(0, 24);
+  const shortlist = candidates.slice(0, 32);
   const rankingPrompt = [
     `Evidence type: ${params.evidenceType}`,
     `Claim to support: ${params.claim}`,

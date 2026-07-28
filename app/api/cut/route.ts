@@ -4,7 +4,6 @@ import { MissingApiKeyError, RateLimitedError } from "@/lib/gemini";
 import {
   ArticleUnreadableError,
   NoWarrantFoundError,
-  VerbatimCheckFailedError,
   cutCard,
 } from "@/services/cardCutter";
 import { CARD_LENGTHS } from "@/types";
@@ -50,11 +49,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ card });
   } catch (err) {
     // Honest, user-facing failures — surface the exact message.
-    if (
-      err instanceof ArticleUnreadableError ||
-      err instanceof NoWarrantFoundError ||
-      err instanceof VerbatimCheckFailedError
-    ) {
+    if (err instanceof ArticleUnreadableError || err instanceof NoWarrantFoundError) {
       return NextResponse.json({ error: err.message }, { status: 422 });
     }
     if (err instanceof RateLimitedError) {

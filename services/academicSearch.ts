@@ -75,7 +75,7 @@ interface OpenAlexWork {
 async function searchOpenAlex(query: string, fromDate: string | null): Promise<CandidateArticle[]> {
   const params = new URLSearchParams({
     search: query,
-    "per-page": "8",
+    "per-page": "12",
     sort: "relevance_score:desc",
   });
   const filters = ["has_abstract:true"];
@@ -125,7 +125,7 @@ async function searchSemanticScholar(
 ): Promise<CandidateArticle[]> {
   const params = new URLSearchParams({
     query,
-    limit: "8",
+    limit: "12",
     fields: "title,abstract,venue,url,publicationDate,year,citationCount,authors",
   });
   if (fromDate) params.set("publicationDateOrYear", `${fromDate}:`);

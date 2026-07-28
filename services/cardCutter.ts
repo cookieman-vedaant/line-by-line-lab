@@ -1,12 +1,13 @@
 import { z } from "zod";
+import { tagMarkupToDelimiters } from "@/lib/cardMarkup";
+import { applyEmphasis } from "@/lib/emphasis";
 import { generateJson } from "@/lib/gemini";
-import { verifyVerbatim } from "@/lib/verbatim";
 import {
   ArticleUnreadableError,
   extractArticleFromUrl,
   type ExtractedArticle,
 } from "@/services/articleExtract";
-import type { Card, CutRequest } from "@/types";
+import type { Card, CardLength, CutRequest } from "@/types";
 
 export { ArticleUnreadableError };
 
@@ -18,85 +19,127 @@ export class NoWarrantFoundError extends Error {
   }
 }
 
-/** Honest failure — the AI's output wasn't verbatim, so the card was rejected. */
-export class VerbatimCheckFailedError extends Error {
-  constructor() {
-    super(
-      "The cut didn't pass the verbatim check (the card text must match the article exactly), so it was rejected. Please try again.",
-    );
-    this.name = "VerbatimCheckFailedError";
-  }
-}
-
-const cardSchema = z.object({
-  tag: z.string().min(1),
-  cite: z.string().min(1),
-  citeDetails: z.string().min(1),
-  body: z.string().min(1),
-});
-
-const cutterOutputSchema = z.union([
-  z.object({ card: cardSchema }),
-  z.object({ error: z.literal("no_warrant") }),
-]);
-
 // Keeps prompts inside free-tier token budgets; plenty for almost any article.
 const MAX_ARTICLE_CHARS = 60000;
 
-// Formatting spec replicated from the user's sample card ("Rodrigues 16").
-const CUTTER_SYSTEM_PROMPT = `You are the Card Cutter inside Line by Line Lab, a tool that cuts debate-ready evidence ("cards") for competitive debate (Lincoln-Douglas). You receive the full text of ONE article and produce ONE card supporting the user's claim.
+/**
+ * HOW CUTTING WORKS (verbatim by construction — the AI never writes body text):
+ * 1. Extract the article (URL via Readability, or pasted text).
+ * 2. SELECT: the AI picks a contiguous paragraph range matching the card
+ *    length; we clamp it mechanically to the length's word budget.
+ *    The body is then assembled from the REAL article paragraphs.
+ * 3. MARK: the AI returns exact substrings to underline/highlight plus the
+ *    tag and cite; we locate each substring in the real text and wrap it.
+ *    Substrings that don't match are skipped — never invented.
+ */
 
-## The iron rules (violating these destroys the product)
-1. You EXTRACT. You never summarize, never paraphrase, never synthesize. Every word in the card body must appear VERBATIM in the provided article text, in the original order. The body is checked programmatically against the article — any altered wording gets the card rejected.
-2. Text may only be OMITTED between passages, never altered within them. Mark omissions between passages with [...] on its own. Do not omit words inside a sentence.
-3. Never invent citations, quotes, dates, or credentials. Cite only what is known.
-4. If nothing in the article strongly supports the claim, return the error output. Never force a weak card.
+/** Word-budget fraction of the article for each card length. */
+const LENGTH_BUDGETS: Record<Exclude<CardLength, "Entire Article">, { min: number; max: number }> = {
+  Short: { min: 0.05, max: 0.3 },
+  Medium: { min: 0.35, max: 0.65 },
+  Long: { min: 0.6, max: 0.95 },
+};
 
-## Card selection
-Ask: "If a debater could only read one section of this article, which section best proves this claim?" Optimize for the strongest WARRANT — the causal reasoning that proves the claim — not the first paragraph, the longest paragraph, or the most famous quote. Keep enough surrounding context that the evidence reads fairly.
+export function splitParagraphs(text: string): string[] {
+  return text
+    .split(/\n+/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+}
 
-## Card length
-- Short: the single strongest warrant (roughly one paragraph of source text).
-- Medium: the strongest warrant plus its supporting explanation (1-3 paragraphs).
-- Long: the complete chain of reasoning (multiple paragraphs).
-- Entire Article: the whole article body (omit only navigation junk/ads if present).
+const countWords = (s: string) => s.split(/\s+/).filter(Boolean).length;
 
-## Formatting (replicate the user's sample card exactly)
-Three emphasis layers in the body, marked with this syntax:
-- ==text== : HIGHLIGHTED key warrants — the punchiest words a debater reads with emphasis. The highlighted text alone must read as a coherent, grammatical argument. Highlight selectively (roughly 10-25% of the body).
-- __text__ : UNDERLINED read-aloud text — the full sentences/clauses read in-round. Includes the highlighted parts' surroundings.
-- plain text : kept-but-unread context (rendered small). Paragraphs that are context-only stay entirely plain.
-Markers must not span paragraph breaks — open and close them within the same paragraph.
+/**
+ * Clamp a selected paragraph range [start, end] (inclusive) so its share of
+ * the article's words lands inside the budget. Expands the end first (then
+ * the start) when too small; shrinks from the end when too large.
+ */
+export function fitRangeToBudget(
+  wordCounts: number[],
+  start: number,
+  end: number,
+  budget: { min: number; max: number },
+): [number, number] {
+  const total = wordCounts.reduce((a, b) => a + b, 0);
+  if (total === 0) return [start, end];
 
-Fields:
-- tag: a punchy 1-2 sentence statement of what the evidence proves, phrased from the user's claim (this is YOUR wording, not the author's). Mark the key phrases with __underline__.
-- cite: AuthorLastName YY — no apostrophe (e.g. "Rodrigues 16"). Multiple authors: "FirstAuthor et al. YY". No known author: publication name + YY.
-- citeDetails: the full cite content WITHOUT brackets: author name (+ qualifications if stated in the article), "Article Title." Publication, date, URL if known (e.g.: hrodrigues. "Avidya (Ignorance) | Mahavidya." Mahavidya.ca scholarly study of the Hindu tradition, 26 Apr. 2016, mahavidya.ca/2016/04/26/avidya-ignorance/.)
-- body: the verbatim extracted text with the three-layer markup.
+  let s = Math.max(0, Math.min(start, wordCounts.length - 1));
+  let e = Math.max(s, Math.min(end, wordCounts.length - 1));
 
-## Output format
-Return ONLY a JSON object. Exactly one of:
-{"card": {"tag": "...", "cite": "...", "citeDetails": "...", "body": "..."}}
-{"error": "no_warrant"}`;
+  const fraction = () =>
+    wordCounts.slice(s, e + 1).reduce((a, b) => a + b, 0) / total;
 
-function buildCutPrompt(
-  req: CutRequest,
-  article: ExtractedArticle,
-  retryFeedback?: string,
-): string {
-  const truncated = article.text.length > MAX_ARTICLE_CHARS;
+  // Too small → grow (end first, then start).
+  while (fraction() < budget.min && (e < wordCounts.length - 1 || s > 0)) {
+    if (e < wordCounts.length - 1) e++;
+    else s--;
+  }
+  // Too large → shrink from the end (keep the selected opening).
+  while (fraction() > budget.max && e > s) {
+    e--;
+  }
+  return [s, e];
+}
+
+const selectorSchema = z.union([
+  z.object({ startIndex: z.number().int().min(0), endIndex: z.number().int().min(0) }),
+  z.object({ error: z.literal("no_warrant") }),
+]);
+
+const SELECTOR_SYSTEM = `You are the passage selector inside a debate card-cutting tool (Lincoln-Douglas). You receive a claim and an article split into numbered paragraphs. Pick the CONTIGUOUS run of paragraphs that best supports the claim at the requested card length.
+
+Selection question: "If a debater could only read one section of this article, which section best proves this claim?" Optimize for the strongest WARRANT — the causal reasoning proving the claim — not the first or longest paragraph.
+
+Card length targets (share of the article's total words):
+- Short: the single strongest passage — roughly 5-30%.
+- Medium: about HALF the article — the contiguous half that best supports the claim (35-65%).
+- Long: the complete chain of reasoning — most of the article (60-95%).
+
+If NOTHING in the article supports the claim, return {"error": "no_warrant"}.
+Otherwise return ONLY JSON: {"startIndex": N, "endIndex": M} (inclusive paragraph indices).`;
+
+const markerSchema = z.object({
+  tag: z.string().min(1),
+  cite: z.string().min(1),
+  citeDetails: z.string().min(1),
+  underlines: z.array(z.string()).max(80),
+  highlights: z.array(z.string()).max(60),
+});
+
+const MARKER_SYSTEM = `You are the emphasis marker inside a debate card-cutting tool (Lincoln-Douglas). You receive a claim and a passage extracted VERBATIM from an article. You do NOT rewrite anything — you return metadata that the app applies to the original text.
+
+Return ONLY JSON:
+{"tag": "...", "cite": "...", "citeDetails": "...", "underlines": ["...", ...], "highlights": ["...", ...]}
+
+- underlines: the read-aloud text — full clauses/sentences COPIED EXACTLY from the passage, character for character. A debater reading only the underlined text should hear a complete argument for the claim. Underline generously across the passage (typically 30-60% of it). Each string must stay within one paragraph.
+- highlights: the punchiest words INSIDE underlined stretches — the key warrants read with emphasis. COPIED EXACTLY from the passage. The highlighted words alone must read as a coherent, grammatical mini-argument. Highlight selectively (roughly a third of the underlined text). Each string must stay within one paragraph.
+- tag: a punchy 1-2 sentence statement of what the evidence proves, phrased from the user's claim (this is YOUR wording). Mark 1-3 key phrases with __underline__ markers.
+- cite: AuthorLastName YY, no apostrophe (e.g. "Rodrigues 16"). Multiple authors: "FirstAuthor et al. YY". No known author: publication name + YY.
+- citeDetails: full cite content WITHOUT brackets: author (+ qualifications if known), "Article Title." Publication, date, URL if known.
+
+Finding the author:
+- Use the provided metadata author if present.
+- If the metadata author is "unknown", look for the author's name stated in the CITE CONTEXT block (bylines like "By Jane Smith" or "Article written by: Jane Smith", often at the very top or bottom of an article), and use that.
+- NEVER invent, guess, or infer an author name from the topic. If no author is genuinely stated anywhere, cite by the publication instead (e.g. "Reuters 25").
+- Same rule for dates and credentials: use only what the metadata or cite context actually states.
+
+Strings that don't match the passage exactly get silently dropped, so copy underlines/highlights with care — including punctuation and capitalization.`;
+
+function buildMarkerPrompt(claim: string, article: ExtractedArticle, passage: string): string {
+  // Bylines usually live at the very top or bottom of the article, which the
+  // selected passage may exclude — give the model the head + tail for the cite.
+  const head = article.text.slice(0, 500);
+  const tail = article.text.length > 1000 ? article.text.slice(-500) : "";
+  const citeContext = [head, tail].filter(Boolean).join("\n…\n");
+
   return [
-    `Claim the card must support: ${req.claim}`,
-    `Card length: ${req.cardLength}`,
+    `Claim the card must support: ${claim}`,
     `Known metadata — title: ${article.title || "unknown"}; author: ${article.author || "unknown"}; publication: ${article.publication || "unknown"}; date: ${article.date || "unknown"}.`,
-    retryFeedback ? `\nPREVIOUS ATTEMPT REJECTED: ${retryFeedback}\n` : "",
-    truncated ? "(Article truncated for length.)" : "",
-    "--- ARTICLE TEXT START ---",
-    article.text.slice(0, MAX_ARTICLE_CHARS),
-    "--- ARTICLE TEXT END ---",
-  ]
-    .filter(Boolean)
-    .join("\n");
+    "--- CITE CONTEXT (article start/end — for finding the author/date only, do NOT quote from here) ---",
+    citeContext,
+    "--- PASSAGE (verbatim from the article — underline/highlight ONLY from here) ---",
+    passage,
+  ].join("\n");
 }
 
 /** Resolve the cut source into clean article text + metadata. */
@@ -121,10 +164,60 @@ async function resolveSource(req: CutRequest): Promise<ExtractedArticle> {
   };
 }
 
+async function selectPassage(
+  claim: string,
+  cardLength: CardLength,
+  paragraphs: string[],
+): Promise<string> {
+  // Entire Article: no selection — the whole text, formatting only.
+  if (cardLength === "Entire Article" || paragraphs.length === 1) {
+    return paragraphs.join("\n\n");
+  }
+
+  const budget = LENGTH_BUDGETS[cardLength];
+  const wordCounts = paragraphs.map(countWords);
+
+  const numbered = paragraphs.map((p, i) => `[${i}] ${p}`).join("\n\n");
+  const raw = await generateJson({
+    system: SELECTOR_SYSTEM,
+    prompt: [
+      `Claim: ${claim}`,
+      `Card length: ${cardLength}`,
+      `Paragraph count: ${paragraphs.length}`,
+      "--- PARAGRAPHS ---",
+      numbered,
+    ].join("\n"),
+    maxOutputTokens: 2048,
+  });
+
+  const parsed = selectorSchema.safeParse(raw);
+
+  // Pick the seed range: the AI's choice if valid, else a mechanical default
+  // (the strongest-density middle). Either way fitRangeToBudget enforces the
+  // length — the specifier must work even when the selector glitches.
+  let seedStart: number;
+  let seedEnd: number;
+  if (parsed.success && !("error" in parsed.data)) {
+    seedStart = Math.min(parsed.data.startIndex, paragraphs.length - 1);
+    seedEnd = Math.min(parsed.data.endIndex, paragraphs.length - 1);
+  } else if (parsed.success) {
+    // {error: "no_warrant"} — the article genuinely doesn't support the claim.
+    throw new NoWarrantFoundError();
+  } else {
+    console.warn("cardCutter: unparseable selector output; using length-clamped default");
+    // Seed at the article's start; the budget will size it correctly.
+    seedStart = 0;
+    seedEnd = 0;
+  }
+
+  const [start, end] = fitRangeToBudget(wordCounts, seedStart, seedEnd, budget);
+  return paragraphs.slice(start, end + 1).join("\n\n");
+}
+
 /**
- * Cut a debate-ready card from a URL or pasted text. The body is verified
- * verbatim against the source; a non-verbatim cut gets one retry with
- * feedback, then an honest rejection.
+ * Cut a debate-ready card from a URL or pasted text.
+ * The body is real article text with emphasis applied on top — the AI cannot
+ * alter the wording because it never produces the wording.
  */
 export async function cutCard(req: CutRequest): Promise<Card> {
   const article = await resolveSource(req);
@@ -133,35 +226,39 @@ export async function cutCard(req: CutRequest): Promise<Card> {
       "That article text is too short to cut a card from. Paste the full article body.",
     );
   }
-
-  let retryFeedback: string | undefined;
-
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const raw = await generateJson({
-      system: CUTTER_SYSTEM_PROMPT,
-      prompt: buildCutPrompt(req, article, retryFeedback),
-      maxOutputTokens: 32768,
-    });
-
-    const parsed = cutterOutputSchema.safeParse(raw);
-    if (!parsed.success) {
-      console.error("cardCutter: unparseable model output");
-      retryFeedback = "Your output was not valid JSON in the required shape. Return ONLY the JSON object.";
-      continue;
-    }
-
-    if ("error" in parsed.data) {
-      throw new NoWarrantFoundError();
-    }
-
-    // The no-fabrication guarantee: reject any body that isn't verbatim.
-    const verdict = verifyVerbatim(parsed.data.card.body, article.text);
-    if (verdict.ok) {
-      return parsed.data.card;
-    }
-    console.warn("cardCutter: verbatim check failed on chunk:", verdict.failedChunk);
-    retryFeedback = `Your card body did not match the article verbatim. This chunk is not in the article text: "${verdict.failedChunk}". Copy text EXACTLY as it appears — no rewording, no fixing typos, no merging sentences.`;
+  if (article.text.length > MAX_ARTICLE_CHARS) {
+    article.text = article.text.slice(0, MAX_ARTICLE_CHARS);
   }
 
-  throw new VerbatimCheckFailedError();
+  const paragraphs = splitParagraphs(article.text);
+  const passage = await selectPassage(req.claim, req.cardLength, paragraphs);
+
+  const markerRaw = await generateJson({
+    system: MARKER_SYSTEM,
+    prompt: buildMarkerPrompt(req.claim, article, passage),
+    maxOutputTokens: 16384,
+  });
+  const marker = markerSchema.safeParse(markerRaw);
+  if (!marker.success) {
+    console.error("cardCutter: unparseable marker output");
+    throw new Error("Card cutting finished but returned an unreadable result. Please try again.");
+  }
+
+  const { body, missed, applied } = applyEmphasis(
+    passage,
+    marker.data.underlines,
+    marker.data.highlights,
+  );
+  if (missed > 0) {
+    console.warn(`cardCutter: ${missed} emphasis substrings didn't match and were skipped (${applied} applied)`);
+  }
+
+  return {
+    // The tag is the one place the AI supplies markup (`__key phrase__`);
+    // convert it to internal delimiters. The body already carries them.
+    tag: tagMarkupToDelimiters(marker.data.tag),
+    cite: marker.data.cite,
+    citeDetails: marker.data.citeDetails,
+    body,
+  };
 }

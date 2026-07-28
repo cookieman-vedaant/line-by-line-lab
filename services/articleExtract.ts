@@ -54,7 +54,12 @@ export async function extractArticleFromUrl(url: string): Promise<ExtractedArtic
   }
 
   const dom = new JSDOM(html, { url });
-  const parsed = new Readability(dom.window.document).parse();
+  const doc = dom.window.document;
+
+  // Pull structured metadata BEFORE Readability mutates the DOM.
+  const meta = extractPageMetadata(doc);
+
+  const parsed = new Readability(doc).parse();
 
   if (!parsed || !parsed.textContent || parsed.textContent.trim().length < MIN_ARTICLE_CHARS) {
     throw new ArticleUnreadableError(
@@ -62,11 +67,180 @@ export async function extractArticleFromUrl(url: string): Promise<ExtractedArtic
     );
   }
 
+  const text = htmlToParagraphText(parsed.content ?? "", parsed.textContent);
+
   return {
-    title: parsed.title ?? "",
-    author: parsed.byline ?? "",
-    publication: parsed.siteName ?? new URL(url).hostname.replace(/^www\./, ""),
-    date: parsed.publishedTime?.slice(0, 10) ?? "",
-    text: parsed.textContent.replace(/\n{3,}/g, "\n\n").trim(),
+    title: meta.title || parsed.title || "",
+    // Prefer structured metadata over Readability's byline (often null);
+    // fall back to a visible byline in the article text.
+    author: meta.author || parsed.byline || findBylineInText(text) || "",
+    publication: meta.publication || parsed.siteName || new URL(url).hostname.replace(/^www\./, ""),
+    date: meta.date || parsed.publishedTime?.slice(0, 10) || "",
+    text,
   };
+}
+
+interface PageMetadata {
+  title: string;
+  author: string;
+  publication: string;
+  date: string;
+}
+
+/**
+ * Extract author/date/publication from a page's <meta> tags and JSON-LD.
+ * Fully defensive — never throws; a missing field just stays empty.
+ */
+export function extractPageMetadata(doc: Document): PageMetadata {
+  const meta: PageMetadata = { title: "", author: "", publication: "", date: "" };
+
+  const attr = (selector: string, attribute = "content"): string => {
+    try {
+      return doc.querySelector(selector)?.getAttribute(attribute)?.trim() ?? "";
+    } catch {
+      return "";
+    }
+  };
+
+  meta.title =
+    attr('meta[property="og:title"]') || attr('meta[name="twitter:title"]') || "";
+  meta.author =
+    attr('meta[name="author"]') ||
+    attr('meta[property="article:author"]') ||
+    attr('meta[property="og:article:author"]') ||
+    attr('meta[name="parsely-author"]') ||
+    attr('meta[name="sailthru.author"]') ||
+    "";
+  meta.publication =
+    attr('meta[property="og:site_name"]') || attr('meta[name="application-name"]') || "";
+  meta.date = normalizeDate(
+    attr('meta[property="article:published_time"]') ||
+      attr('meta[name="parsely-pub-date"]') ||
+      attr('meta[itemprop="datePublished"]') ||
+      attr("time[datetime]", "datetime"),
+  );
+
+  // JSON-LD fills any gaps (author, date, publisher).
+  try {
+    const scripts = doc.querySelectorAll('script[type="application/ld+json"]');
+    for (const script of scripts) {
+      const jsonLd = parseJsonLd(script.textContent ?? "");
+      for (const node of jsonLd) {
+        if (!meta.author) meta.author = jsonLdAuthor(node);
+        if (!meta.date) meta.date = normalizeDate(stringField(node, "datePublished"));
+        if (!meta.publication) meta.publication = jsonLdPublisher(node);
+      }
+    }
+  } catch {
+    // ignore malformed JSON-LD
+  }
+
+  return meta;
+}
+
+/** Author name(s) from a JSON-LD node's `author` field (Person or Organization). */
+function jsonLdAuthor(node: Record<string, unknown>): string {
+  const author = node.author;
+  if (!author) return "";
+  const names = (Array.isArray(author) ? author : [author])
+    .map((a) => {
+      if (typeof a === "string") return a;
+      if (a && typeof a === "object" && "name" in a) {
+        const name = (a as Record<string, unknown>).name;
+        return typeof name === "string" ? name : "";
+      }
+      return "";
+    })
+    .filter(Boolean);
+  return names.join(", ");
+}
+
+function jsonLdPublisher(node: Record<string, unknown>): string {
+  const pub = node.publisher;
+  if (pub && typeof pub === "object" && "name" in pub) {
+    const name = (pub as Record<string, unknown>).name;
+    return typeof name === "string" ? name : "";
+  }
+  return typeof pub === "string" ? pub : "";
+}
+
+function stringField(node: Record<string, unknown>, key: string): string {
+  const v = node[key];
+  return typeof v === "string" ? v : "";
+}
+
+/** Flatten JSON-LD (which may be a single object, an array, or a @graph). */
+function parseJsonLd(raw: string): Record<string, unknown>[] {
+  if (!raw.trim()) return [];
+  const parsed: unknown = JSON.parse(raw);
+  const roots = Array.isArray(parsed) ? parsed : [parsed];
+  const out: Record<string, unknown>[] = [];
+  for (const root of roots) {
+    if (root && typeof root === "object") {
+      const obj = root as Record<string, unknown>;
+      if (Array.isArray(obj["@graph"])) {
+        for (const g of obj["@graph"]) {
+          if (g && typeof g === "object") out.push(g as Record<string, unknown>);
+        }
+      } else {
+        out.push(obj);
+      }
+    }
+  }
+  return out;
+}
+
+/** Reduce a date string to YYYY-MM-DD when possible. */
+export function normalizeDate(raw: string): string {
+  if (!raw) return "";
+  const iso = raw.match(/\d{4}-\d{2}-\d{2}/);
+  if (iso) return iso[0];
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+}
+
+// A name token is a capitalized word or an initial ("Jane", "Q."). Tokens are
+// separated by spaces/tabs only (not newlines), so a byline can't run past its
+// line or grab the next sentence's first word.
+const NAME_TOKEN = "(?:[A-Z]\\.|[A-Z][a-z’'\\-]+)";
+const NAME_PATTERN = `${NAME_TOKEN}(?:[ \\t]+${NAME_TOKEN}){1,3}`;
+
+/**
+ * Last-resort author: scan the start of the article for a visible byline like
+ * "By Jane Smith" or "Article written by: Jane Smith".
+ */
+export function findBylineInText(text: string): string {
+  const head = text.slice(0, 600);
+  const patterns = [
+    new RegExp(`(?:article\\s+)?[Ww]ritten [Bb]y[:\\s]+(${NAME_PATTERN})`),
+    new RegExp(`(?:^|\\n)\\s*[Bb]y[:\\s]+(${NAME_PATTERN})`),
+  ];
+  for (const re of patterns) {
+    const m = head.match(re);
+    if (m?.[1]) return m[1].trim();
+  }
+  return "";
+}
+
+/**
+ * Build paragraph-structured text from Readability's cleaned article HTML.
+ * textContent alone loses paragraph breaks, which breaks card-length
+ * selection — real <p>/<h*>/<li> boundaries become blank-line separators.
+ */
+function htmlToParagraphText(contentHtml: string, fallbackText: string): string {
+  try {
+    const dom = new JSDOM(contentHtml);
+    const blocks = dom.window.document.querySelectorAll(
+      "p, h1, h2, h3, h4, h5, h6, li, blockquote, figcaption",
+    );
+    const paragraphs = [...blocks]
+      .map((el) => el.textContent?.replace(/\s+/g, " ").trim() ?? "")
+      .filter((p) => p.length > 0);
+    if (paragraphs.join("").length >= fallbackText.trim().length * 0.5) {
+      return paragraphs.join("\n\n");
+    }
+  } catch {
+    // fall through to textContent
+  }
+  return fallbackText.replace(/\n{3,}/g, "\n\n").trim();
 }

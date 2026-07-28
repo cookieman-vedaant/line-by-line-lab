@@ -68,16 +68,18 @@ export interface Article {
 
 /**
  * A debate-ready card produced by the Card Cutter.
- * Formatting replicates the user's sample card (Rodrigues 16):
+ * Formatting replicates the user's sample card (Rodrigues 16).
  *
- * Markup conventions in `tag` and `body` (verbatim author text in `body`):
- *   ==text==   highlighted key warrant — rendered cyan highlight + bold + underline
- *   __text__   underlined read-aloud text — rendered underlined
- *   plain      kept-but-unread context — rendered small and de-emphasized
- *   [...]      omitted text (body only)
+ * `tag` and `body` carry emphasis as INTERNAL private-use delimiters
+ * (see lib/cardMarkup.ts) — never `==`/`__`, so literal `==`/`__` in the
+ * article render as ordinary text:
+ *   U+E000…U+E001  highlighted key warrant — cyan highlight + bold + underline
+ *   U+E002…U+E003  underlined read-aloud text
+ *   plain          kept-but-unread context — small, de-emphasized
+ * `body` is verbatim article text with emphasis applied on top.
  */
 export interface Card {
-  /** Tag stating what the evidence proves; bold overall, `__...__` marks key phrases. */
+  /** Tag stating what the evidence proves; bold overall, delimiters mark key phrases. */
   tag: string;
   /** Short cite read in-round, sample-card style without apostrophe: `Rodrigues 16`. */
   cite: string;

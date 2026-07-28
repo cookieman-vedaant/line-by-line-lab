@@ -5,15 +5,22 @@ DO NOT delete historical context if it is still relevant. Compress older complet
 -->
 
 ## 🏗️ Active Phase & Goal
-**Current Phase:** Phase 2 — Core Features ✅ complete and live-verified on the $0 stack (2026-07-04).
-**Current Task:** Ready for Phase 3 polish (error handling, performance). UI personality pass is deliberately the VERY LAST phase — the user said so explicitly.
+**Current Phase:** Phase 2 — Core Features ✅, now in an iterative bug-fix/refinement loop with the user (they test, report, we fix — "push forward until it works perfectly").
+**Current Task:** 2026-07-05 fixed a batch of Card Cutter bugs (see Architectural Decisions): visible `==`/`__` impurities, everything-shrunk/no-highlighting, length specifier ignored, weak cite extraction. All live-verified. Awaiting next round of user testing feedback.
 **Next Steps:**
-1. Phase 3: tune search latency (2 Gemini calls + 2 database fan-outs per search), responsive layout check.
-2. Phase 4: security pass, deploy to Vercel (set `GEMINI_API_KEY` in Vercel env).
-3. Last: UI personality pass with the user.
+1. Continue the test→fix loop as the user reports issues.
+2. Possible refinement: trailing page junk (nav/footer/"written by" lines) still gets included in Entire-Article cuts (mahavidya has ~32 tiny trailing "paragraphs"). Not yet filtered — revisit if the user flags it.
+3. Later phases: performance, security, Vercel deploy (set `GEMINI_API_KEY` in Vercel env). UI personality pass is deliberately LAST (user's explicit preference).
 
 ## 📂 Architectural Decisions
 *(Log specific choices made during the build here so future agents respect them)*
+- 2026-07-05 — **Card Cutter is SELECT-then-MARK, never AI-retype.** cutCard: (1) extract article → paragraphs, (2) Gemini picks a paragraph range, `fitRangeToBudget()` clamps it to the length's word share (Short 5-30%, Medium 35-65%, Long 60-95%, Entire=all — mechanically enforced so the specifier always works, even when the selector glitches: fallback seeds [0,0] and the budget sizes it, NEVER dumps the whole article), (3) Gemini returns exact substrings to underline/highlight + tag/cite; `lib/emphasis.ts` locates them in the REAL text and wraps them. The AI never writes body text → verbatim is guaranteed by construction (the old verbatim-CHECK-and-retry approach is gone). Live-verified 25/54/85/100% across the four lengths.
+- 2026-07-05 — **Emphasis uses Unicode PRIVATE-USE delimiters, NOT `==`/`__`** (U+E000/E001 highlight, U+E002/E003 underline; constants + parser in `lib/cardMarkup.ts`). Reason: articles legitimately contain `==`/`__` (code, math, snake_case) which collided with markers and leaked as visible "impurities" + broke rendering. Now literal `==`/`__` always render as plain text. The whole pipeline must stay consistent: `emphasis.ts` EMITS the delimiters, `cardCutter.ts` converts the AI's tag markup via `tagMarkupToDelimiters()`, `cardMarkup.ts` PARSES them, `CardView.tsx` strips them for plain-text/clipboard via `stripDelimiters()`. Body needles are matched WITHOUT stripping `==`/`__` (they may be real article chars).
+- 2026-07-05 — **Gemini thinking is DISABLED** for all `generateJson` calls (`thinkingConfig: { thinkingBudget: 0 }` in `lib/gemini.ts`). gemini-2.5-flash is a thinking model; with small maxOutputTokens it spent the budget thinking and truncated the JSON (this silently broke the length selector). Our calls are structured extraction/selection, not open reasoning — disabling thinking is more reliable, faster, and lighter on the free-tier rate limit.
+- 2026-07-05 — **Card typography (user spec):** Calibri throughout; highlighted = cyan+bold+underline 12pt; underlined = 12pt; unread context = 8pt shrunk. `//vedaant` initials REMOVED. Copy card writes rich `text/html` (survives paste into Word/Google Docs) + `text/plain` fallback.
+- 2026-07-05 — **Cite extraction** (`services/articleExtract.ts`): author/date/publication from `<meta>` tags → JSON-LD (Person/@graph) → Readability byline → visible "By …"/"written by:" byline in text (`findBylineInText`). Marker prompt also gets a CITE CONTEXT block (article head+tail, where bylines live) so the AI finds the author even when the selected passage excludes it — but is told to NEVER invent one; cite by publication if truly absent.
+- 2026-07-05 — Article finder ranker instructed to err toward INCLUSION and return 5-8 (was capped low); per-source retrieval 12, shortlist 32.
+- 2026-07-05 — vitest.config.ts added so tests resolve the `@/*` path alias. 62 unit tests (json, verbatim, emphasis, cardMarkup, cardCutter budget, academicSearch, articleExtract metadata/byline).
 - 2026-07-04 — **THE COST PIVOT: no paid APIs, Claude API removed entirely** (user decision — it costs money). Replaced by: **OpenAlex + Semantic Scholar** (free, keyless academic search — real articles only), **Gemini API free tier** (`gemini-2.5-flash` default, override via `GEMINI_MODEL`) for query expansion, ranking, and cutting, and **Mozilla Readability + jsdom** for URL→text extraction.
 - 2026-07-04 — **Fabrication is structurally impossible**: articles come only from scholarly databases (AI just ranks them), and card bodies are **programmatically verified verbatim** (`lib/verbatim.ts`) against source text — non-verbatim cuts get one retry with feedback, then honest rejection.
 - 2026-07-04 — **Card Cutter is standalone**: accepts a URL *or* pasted article text (+ optional cite metadata) via the "Cut a Card" tab; search results just pre-fill the same `/api/cut` endpoint. Not limited to found articles (user requirement).

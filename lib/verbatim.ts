@@ -31,6 +31,60 @@ export function normalizeForComparison(text: string): string {
     .toLowerCase();
 }
 
+/**
+ * A normalized view of a text with a map back to raw character offsets,
+ * so a normalized substring match can be applied to the ORIGINAL text.
+ */
+export interface NormalizedIndex {
+  norm: string;
+  /** map[i] = index in the raw string of the char that produced norm[i]. */
+  map: number[];
+}
+
+const CHAR_MAP: Record<string, string> = {
+  "‘": "'",
+  "’": "'",
+  "ʼ": "'",
+  "“": '"',
+  "”": '"',
+  "–": "-",
+  "—": "-",
+  "…": "...",
+  " ": " ",
+};
+
+/** Build a normalized index consistent with normalizeForComparison(). */
+export function buildNormalizedIndex(raw: string): NormalizedIndex {
+  const normChars: string[] = [];
+  const map: number[] = [];
+
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    const mapped = CHAR_MAP[ch] ?? ch;
+
+    if (/\s/.test(mapped)) {
+      // Collapse whitespace runs; skip leading whitespace entirely.
+      if (normChars.length === 0 || normChars[normChars.length - 1] === " ") continue;
+      normChars.push(" ");
+      map.push(i);
+      continue;
+    }
+
+    for (const outChar of mapped.toLowerCase()) {
+      normChars.push(outChar);
+      map.push(i);
+    }
+  }
+
+  // Trim trailing space.
+  while (normChars.length > 0 && normChars[normChars.length - 1] === " ") {
+    normChars.pop();
+    map.pop();
+  }
+
+  return { norm: normChars.join(""), map };
+}
+
 export interface VerbatimResult {
   ok: boolean;
   /** The first card chunk that does not appear in the source (when !ok). */
