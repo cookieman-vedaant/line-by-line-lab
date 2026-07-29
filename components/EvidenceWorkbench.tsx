@@ -76,10 +76,9 @@ export default function EvidenceWorkbench() {
     <button
       type="button"
       onClick={() => setTab(value)}
-      className={`border-b-2 px-4 py-2 text-sm font-semibold transition ${
-        tab === value
-          ? "border-zinc-900 text-zinc-900 dark:border-zinc-100 dark:text-zinc-100"
-          : "border-transparent text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+      aria-pressed={tab === value}
+      className={`btn-press frame px-5 py-2.5 font-display text-sm font-bold uppercase tracking-wide ${
+        tab === value ? "bg-accent text-paper" : "bg-paper-2 text-ink"
       }`}
     >
       {label}
@@ -88,70 +87,78 @@ export default function EvidenceWorkbench() {
 
   return (
     <div className="flex flex-col gap-8">
-      <nav
-        aria-label="Tool"
-        className="flex justify-center border-b border-zinc-200 dark:border-zinc-800"
-      >
+      <nav aria-label="Tool" className="flex gap-3">
         {tabButton("find", "Find Articles")}
         {tabButton("cut", "Cut a Card")}
       </nav>
 
-      {tab === "cut" ? (
-        <CardCutterPanel initialClaim={lastParams?.claim} />
-      ) : (
-        <div className="flex flex-col gap-10">
+      {/* Both panels stay mounted (typed text survives a tab switch); the
+          hidden one is display:none, so its content replays the tab-in
+          animation each time it's shown. */}
+      <div className={tab === "cut" ? "" : "hidden"}>
+        <div className="tab-panel">
+          <CardCutterPanel initialClaim={lastParams?.claim} />
+        </div>
+      </div>
+
+      <div className={tab === "find" ? "" : "hidden"}>
+        <div className="tab-panel flex flex-col gap-10">
           <SearchForm onSearch={handleSearch} busy={search.status === "searching"} />
 
           {search.status === "searching" && (
-            <p className="animate-pulse text-center text-sm text-zinc-500 dark:text-zinc-400">
-              Searching scholarly databases…
+            <p className="label-mono animate-pulse text-center text-sm text-accent">
+              ▸ searching scholarly databases…
             </p>
           )}
 
           {search.status === "empty" && (
-            <p role="status" className="text-center text-sm text-zinc-600 dark:text-zinc-400">
+            <p role="status" className="frame bg-yellow px-4 py-3 text-sm font-medium text-black">
               {search.notice} Try broadening the claim or relaxing the filters — or paste an
               article you already have into the Cut a Card tab.
             </p>
           )}
 
           {search.status === "error" && (
-            <p role="alert" className="text-center text-sm text-red-600 dark:text-red-400">
+            <p role="alert" className="frame bg-red px-4 py-3 text-sm font-semibold text-white">
               {search.message}
             </p>
           )}
 
           {search.status === "results" && (
-            <ArticleResults
-              articles={search.articles}
-              cutLength={cutLength}
-              onCutLengthChange={setCutLength}
-              onCut={handleCut}
-              cuttingUrl={cuttingUrl}
-            />
+            <div key={search.articles[0]?.url} className="tab-panel">
+              <ArticleResults
+                articles={search.articles}
+                cutLength={cutLength}
+                onCutLengthChange={setCutLength}
+                onCut={handleCut}
+                cuttingUrl={cuttingUrl}
+              />
+            </div>
           )}
 
           {cuttingUrl && (
-            <p className="animate-pulse text-center text-sm text-zinc-500 dark:text-zinc-400">
-              Reading the article and cutting your card…
+            <p className="label-mono animate-pulse text-center text-sm text-accent">
+              ▸ reading the article and cutting your card…
             </p>
           )}
 
           {cutError && (
-            <p role="alert" className="text-center text-sm text-red-600 dark:text-red-400">
+            <p role="alert" className="frame bg-red px-4 py-3 text-sm font-semibold text-white">
               {cutError}
             </p>
           )}
 
           {result && (
-            <CardView
-              card={result.card}
-              sourceUrl={result.article.url}
-              sourceName={result.article.publication}
-            />
+            <div key={result.card.cite + result.article.url} className="tab-panel">
+              <CardView
+                card={result.card}
+                sourceUrl={result.article.url}
+                sourceName={result.article.publication}
+              />
+            </div>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

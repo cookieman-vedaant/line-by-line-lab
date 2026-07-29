@@ -1,26 +1,293 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/*
+  Line by Line Lab — two switchable themes, driven entirely by tokens so every
+  component recolors + re-shapes automatically:
+    • ROSTRUM ("Bold")  — warm paper, electric blue, thick borders, hard shadows
+    • CUT     ("Dark")  — near-black, sleek amber, hairline borders, soft glow
+  Components use semantic tokens (bg-paper, text-ink, bg-accent, .frame, …) and
+  the structural vars (--bw, --radius, --shadow*) — never per-theme hardcodes.
+*/
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---- ROSTRUM is the default (also applied when no data-theme is set) ---- */
+:root,
+[data-theme="rostrum"] {
+  --paper: #f6efdf;
+  --paper-2: #fffaf0;
+  --ink: #17130f;
+  --stroke: #17130f;
+  --accent: #2f43ff;
+  --accent-2: #2f43ff;
+  --red: #ff4a2e;
+  --yellow: #ffc93c;
+  --dot: rgba(23, 19, 15, 0.09);
+
+  --bw: 3px; /* border width */
+  --radius: 0px; /* sharp corners */
+  --shadow: 5px 5px 0 0 var(--stroke);
+  --shadow-lg: 8px 8px 0 0 var(--stroke);
+  --shadow-btn: 4px 4px 0 0 var(--stroke);
+}
+
+/* ---- CUT: dark, sleek, glass — a distinct visual language, not a recolor ---- */
+[data-theme="cut"] {
+  --paper: #090b11;
+  --paper-2: rgba(255, 255, 255, 0.045); /* translucent glass surface */
+  --ink: #e9edf5;
+  --stroke: rgba(255, 255, 255, 0.09); /* hairline */
+  --accent: #5ce0ff; /* cool cyan */
+  --accent-2: #7c86ff; /* periwinkle (gradient partner) */
+  --red: #ff6b6b;
+  --yellow: #ffd27a;
+  --grid: rgba(255, 255, 255, 0.032);
+  --glow: rgba(92, 224, 255, 0.28);
+
+  --bw: 1px;
+  --radius: 14px;
+  --shadow: 0 14px 40px -20px rgba(0, 0, 0, 0.9), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --shadow-lg: 0 30px 70px -28px rgba(0, 0, 0, 0.92), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --shadow-btn: 0 10px 26px -14px rgba(0, 0, 0, 0.7);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --color-paper: var(--paper);
+  --color-paper-2: var(--paper-2);
+  --color-ink: var(--ink);
+  --color-stroke: var(--stroke);
+  --color-accent: var(--accent);
+  --color-red: var(--red);
+  --color-yellow: var(--yellow);
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-background: var(--paper);
+  --color-foreground: var(--ink);
+
+  --font-sans: var(--font-display);
+  --font-display: var(--font-display);
+  --font-mono: var(--font-mono);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Per-theme background atmosphere (never a flat fill). */
+[data-theme="rostrum"] body,
+:root body {
+  background-image: radial-gradient(var(--dot) 1.4px, transparent 1.4px);
+  background-size: 22px 22px;
+  background-position: -11px -11px;
+}
+[data-theme="cut"] body {
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 46px 46px, 46px 46px;
+}
+/* Slow-drifting aurora behind everything — the theme feels alive, not flat. */
+[data-theme="cut"] body::before {
+  content: "";
+  position: fixed;
+  inset: -25%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(38% 38% at 22% 18%, rgba(92, 224, 255, 0.12), transparent 62%),
+    radial-gradient(40% 40% at 82% 26%, rgba(124, 134, 255, 0.12), transparent 62%),
+    radial-gradient(46% 46% at 50% 92%, rgba(92, 224, 255, 0.08), transparent 62%);
+  animation: aurora 22s ease-in-out infinite alternate;
+}
+@keyframes aurora {
+  from {
+    transform: translate3d(-3%, -2%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(3%, 3%, 0) scale(1.12);
+  }
+}
+
+/* Smooth every color/shadow change — this is what makes a theme switch (and
+   general interaction) feel fluid instead of stiff. Buttons keep their own
+   snappier transition via higher specificity below. */
+body * {
+  transition:
+    background-color 0.3s ease,
+    border-color 0.3s ease,
+    color 0.3s ease,
+    box-shadow 0.3s ease,
+    fill 0.3s ease;
+}
+
+/* ---- Structural building blocks (token-driven, so they retheme) ---------- */
+
+.frame {
+  border: var(--bw) solid var(--stroke);
+  border-radius: var(--radius);
+}
+.divide-b {
+  border-bottom: var(--bw) solid var(--stroke);
+}
+.divide-t {
+  border-top: var(--bw) solid var(--stroke);
+}
+
+.shadow-hard {
+  box-shadow: var(--shadow);
+}
+.shadow-hard-lg {
+  box-shadow: var(--shadow-lg);
+}
+
+/* Tactile button/tab. The press feel differs per theme (offset-collapse vs
+   lift-and-settle) but the class stays the same in markup. */
+.btn-press {
+  box-shadow: var(--shadow-btn);
+  transition:
+    transform 0.1s ease,
+    box-shadow 0.16s ease,
+    background-color 0.16s ease,
+    filter 0.16s ease;
+}
+.btn-press:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+[data-theme="rostrum"] .btn-press:hover:not(:disabled) {
+  transform: translate(1px, 1px);
+  box-shadow: 3px 3px 0 0 var(--stroke);
+}
+[data-theme="rostrum"] .btn-press:active:not(:disabled) {
+  transform: translate(4px, 4px);
+  box-shadow: 0 0 0 0 var(--stroke);
+}
+[data-theme="cut"] .btn-press:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 30px -10px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--glow), 0 0 26px -6px var(--glow);
+  filter: brightness(1.05);
+}
+[data-theme="cut"] .btn-press:active:not(:disabled) {
+  transform: translateY(0) scale(0.985);
+  box-shadow: 0 6px 16px -10px rgba(0, 0, 0, 0.6);
+}
+
+/* ---- CUT reinterprets the shared building blocks into a sleeker language ---- */
+
+/* Frosted glass on translucent surfaces (opaque chips/buttons unaffected). */
+[data-theme="cut"] .frame {
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+}
+
+/* The accent becomes a cyan→periwinkle gradient everywhere it's used. */
+[data-theme="cut"] .bg-accent {
+  background-image: linear-gradient(135deg, var(--accent), var(--accent-2));
+}
+
+/* Labels lose the loud stamped-uppercase treatment — quieter, more technical. */
+[data-theme="cut"] .label-mono {
+  text-transform: none;
+  letter-spacing: 0.015em;
+  font-weight: 400;
+}
+
+/* Wordmark: a tilted filled sticker in Bold → a clean gradient wordmark here. */
+[data-theme="cut"] .lab-mark {
+  transform: none;
+  border: none;
+  box-shadow: none;
+  padding: 0 0.05em;
+  background: linear-gradient(120deg, var(--accent), var(--accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Masthead rule: a bold ink bar → a thin fading accent line. */
+[data-theme="cut"] .masthead-rule {
+  height: 1px;
+  background: linear-gradient(90deg, var(--accent), transparent 72%);
+  opacity: 0.6;
+}
+
+/* Cards glow and lift on hover. */
+[data-theme="cut"] li.frame:hover {
+  border-color: rgba(92, 224, 255, 0.4);
+  box-shadow: var(--shadow-lg), 0 0 34px -6px var(--glow);
+}
+
+/* Richer, softer entrance: blur-in on tab/content reveals. */
+[data-theme="cut"] .tab-panel {
+  animation: cut-in 0.55s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+@keyframes cut-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+    filter: blur(7px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+/* Uppercase mono label — labels, badges, cites. */
+.label-mono {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* ---- Motion ------------------------------------------------------------- */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes tab-in {
+  from {
+    opacity: 0;
+    transform: translateY(9px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.reveal {
+  opacity: 0;
+  animation: rise-in 0.55s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+}
+.reveal-1 { animation-delay: 0.05s; }
+.reveal-2 { animation-delay: 0.15s; }
+.reveal-3 { animation-delay: 0.25s; }
+.reveal-4 { animation-delay: 0.35s; }
+
+/* Replays every time a hidden (display:none) tab panel becomes visible. */
+.tab-panel {
+  animation: tab-in 0.4s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal,
+  .tab-panel,
+  [data-theme="cut"] body::before {
+    opacity: 1;
+    animation: none;
+  }
+  body *,
+  .btn-press {
+    transition: none;
+  }
 }

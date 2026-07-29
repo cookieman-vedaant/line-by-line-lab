@@ -6,11 +6,10 @@ import { requestCut } from "@/lib/apiClient";
 import { CARD_LENGTHS, type Card, type CardLength } from "@/types";
 
 const inputClasses =
-  "w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 " +
-  "placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 " +
-  "dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500";
+  "w-full frame bg-paper-2 px-3 py-2.5 text-sm font-medium text-ink " +
+  "placeholder:text-ink/40 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/35";
 
-const labelClasses = "mb-1.5 block text-sm font-medium text-zinc-700 dark:text-zinc-300";
+const labelClasses = "label-mono mb-2 block text-xs text-ink";
 
 interface CardCutterPanelProps {
   /** Prefill the claim from the last search, if any. */
@@ -28,6 +27,16 @@ export default function CardCutterPanel({ initialClaim }: CardCutterPanelProps) 
   const [date, setDate] = useState("");
   const [claim, setClaim] = useState(initialClaim ?? "");
   const [cardLength, setCardLength] = useState<CardLength>("Medium");
+
+  // The panel stays mounted across tab switches, so when a later search supplies
+  // a new claim, seed the field from it — but only while it's still empty, never
+  // clobbering typed text. Done during render (React's prop-change pattern), so
+  // no effect is needed.
+  const [seededClaim, setSeededClaim] = useState(initialClaim ?? "");
+  if (initialClaim && initialClaim !== seededClaim) {
+    setSeededClaim(initialClaim);
+    if (!claim) setClaim(initialClaim);
+  }
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,10 +89,9 @@ export default function CardCutterPanel({ initialClaim }: CardCutterPanelProps) 
     <button
       type="button"
       onClick={() => setMode(value)}
-      className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
-        mode === value
-          ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-          : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+      aria-pressed={mode === value}
+      className={`btn-press frame px-3 py-1.5 font-display text-xs font-bold uppercase tracking-wide ${
+        mode === value ? "bg-accent text-paper" : "bg-paper-2 text-ink"
       }`}
     >
       {label}
@@ -93,8 +101,8 @@ export default function CardCutterPanel({ initialClaim }: CardCutterPanelProps) 
   return (
     <div className="flex flex-col gap-8">
       <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-5">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-zinc-500 dark:text-zinc-400">Article from:</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="label-mono text-xs text-ink/70">Article from:</span>
           {modeButton("url", "A link (URL)")}
           {modeButton("text", "Pasted text")}
         </div>
@@ -102,7 +110,7 @@ export default function CardCutterPanel({ initialClaim }: CardCutterPanelProps) 
         {mode === "url" ? (
           <div>
             <label htmlFor="cutter-url" className={labelClasses}>
-              Article URL <span className="text-red-500">*</span>
+              Article URL <span className="text-red">*</span>
             </label>
             <input
               id="cutter-url"
@@ -117,7 +125,7 @@ export default function CardCutterPanel({ initialClaim }: CardCutterPanelProps) 
           <>
             <div>
               <label htmlFor="cutter-text" className={labelClasses}>
-                Article text <span className="text-red-500">*</span>
+                Article text <span className="text-red">*</span>
               </label>
               <textarea
                 id="cutter-text"
@@ -129,7 +137,7 @@ export default function CardCutterPanel({ initialClaim }: CardCutterPanelProps) 
               />
             </div>
             <details className="text-sm">
-              <summary className="cursor-pointer text-zinc-600 dark:text-zinc-400">
+              <summary className="label-mono cursor-pointer text-xs text-ink/70 hover:text-accent">
                 Source details (optional — used for the cite)
               </summary>
               <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -169,7 +177,7 @@ export default function CardCutterPanel({ initialClaim }: CardCutterPanelProps) 
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-[1fr_auto]">
           <div>
             <label htmlFor="cutter-claim" className={labelClasses}>
-              Claim the card must support <span className="text-red-500">*</span>
+              Claim the card must support <span className="text-red">*</span>
             </label>
             <textarea
               id="cutter-claim"
@@ -200,7 +208,7 @@ export default function CardCutterPanel({ initialClaim }: CardCutterPanelProps) 
         </div>
 
         {error && (
-          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+          <p role="alert" className="frame bg-red px-4 py-3 text-sm font-semibold text-white">
             {error}
           </p>
         )}
@@ -208,17 +216,16 @@ export default function CardCutterPanel({ initialClaim }: CardCutterPanelProps) 
         <button
           type="submit"
           disabled={busy}
-          className="rounded-md bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white transition
-            hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60
-            dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+          className="btn-press frame mt-1 w-full bg-accent px-6 py-3.5 font-display
+            text-base font-bold uppercase tracking-wide text-paper sm:w-auto sm:self-start"
         >
-          {busy ? "Cutting card…" : "Cut Card"}
+          {busy ? "Cutting card…" : "✂ Cut Card"}
         </button>
       </form>
 
       {busy && (
-        <p className="animate-pulse text-center text-sm text-zinc-500 dark:text-zinc-400">
-          Reading the article and cutting your card…
+        <p className="label-mono animate-pulse text-center text-sm text-accent">
+          ▸ reading the article and cutting your card…
         </p>
       )}
 

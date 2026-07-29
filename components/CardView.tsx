@@ -23,7 +23,7 @@ function renderNodes(nodes: MarkupNode[], plainClass: string) {
       return (
         <mark
           key={i}
-          className="bg-cyan-300 font-bold underline decoration-2 text-[12pt] dark:bg-cyan-600 dark:text-zinc-50"
+          className="bg-cyan-300 font-bold underline decoration-2 text-[12pt] text-black"
         >
           {node.text}
         </mark>
@@ -126,54 +126,54 @@ export default function CardView({ card, sourceUrl, sourceName }: CardViewProps)
     <section
       aria-label="Debate card"
       style={CARD_FONT}
-      className="rounded-lg border border-zinc-200 p-5 dark:border-zinc-800"
+      className="shadow-hard-lg border-[3px] border-black bg-white p-6"
     >
-      {/* Tag: bold 13pt, underlined key phrases */}
-      <div className="flex items-start justify-between gap-4">
-        <h2 className="text-[13pt] font-bold leading-snug">
-          {parseCardMarkup(card.tag).map((n, i) =>
-            n.kind === "plain" ? (
-              <span key={i}>{n.text}</span>
-            ) : (
-              <span key={i} className="underline">
-                {n.text}
-              </span>
-            ),
-          )}
-        </h2>
+      {/* Masthead: mono kicker + copy button (display/mono fonts, not Calibri).
+          The card is a fixed white "sheet" in both themes, so its chrome is
+          fixed-dark — only the copy button carries the theme accent. */}
+      <div className="mb-4 flex items-center justify-between gap-4 border-b-[3px] border-black pb-3">
+        <span className="label-mono border-[3px] border-black bg-black px-2 py-1 text-[10px] text-white">
+          ✂ Cut Card
+        </span>
         <button
           type="button"
           onClick={handleCopy}
-          className="shrink-0 rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-medium
-            text-zinc-700 transition hover:bg-zinc-100
-            dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          style={{ fontFamily: "inherit" }}
+          className={`btn-press shrink-0 border-[3px] border-black px-3 py-1.5 font-display text-xs
+            font-bold uppercase tracking-wide ${copied ? "bg-black text-white" : "bg-accent text-paper"}`}
         >
           {copied ? "Copied ✓" : "Copy card"}
         </button>
       </div>
 
+      {/* Tag: bold 13pt, underlined key phrases */}
+      <h2 className="text-[13pt] font-bold leading-snug text-black">
+        {parseCardMarkup(card.tag).map((n, i) =>
+          n.kind === "plain" ? (
+            <span key={i}>{n.text}</span>
+          ) : (
+            <span key={i} className="underline">
+              {n.text}
+            </span>
+          ),
+        )}
+      </h2>
+
       {/* Cite: bold 12pt short cite + 8pt bracketed details */}
-      <p className="mt-3 leading-snug">
+      <p className="mt-3 leading-snug text-black">
         <span className="text-[12pt] font-bold">{card.cite}</span>{" "}
-        <span className="text-[8pt] text-zinc-500 dark:text-zinc-400">
-          [{stripDelimiters(card.citeDetails)}]
-        </span>
+        <span className="text-[8pt] text-neutral-500">[{stripDelimiters(card.citeDetails)}]</span>
       </p>
 
       {/* Body: 12pt underlined/highlighted, 8pt shrunk context */}
-      <div className="mt-4 flex flex-col gap-3 leading-relaxed">
+      <div className="mt-4 flex flex-col gap-3 leading-relaxed text-black">
         {paragraphs.map((paragraph, i) => (
           <p key={i}>
-            {renderNodes(
-              parseCardMarkup(paragraph),
-              "text-[8pt] text-zinc-500 dark:text-zinc-400",
-            )}
+            {renderNodes(parseCardMarkup(paragraph), "text-[8pt] text-neutral-500")}
           </p>
         ))}
       </div>
 
-      <p className="mt-4 text-xs text-zinc-400 dark:text-zinc-500" style={{ fontFamily: "initial" }}>
+      <p className="label-mono mt-5 border-t-[3px] border-black pt-3 text-[10px] normal-case text-neutral-500">
         {sourceUrl ? (
           <>
             Cut from{" "}
@@ -181,7 +181,7 @@ export default function CardView({ card, sourceUrl, sourceName }: CardViewProps)
               href={sourceUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="underline hover:text-zinc-600 dark:hover:text-zinc-300"
+              className="text-neutral-800 underline"
             >
               {sourceName ?? sourceUrl}
             </a>

@@ -10,11 +10,10 @@ import {
 } from "@/types";
 
 const inputClasses =
-  "w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 " +
-  "placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500 " +
-  "dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500";
+  "w-full frame bg-paper-2 px-3 py-2.5 text-sm font-medium text-ink " +
+  "placeholder:text-ink/40 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/35";
 
-const labelClasses = "mb-1.5 block text-sm font-medium text-zinc-700 dark:text-zinc-300";
+const labelClasses = "label-mono mb-2 block text-xs text-ink";
 
 interface SearchFormProps {
   onSearch: (params: SearchParams) => void;
@@ -56,7 +55,7 @@ export default function SearchForm({ onSearch, busy }: SearchFormProps) {
     <form onSubmit={handleSubmit} noValidate className="flex w-full flex-col gap-5">
       <div>
         <label htmlFor="evidenceType" className={labelClasses}>
-          Evidence Type <span className="text-red-500">*</span>
+          Evidence Type <span className="text-red">*</span>
         </label>
         <select
           id="evidenceType"
@@ -78,7 +77,7 @@ export default function SearchForm({ onSearch, busy }: SearchFormProps) {
 
       <div>
         <label htmlFor="claim" className={labelClasses}>
-          Claim <span className="text-red-500">*</span>
+          Claim <span className="text-red">*</span>
         </label>
         <textarea
           id="claim"
@@ -148,7 +147,7 @@ export default function SearchForm({ onSearch, busy }: SearchFormProps) {
       </div>
 
       {error && (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+        <p role="alert" className="frame bg-red px-4 py-3 text-sm font-semibold text-white">
           {error}
         </p>
       )}
@@ -156,11 +155,10 @@ export default function SearchForm({ onSearch, busy }: SearchFormProps) {
       <button
         type="submit"
         disabled={busy}
-        className="rounded-md bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white transition
-          hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60
-          dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+        className="btn-press frame mt-1 w-full bg-accent px-6 py-3.5 font-display
+          text-base font-bold uppercase tracking-wide text-paper sm:w-auto sm:self-start"
       >
-        {busy ? "Searching…" : "Search"}
+        {busy ? "Searching…" : "▸ Search"}
       </button>
     </form>
   );

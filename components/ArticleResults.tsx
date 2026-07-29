@@ -18,6 +18,14 @@ function credibilityLabel(score: number): string {
   return "Lower credibility";
 }
 
+/** Riso-sticker color for the credibility badge, keyed to the score. */
+function credibilityBadgeClass(score: number): string {
+  if (score >= 85) return "bg-accent text-paper";
+  if (score >= 70) return "bg-ink text-paper";
+  if (score >= 50) return "bg-yellow text-black";
+  return "bg-red text-white";
+}
+
 export default function ArticleResults({
   articles,
   cutLength,
@@ -28,18 +36,19 @@ export default function ArticleResults({
   const busy = cuttingUrl !== null;
 
   return (
-    <section aria-label="Search results" className="flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-4">
-        <h2 className="text-lg font-semibold">
-          {articles.length} article{articles.length === 1 ? "" : "s"} found
+    <section aria-label="Search results" className="flex flex-col gap-5">
+      <div className="divide-b flex flex-wrap items-center justify-between gap-4 pb-3">
+        <h2 className="font-display text-2xl font-extrabold">
+          {articles.length} article{articles.length === 1 ? "" : "s"}{" "}
+          <span className="text-accent">found</span>
         </h2>
-        <label className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400">
+        <label className="label-mono flex items-center gap-2 text-xs">
           Card length
           <select
             value={cutLength}
             onChange={(e) => onCutLengthChange(e.target.value as CardLength)}
-            className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-900
-              dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+            className="frame bg-paper-2 px-2 py-1 font-mono text-xs font-medium
+              text-ink focus:border-accent focus:outline-none"
           >
             {CARD_LENGTHS.map((length) => (
               <option key={length} value={length}>
@@ -50,14 +59,14 @@ export default function ArticleResults({
         </label>
       </div>
 
-      <ol className="flex flex-col gap-3">
+      <ol className="flex flex-col gap-5">
         {articles.map((article) => {
           const isCutting = cuttingUrl === article.url;
           return (
             <li
               key={article.url}
-              className="rounded-lg border border-zinc-200 p-4 transition hover:border-zinc-400
-                dark:border-zinc-800 dark:hover:border-zinc-600"
+              className="shadow-hard frame bg-paper-2 p-5 transition
+                hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-hard-lg"
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -65,34 +74,36 @@ export default function ArticleResults({
                     href={article.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="font-semibold text-zinc-900 hover:underline dark:text-zinc-100"
+                    className="font-display text-lg font-bold leading-tight text-ink
+                      underline-offset-2 hover:text-accent hover:underline"
                   >
                     {article.title}
                   </a>
-                  <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">
+                  <p className="label-mono mt-1.5 text-[11px] text-ink/70">
                     {article.author} · {article.publication} · {article.date}
                   </p>
                 </div>
                 <span
                   title={`Credibility score: ${article.credibilityScore}/100`}
-                  className="shrink-0 rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-700
-                    dark:bg-zinc-800 dark:text-zinc-300"
+                  className={`label-mono frame shrink-0 px-2 py-1 text-[10px] font-medium
+                    ${credibilityBadgeClass(article.credibilityScore)}`}
                 >
                   {credibilityLabel(article.credibilityScore)}
                 </span>
               </div>
 
-              <p className="mt-2 text-sm text-zinc-700 dark:text-zinc-300">{article.explanation}</p>
+              <p className="mt-3 text-sm font-medium leading-relaxed text-ink/90">
+                {article.explanation}
+              </p>
 
               <button
                 type="button"
                 onClick={() => onCut(article)}
                 disabled={busy}
-                className="mt-3 rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-semibold text-white transition
-                  hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60
-                  dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+                className={`btn-press frame mt-4 px-4 py-2 font-display text-xs
+                  font-bold uppercase tracking-wide text-paper ${isCutting ? "bg-accent" : "bg-ink"}`}
               >
-                {isCutting ? `Cutting ${cutLength.toLowerCase()} card…` : "Cut Card"}
+                {isCutting ? `Cutting ${cutLength.toLowerCase()} card…` : "✂ Cut Card"}
               </button>
             </li>
           );
