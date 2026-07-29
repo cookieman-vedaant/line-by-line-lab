@@ -24,8 +24,10 @@ const cutRequestSchema = z
     claim: z.string().trim().min(3).max(500),
     cardLength: z.enum(CARD_LENGTHS),
   })
-  .refine((r) => Boolean(r.source.url) !== Boolean(r.source.text?.trim()), {
-    message: "Provide either an article URL or pasted article text (not both).",
+  .refine((r) => Boolean(r.source.url) || Boolean(r.source.text?.trim()), {
+    // At least one source. Search results send BOTH: a URL to fetch plus the
+    // abstract as a fallback when that URL is paywalled/unreadable.
+    message: "Provide an article URL or pasted article text.",
   });
 
 export async function POST(req: Request) {

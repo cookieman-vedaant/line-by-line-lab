@@ -56,6 +56,9 @@ export default function EvidenceWorkbench() {
         author: article.author,
         publication: article.publication,
         date: article.date,
+        // Fallback for when the (often paywalled) URL can't be fetched —
+        // real, verbatim abstract text the search already retrieved.
+        text: article.abstract,
       },
       claim: lastParams.claim,
       cardLength: cutLength,

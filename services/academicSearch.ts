@@ -59,6 +59,13 @@ export function publicationAgeToFromDate(
   return d.toISOString().slice(0, 10);
 }
 
+interface OpenAlexLocation {
+  landing_page_url?: string;
+  pdf_url?: string;
+  version?: string;
+  source?: { display_name?: string };
+}
+
 interface OpenAlexWork {
   display_name?: string;
   publication_date?: string;
@@ -66,10 +73,23 @@ interface OpenAlexWork {
   doi?: string;
   abstract_inverted_index?: Record<string, number[]> | null;
   authorships?: { author?: { display_name?: string } }[];
-  primary_location?: {
-    landing_page_url?: string;
-    source?: { display_name?: string };
-  };
+  primary_location?: OpenAlexLocation;
+  best_oa_location?: OpenAlexLocation | null;
+}
+
+/**
+ * Pick the most *fetchable* URL for a work. An open-access HTML landing page
+ * (PMC, arXiv abstract, institutional repo) can be read by Readability; a bare
+ * DOI usually redirects to a paywalled/JS publisher page that can't. Prefer OA
+ * HTML → primary landing page → DOI. We skip pdf_url: our extractor is
+ * HTML-only, so a PDF link would just fail (the abstract fallback covers those).
+ */
+export function pickWorkUrl(w: OpenAlexWork): string {
+  const oa = w.best_oa_location;
+  if (oa?.landing_page_url && !/\.pdf($|\?)/i.test(oa.landing_page_url)) {
+    return oa.landing_page_url;
+  }
+  return w.primary_location?.landing_page_url ?? w.doi ?? "";
 }
 
 async function searchOpenAlex(query: string, fromDate: string | null): Promise<CandidateArticle[]> {
@@ -89,7 +109,7 @@ async function searchOpenAlex(query: string, fromDate: string | null): Promise<C
   const data: { results?: OpenAlexWork[] } = await res.json();
 
   return (data.results ?? []).flatMap((w): CandidateArticle[] => {
-    const url = w.primary_location?.landing_page_url ?? w.doi ?? "";
+    const url = pickWorkUrl(w);
     if (!w.display_name || !url) return [];
     return [
       {

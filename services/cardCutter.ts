@@ -1,7 +1,8 @@
 import { z } from "zod";
+import { TtlCache } from "@/lib/cache";
 import { tagMarkupToDelimiters } from "@/lib/cardMarkup";
 import { applyEmphasis } from "@/lib/emphasis";
-import { generateJson } from "@/lib/gemini";
+import { GEMINI_MARKER_MODEL, generateJson } from "@/lib/gemini";
 import {
   ArticleUnreadableError,
   extractArticleFromUrl,
@@ -114,23 +115,26 @@ Return ONLY JSON:
 There are THREE layers of emphasis, exactly like a hand-cut debate card:
   1. plain text — context that is kept but NOT read aloud (most of the passage stays plain).
   2. underline — the sentences/clauses the debater READS ALOUD.
-  3. highlight — SHORT key fragments INSIDE the underlined text that the debater's voice STRESSES.
+  3. highlight — the key warrant phrases INSIDE the underlined text that the debater's voice STRESSES (coherent phrases, never lone keywords).
 
 Work through the passage from beginning to end so emphasis is distributed throughout, not clustered at the top.
 
 - underlines: the read-aloud text — full clauses/sentences COPIED EXACTLY from the passage. Underline the sentences that carry the argument for the claim, across every relevant paragraph. A debater reading only the underlined text should hear the complete argument. Each string stays within one paragraph.
 
-- highlights: THIS IS THE MOST IMPORTANT RULE. A highlight is a SHORT fragment — typically 1 to 5 words, NEVER a whole sentence and never more than ~6 words. Highlights are the exact words a debater's voice stresses: the load-bearing warrant words. Pull them OUT from inside the underlined sentences and SKIP the filler between them (articles, hedges, attributions, "which", "that", "sometimes referred to as"). Return MANY short highlights — several per underlined sentence where the reasoning is dense. Read in sequence, the highlighted fragments alone must form a compressed but coherent argument for the claim. NEVER highlight an entire underlined sentence — if a highlight is longer than ~6 words, break it into the 2-3 key fragments inside it.
+- highlights: the load-bearing warrant phrases WITHIN the underlined sentences — the words the debater stresses. Follow these rules strictly:
+  • A highlight is a COHERENT, self-contained phrase that still makes sense read on its own — usually a short clause of about 3 to 10 words that keeps the key term TOGETHER with the words that state the point about it (subject + what is said about it). Example shape: "is the single strongest predictor of support", not "predictor".
+  • NEVER highlight a bare topic word or buzzword by itself ("nationalism", "reality", "emissions", "one", "truth"). If the crucial term is a single word, extend the highlight to include the surrounding words that give it meaning. A highlight that is just a keyword with no context is WRONG.
+  • Highlight each idea ONCE. NEVER highlight the same word or phrase more than once, even if the term recurs many times — choose the ONE sentence where it most clearly proves the claim and highlight it only there. Repeating the same buzzword is WRONG.
+  • Copy each highlight EXACTLY from inside an underlined sentence. Read in sequence, the highlights should form a coherent compressed version of the argument — not a scatter of disconnected words.
+  • Prefer FEWER, meaningful phrases over many fragments. A dense underlined sentence usually has ONE or TWO highlight-worthy clauses, not five.
 
-Worked example (this is the exact granularity to match):
-  Underlined sentence: "It is a lack of what Hindu philosophers sometimes refer to as true knowledge."
-  → highlights: ["a lack of", "true knowledge"]   (NOT the whole sentence)
-  Underlined sentence: "Avidya is our mistaken belief that these things make up reality, or our true self."
-  → highlights: ["mistaken", "make up reality", "true self"]
-  Underlined sentence: "the non-dualism comes from the belief that Atman (the true self) is Brahman."
-  → highlights: ["non-dualism comes from the belief that Atman", "is Brahman"]
+Worked example (match this style exactly):
+  Claim: "Christian nationalism drives support for the candidate."
+  Underlined sentence: "Survey data show that Christian nationalism is the single strongest predictor of support, outweighing income, education, and party affiliation."
+  GOOD -> highlights: ["Christian nationalism is the single strongest predictor of support", "outweighing income, education, and party affiliation"]
+  BAD  -> highlights: ["Christian nationalism", "Christian nationalism", "predictor", "support"]   (lone, repeated, out-of-context buzzwords — NEVER do this)
 
-- Prioritize by the claim: the fragments you highlight should be the words that most directly state WHY or HOW the claim is true.
+- Prioritize by the claim: the phrases you highlight should be the ones that most directly state WHY or HOW the claim is true.
 - tag: a punchy 1-2 sentence statement of what the evidence proves, phrased from the user's claim (this is YOUR wording). Mark 1-3 key phrases with __underline__ markers.
 - cite: AuthorLastName YY, no apostrophe (e.g. "Rodrigues 16"). Multiple authors: "FirstAuthor et al. YY". No known author: publication name + YY.
 - citeDetails: full cite content WITHOUT brackets: author (+ qualifications if known), "Article Title." Publication, date, URL if known.
@@ -162,24 +166,38 @@ function buildMarkerPrompt(claim: string, article: ExtractedArticle, passage: st
 
 /** Resolve the cut source into clean article text + metadata. */
 async function resolveSource(req: CutRequest): Promise<ExtractedArticle> {
-  if (req.source.url) {
-    const extracted = await extractArticleFromUrl(req.source.url);
-    // User/search-supplied metadata wins over what the page scraper guessed.
-    return {
-      ...extracted,
-      title: req.source.title || extracted.title,
-      author: req.source.author || extracted.author,
-      publication: req.source.publication || extracted.publication,
-      date: req.source.date || extracted.date,
-    };
-  }
-  return {
+  const fromProvidedText = (): ExtractedArticle => ({
     title: req.source.title ?? "",
     author: req.source.author ?? "",
     publication: req.source.publication ?? "",
     date: req.source.date ?? "",
     text: (req.source.text ?? "").trim(),
-  };
+  });
+
+  if (req.source.url) {
+    try {
+      const extracted = await extractArticleFromUrl(req.source.url);
+      // User/search-supplied metadata wins over what the page scraper guessed.
+      return {
+        ...extracted,
+        title: req.source.title || extracted.title,
+        author: req.source.author || extracted.author,
+        publication: req.source.publication || extracted.publication,
+        date: req.source.date || extracted.date,
+      };
+    } catch (err) {
+      // The URL couldn't be read (paywalled DOI/publisher page, JS-only, PDF).
+      // Search results ship the real abstract as a fallback — cut from that
+      // rather than failing. It's still verbatim author wording, just shorter.
+      const fallback = fromProvidedText();
+      if (err instanceof ArticleUnreadableError && fallback.text.length >= 200) {
+        console.warn("cardCutter: URL unreadable; cutting from provided abstract text");
+        return fallback;
+      }
+      throw err;
+    }
+  }
+  return fromProvidedText();
 }
 
 async function selectPassage(
@@ -232,12 +250,33 @@ async function selectPassage(
   return paragraphs.slice(start, end + 1).join("\n\n");
 }
 
+// Re-cutting the same source at the same length/claim (common while iterating)
+// reuses the card for 30 min — zero AI cost.
+const cutCache = new TtlCache<Card>(30 * 60 * 1000, 30);
+
+/** Stable, compact key for a cut request (hashes long pasted text). */
+function cutCacheKey(req: CutRequest): string {
+  const sourceKey = req.source.url ?? `text:${djb2(req.source.text ?? "")}`;
+  return `${sourceKey}|${req.cardLength}|${req.claim.trim().toLowerCase()}`;
+}
+
+/** Tiny non-crypto string hash — just to key the cache on pasted text. */
+function djb2(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
 /**
  * Cut a debate-ready card from a URL or pasted text.
  * The body is real article text with emphasis applied on top — the AI cannot
  * alter the wording because it never produces the wording.
  */
 export async function cutCard(req: CutRequest): Promise<Card> {
+  return cutCache.wrap(cutCacheKey(req), () => runCut(req));
+}
+
+async function runCut(req: CutRequest): Promise<Card> {
   const article = await resolveSource(req);
   if (article.text.length < 200) {
     throw new ArticleUnreadableError(
@@ -254,6 +293,9 @@ export async function cutCard(req: CutRequest): Promise<Card> {
   const markerRaw = await generateJson({
     system: MARKER_SYSTEM,
     prompt: buildMarkerPrompt(req.claim, article, passage),
+    // The quality-critical call: a stronger model picks coherent in-context
+    // warrant phrases instead of disconnected buzzwords.
+    model: GEMINI_MARKER_MODEL,
     // Dense emphasis on a long/entire card means many substrings — give the
     // JSON room so it isn't truncated (which would drop later warrants).
     maxOutputTokens: 40000,

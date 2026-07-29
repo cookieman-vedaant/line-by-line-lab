@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { generateJson } from "@/lib/gemini";
+import { TtlCache } from "@/lib/cache";
+import { RateLimitedError, generateJson } from "@/lib/gemini";
 import {
   searchAcademic,
   type CandidateArticle,
@@ -85,19 +86,70 @@ function candidateToArticle(
     date: c.date || "unknown",
     explanation,
     credibilityScore,
+    // Carried so the Card Cutter can fall back to real abstract text when the
+    // (often paywalled) article URL can't be fetched.
+    abstract: c.abstract,
   };
 }
 
+/**
+ * Non-AI ranking used when Gemini is rate-limited. Keeps search working on a
+ * dead quota by returning REAL articles ordered by objective signals — never
+ * fabricating relevance. Honest explanation: fit is unverified.
+ */
+function heuristicRanking(candidates: CandidateArticle[]): Article[] {
+  const score = (c: CandidateArticle): number => {
+    const citations = Math.min(40, Math.log10(c.citationCount + 1) * 15);
+    const year = Number.parseInt(c.date.slice(0, 4), 10);
+    const recency = Number.isFinite(year) ? Math.max(0, year - 2010) : 0;
+    const hasVenue = c.venue ? 10 : 0;
+    return 50 + citations + Math.min(15, recency) + hasVenue;
+  };
+  return [...candidates]
+    .sort((a, b) => score(b) - score(a))
+    .slice(0, 6)
+    .map((c) =>
+      candidateToArticle(
+        c,
+        "Auto-ranked while the AI ranker was rate-limited — relevance isn't verified, so skim the abstract to confirm it fits your claim.",
+        Math.round(Math.min(90, score(c))),
+      ),
+    );
+}
+
+// Repeat searches (same params) reuse the result for 30 min — zero AI cost.
+const searchCache = new TtlCache<Article[]>(30 * 60 * 1000);
+
+function searchCacheKey(p: SearchParams): string {
+  return JSON.stringify([
+    p.evidenceType,
+    p.claim.trim().toLowerCase(),
+    p.sourceType ?? "Any",
+    p.publicationAge ?? "Any",
+  ]);
+}
+
 export async function findArticles(params: SearchParams): Promise<Article[]> {
-  // 1. Debate-aware query expansion (Gemini, free tier).
-  const expansionRaw = await generateJson({
-    system: EXPANDER_SYSTEM,
-    prompt: `Evidence type: ${params.evidenceType}\nClaim: ${params.claim}`,
-    maxOutputTokens: 1024,
-  });
-  const expansion = expanderSchema.safeParse(expansionRaw);
-  // If expansion fails, fall back to the raw claim as the query.
-  const queries = expansion.success ? expansion.data.queries : [params.claim];
+  return searchCache.wrap(searchCacheKey(params), () => runSearch(params));
+}
+
+async function runSearch(params: SearchParams): Promise<Article[]> {
+  // 1. Debate-aware query expansion (Gemini, free tier). If it's unparseable
+  //    OR the quota is hit, fall back to the raw claim — never fail the search
+  //    over the (optional) expansion step.
+  let queries: string[] = [params.claim];
+  try {
+    const expansionRaw = await generateJson({
+      system: EXPANDER_SYSTEM,
+      prompt: `Evidence type: ${params.evidenceType}\nClaim: ${params.claim}`,
+      maxOutputTokens: 1024,
+    });
+    const expansion = expanderSchema.safeParse(expansionRaw);
+    if (expansion.success) queries = expansion.data.queries;
+  } catch (err) {
+    if (!(err instanceof RateLimitedError)) throw err;
+    // Quota hit on expansion — proceed with the raw claim as the query.
+  }
 
   // 2. Retrieve real articles from the free scholarly databases.
   const candidates = await searchAcademic(queries, params.publicationAge);
@@ -105,7 +157,9 @@ export async function findArticles(params: SearchParams): Promise<Article[]> {
     throw new NoSourcesFoundError();
   }
 
-  // 3. Debate-aware ranking over ONLY the retrieved candidates.
+  // 3. Debate-aware ranking over ONLY the retrieved candidates. If the ranker
+  //    is rate-limited, degrade to objective heuristic ranking so the user
+  //    still gets real articles instead of an error.
   const shortlist = candidates.slice(0, 32);
   const rankingPrompt = [
     `Evidence type: ${params.evidenceType}`,
@@ -120,11 +174,21 @@ export async function findArticles(params: SearchParams): Promise<Article[]> {
     .filter(Boolean)
     .join("\n");
 
-  const rankingRaw = await generateJson({
-    system: RANKER_SYSTEM,
-    prompt: rankingPrompt,
-    maxOutputTokens: 4096,
-  });
+  let rankingRaw: unknown;
+  try {
+    rankingRaw = await generateJson({
+      system: RANKER_SYSTEM,
+      prompt: rankingPrompt,
+      maxOutputTokens: 4096,
+    });
+  } catch (err) {
+    if (err instanceof RateLimitedError) {
+      console.warn("articleFinder: ranker rate-limited; using heuristic ranking");
+      return heuristicRanking(shortlist);
+    }
+    throw err;
+  }
+
   const ranking = rankerSchema.safeParse(rankingRaw);
   if (!ranking.success) {
     console.error("articleFinder: unparseable ranking output", ranking.error.message);

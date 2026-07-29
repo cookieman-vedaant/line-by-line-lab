@@ -29,10 +29,24 @@ export interface EmphasisResult {
   applied: number;
 }
 
-/** Find every raw-offset span of `needle` in the indexed text. */
+const WORD_CHAR = /[A-Za-z0-9]/;
+const isWord = (ch: string | undefined): boolean => ch !== undefined && WORD_CHAR.test(ch);
+
+/**
+ * A span is word-boundary-clean when it doesn't slice through a word at either
+ * edge — so needle "one" can't match inside "oneness", and short buzzwords
+ * can't attach to neighbouring words.
+ */
+function isBoundaryClean(text: string, start: number, end: number): boolean {
+  const cutsLeft = isWord(text[start - 1]) && isWord(text[start]);
+  const cutsRight = isWord(text[end]) && isWord(text[end - 1]);
+  return !cutsLeft && !cutsRight;
+}
+
+/** Find every word-boundary-clean raw-offset span of `needle` in the text. */
 function locateSpans(
   index: ReturnType<typeof buildNormalizedIndex>,
-  rawLength: number,
+  text: string,
   needle: string,
 ): Array<[number, number]> {
   // Needles are plain copied text (they may legitimately contain `==`/`__`,
@@ -48,8 +62,8 @@ function locateSpans(
     if (at === -1) break;
     const rawStart = index.map[at];
     const lastNormIdx = at + normNeedle.length - 1;
-    const rawEnd = Math.min(index.map[lastNormIdx] + 1, rawLength);
-    spans.push([rawStart, rawEnd]);
+    const rawEnd = Math.min(index.map[lastNormIdx] + 1, text.length);
+    if (isBoundaryClean(text, rawStart, rawEnd)) spans.push([rawStart, rawEnd]);
     from = at + normNeedle.length;
   }
   return spans;
@@ -73,8 +87,10 @@ export function applyEmphasis(
   let missed = 0;
   let applied = 0;
 
+  // Underlines are the read-aloud sentences (long, rarely repeated) — mark
+  // every occurrence.
   for (const needle of underlines) {
-    const spans = locateSpans(index, text.length, needle);
+    const spans = locateSpans(index, text, needle);
     if (spans.length === 0) {
       missed++;
       continue;
@@ -87,17 +103,25 @@ export function applyEmphasis(
     }
   }
 
+  // Highlights are the short stressed warrant phrases. Mark each phrase only
+  // ONCE (deduped), at the occurrence that sits inside a read-aloud/underlined
+  // sentence when possible — so a recurring keyword isn't lit up everywhere and
+  // never lands stranded in un-read plain text.
+  const seenHighlights = new Set<string>();
   for (const needle of highlights) {
-    const spans = locateSpans(index, text.length, needle);
+    const key = normalizeForComparison(stripDelimiters(needle));
+    if (seenHighlights.has(key)) continue; // duplicate phrase — skip silently
+    seenHighlights.add(key);
+
+    const spans = locateSpans(index, text, needle);
     if (spans.length === 0) {
       missed++;
       continue;
     }
+    const chosen = spans.find(([start]) => marks[start] === UNDERLINE) ?? spans[0];
     applied++;
-    for (const [start, end] of spans) {
-      for (let i = start; i < end; i++) {
-        marks[i] = HIGHLIGHT;
-      }
+    for (let i = chosen[0]; i < chosen[1]; i++) {
+      marks[i] = HIGHLIGHT;
     }
   }
 

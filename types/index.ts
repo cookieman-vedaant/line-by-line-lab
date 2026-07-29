@@ -64,6 +64,12 @@ export interface Article {
   date: string;
   explanation: string;
   credibilityScore: number;
+  /**
+   * The database abstract — real, verbatim author wording. Carried through so
+   * the Card Cutter can fall back to it when the article URL (often a paywalled
+   * DOI/publisher page) can't be fetched. Not shown in the UI.
+   */
+  abstract?: string;
 }
 
 /**

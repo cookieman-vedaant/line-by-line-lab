@@ -12,7 +12,6 @@ const TEXT =
   "Avidya is a Sanskrit word most commonly defined as ignorance. It is spiritual ignorance.\n\nThe Advaita Vedanta school of Hinduism can be traced to the Upanisads.";
 
 const u = (s: string) => `${UNDERLINE_OPEN}${s}${UNDERLINE_CLOSE}`;
-const h = (s: string) => `${HIGHLIGHT_OPEN}${s}${HIGHLIGHT_CLOSE}`;
 
 describe("applyEmphasis", () => {
   it("wraps an underline around real text", () => {
@@ -83,9 +82,51 @@ describe("applyEmphasis", () => {
     expect(applied).toBe(1);
   });
 
-  it("marks every occurrence of a repeated needle", () => {
+  it("underlines mark every occurrence of a repeated needle", () => {
     const source = "sanctions fail. We know sanctions fail.";
-    const { body } = applyEmphasis(source, [], ["sanctions fail"]);
-    expect(body.split(h("sanctions fail")).length - 1).toBe(2);
+    const { body } = applyEmphasis(source, ["sanctions fail"], []);
+    expect(body.split(u("sanctions fail")).length - 1).toBe(2);
+  });
+
+  it("highlights a recurring phrase only ONCE (no buzzword repetition)", () => {
+    const source = "One. They are all one. The one truth is one.";
+    const { body } = applyEmphasis(source, [], ["one"]);
+    // "one" recurs, but only a single highlight is emitted.
+    expect(body.split(HIGHLIGHT_OPEN).length - 1).toBe(1);
+  });
+
+  it("dedupes identical highlight phrases the model repeats", () => {
+    const source = "Christian nationalism drives support in the data.";
+    const { body, applied } = applyEmphasis(
+      source,
+      [],
+      ["Christian nationalism", "Christian nationalism", "Christian nationalism"],
+    );
+    expect(applied).toBe(1);
+    expect(body.split(HIGHLIGHT_OPEN).length - 1).toBe(1);
+  });
+
+  it("prefers the occurrence inside a read-aloud (underlined) sentence", () => {
+    const source = "Truth is mentioned here. The eternal truth grounds reality.";
+    const { body } = applyEmphasis(
+      source,
+      ["The eternal truth grounds reality."],
+      ["truth"],
+    );
+    const nodes = parseCardMarkup(body);
+    const highlight = nodes.find((n) => n.kind === "highlight");
+    // The highlighted "truth" sits within the underlined second sentence,
+    // not the stray "Truth" in the un-underlined first sentence.
+    expect(highlight?.text.toLowerCase()).toBe("truth");
+    const before = body.slice(0, body.indexOf(HIGHLIGHT_OPEN));
+    expect(before).toContain("eternal");
+  });
+
+  it("won't match a short needle inside a larger word", () => {
+    const source = "Their oneness is a phone call away.";
+    // "one" must not light up inside "oneness" or "phone".
+    const { missed, applied } = applyEmphasis(source, [], ["one"]);
+    expect(applied).toBe(0);
+    expect(missed).toBe(1);
   });
 });
