@@ -1,5 +1,5 @@
 import { Readability } from "@mozilla/readability";
-import { JSDOM } from "jsdom";
+import { parseHTML } from "linkedom";
 
 /** Honest failure — the article couldn't be fetched or parsed. */
 export class ArticleUnreadableError extends Error {
@@ -56,8 +56,11 @@ export async function extractArticleFromUrl(
     );
   }
 
-  const dom = new JSDOM(html, { url });
-  const doc = dom.window.document;
+  // linkedom parses HTML without a heavy browser emulation — it works in
+  // serverless/edge where jsdom crashes. Its Document is runtime-compatible
+  // with Readability + our metadata reader; the TS type differs, so we cast.
+  const { document } = parseHTML(html);
+  const doc = document as unknown as Document;
 
   // Pull structured metadata BEFORE Readability mutates the DOM.
   const meta = extractPageMetadata(doc);
@@ -252,8 +255,8 @@ export function findBylineInText(text: string): string {
  */
 function htmlToParagraphText(contentHtml: string, fallbackText: string): string {
   try {
-    const dom = new JSDOM(contentHtml);
-    const blocks = dom.window.document.querySelectorAll(
+    const { document } = parseHTML(contentHtml);
+    const blocks = document.querySelectorAll(
       "p, h1, h2, h3, h4, h5, h6, li, blockquote, figcaption",
     );
     const paragraphs = [...blocks]
