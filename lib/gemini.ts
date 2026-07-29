@@ -19,16 +19,23 @@ export const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite";
 export const GEMINI_MARKER_MODEL =
   process.env.GEMINI_MARKER_MODEL || "gemini-3.5-flash";
 
-// The free tier's per-minute cap resets every ~60s, so a brief wait usually
-// clears a 429 from a burst of quick uses. Retry a couple of times with backoff
-// before giving up — turns "you're rate limited, stop" into "hang on a sec".
-const RETRY_DELAYS_MS = [4000, 10000];
+// Backoff for transient failures (429 rate limit / 503 overload). Kept short so
+// a cut doesn't hang for the better part of a minute on serverless. Callers that
+// have a faster fallback (e.g. the marker's fallback model) pass retries: 0.
+const RETRY_DELAYS_MS = [3000, 7000];
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function isRateLimit(err: unknown): boolean {
-  return (
-    err instanceof Error && /429|RESOURCE_EXHAUSTED|quota/i.test(err.message)
+/**
+ * Transient model errors worth retrying: rate limits (429), and — critically —
+ * server-side overload (503 "high demand"/UNAVAILABLE) and gateway blips
+ * (500/502/504) plus flaky network. These are temporary; a short wait clears
+ * them. Anything else (bad request, our bug) fails immediately.
+ */
+function isTransient(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return /\b(429|500|502|503|504)\b|RESOURCE_EXHAUSTED|UNAVAILABLE|quota|rate.?limit|overloaded|high demand|ECONNRESET|ETIMEDOUT|ENOTFOUND|fetch failed/i.test(
+    err.message,
   );
 }
 
@@ -42,11 +49,14 @@ export class MissingApiKeyError extends Error {
   }
 }
 
-/** Thrown when the free-tier quota is hit — surfaced as a friendly retry hint. */
+/**
+ * Thrown when the model is temporarily unavailable — a hit rate limit (429) OR
+ * high demand / overload (503). Surfaced as a friendly "try again" hint.
+ */
 export class RateLimitedError extends Error {
   constructor() {
     super(
-      "The free AI quota was hit for the moment. Wait a minute and try again.",
+      "The AI is busy right now (rate limit or high demand). Wait a few seconds and try again.",
     );
     this.name = "RateLimitedError";
   }
@@ -69,6 +79,9 @@ interface GenerateJsonOptions {
   maxOutputTokens?: number;
   /** Override the model for this call (defaults to GEMINI_MODEL). */
   model?: string;
+  /** Max retry attempts on transient errors (default = RETRY_DELAYS_MS.length).
+   *  Pass 0 to fail fast when the caller has its own fallback. */
+  retries?: number;
 }
 
 /**
@@ -77,9 +90,10 @@ interface GenerateJsonOptions {
  */
 export async function generateJson(opts: GenerateJsonOptions): Promise<unknown> {
   const ai = getGemini();
+  const maxRetries = opts.retries ?? RETRY_DELAYS_MS.length;
 
-  // Try once, then retry on rate-limit with backoff (RETRY_DELAYS_MS.length
-  // extra attempts). Non-rate-limit errors fail immediately.
+  // Try once, then retry on transient errors with backoff. Non-transient errors
+  // fail immediately.
   for (let attempt = 0; ; attempt++) {
     try {
       const response = await ai.models.generateContent({
@@ -99,9 +113,9 @@ export async function generateJson(opts: GenerateJsonOptions): Promise<unknown> 
       });
       return extractJson(response.text ?? "");
     } catch (err) {
-      if (!isRateLimit(err)) throw err;
-      if (attempt >= RETRY_DELAYS_MS.length) throw new RateLimitedError();
-      await sleep(RETRY_DELAYS_MS[attempt]);
+      if (!isTransient(err)) throw err;
+      if (attempt >= maxRetries) throw new RateLimitedError();
+      await sleep(RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)]);
     }
   }
 }

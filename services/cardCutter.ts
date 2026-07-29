@@ -2,7 +2,7 @@ import { z } from "zod";
 import { TtlCache } from "@/lib/cache";
 import { tagMarkupToDelimiters } from "@/lib/cardMarkup";
 import { applyEmphasis } from "@/lib/emphasis";
-import { GEMINI_MARKER_MODEL, generateJson } from "@/lib/gemini";
+import { GEMINI_MARKER_MODEL, GEMINI_MODEL, RateLimitedError, generateJson } from "@/lib/gemini";
 import {
   ArticleUnreadableError,
   extractArticleFromUrl,
@@ -290,16 +290,35 @@ async function runCut(req: CutRequest): Promise<Card> {
   const paragraphs = splitParagraphs(article.text);
   const passage = await selectPassage(req.claim, req.cardLength, paragraphs);
 
-  const markerRaw = await generateJson({
-    system: MARKER_SYSTEM,
-    prompt: buildMarkerPrompt(req.claim, article, passage),
-    // The quality-critical call: a stronger model picks coherent in-context
-    // warrant phrases instead of disconnected buzzwords.
-    model: GEMINI_MARKER_MODEL,
-    // Dense emphasis on a long/entire card means many substrings — give the
-    // JSON room so it isn't truncated (which would drop later warrants).
-    maxOutputTokens: 40000,
-  });
+  const markerPrompt = buildMarkerPrompt(req.claim, article, passage);
+  // The quality-critical call: a stronger model picks coherent in-context
+  // warrant phrases instead of disconnected buzzwords. maxOutputTokens is large
+  // because dense emphasis on a long card means many substrings (avoid truncation).
+  let markerRaw: unknown;
+  try {
+    // Fail fast (retries: 0) on the premium model — it's the one that gets
+    // "high demand" 503s. Rather than burn ~15s retrying it, drop straight to
+    // the reliable default model, which retries normally.
+    markerRaw = await generateJson({
+      system: MARKER_SYSTEM,
+      prompt: markerPrompt,
+      model: GEMINI_MARKER_MODEL,
+      maxOutputTokens: 40000,
+      retries: GEMINI_MARKER_MODEL !== GEMINI_MODEL ? 0 : undefined,
+    });
+  } catch (err) {
+    if (err instanceof RateLimitedError && GEMINI_MARKER_MODEL !== GEMINI_MODEL) {
+      console.warn("cardCutter: marker model busy; falling back to the default model");
+      markerRaw = await generateJson({
+        system: MARKER_SYSTEM,
+        prompt: markerPrompt,
+        model: GEMINI_MODEL,
+        maxOutputTokens: 40000,
+      });
+    } else {
+      throw err;
+    }
+  }
   const marker = markerSchema.safeParse(markerRaw);
   if (!marker.success) {
     console.error("cardCutter: unparseable marker output");

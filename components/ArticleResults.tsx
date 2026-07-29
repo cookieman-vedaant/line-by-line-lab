@@ -83,13 +83,23 @@ export default function ArticleResults({
                     {article.author} · {article.publication} · {article.date}
                   </p>
                 </div>
-                <span
-                  title={`Credibility score: ${article.credibilityScore}/100`}
-                  className={`label-mono frame shrink-0 px-2 py-1 text-[10px] font-medium
-                    ${credibilityBadgeClass(article.credibilityScore)}`}
-                >
-                  {credibilityLabel(article.credibilityScore)}
-                </span>
+                <div className="flex shrink-0 flex-col items-end gap-1.5">
+                  {article.accessible && (
+                    <span
+                      title="Full text was fetched and confirmed readable — you can open and cut this"
+                      className="label-mono frame bg-accent px-2 py-1 text-[10px] font-medium text-paper"
+                    >
+                      ✓ Full text
+                    </span>
+                  )}
+                  <span
+                    title={`Credibility score: ${article.credibilityScore}/100`}
+                    className={`label-mono frame px-2 py-1 text-[10px] font-medium
+                      ${credibilityBadgeClass(article.credibilityScore)}`}
+                  >
+                    {credibilityLabel(article.credibilityScore)}
+                  </span>
+                </div>
               </div>
 
               <p className="mt-3 text-sm font-medium leading-relaxed text-ink/90">

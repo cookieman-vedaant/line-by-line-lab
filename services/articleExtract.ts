@@ -27,7 +27,10 @@ const MIN_ARTICLE_CHARS = 400;
  * Fetch a URL and extract clean article text with Mozilla Readability —
  * the same engine behind Firefox Reader Mode. Free, runs on our server.
  */
-export async function extractArticleFromUrl(url: string): Promise<ExtractedArticle> {
+export async function extractArticleFromUrl(
+  url: string,
+  timeoutMs: number = FETCH_TIMEOUT_MS,
+): Promise<ExtractedArticle> {
   let html: string;
   try {
     const res = await fetch(url, {
@@ -38,7 +41,7 @@ export async function extractArticleFromUrl(url: string): Promise<ExtractedArtic
         Accept: "text/html,application/xhtml+xml",
       },
       redirect: "follow",
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) {
       throw new ArticleUnreadableError(
@@ -78,6 +81,26 @@ export async function extractArticleFromUrl(url: string): Promise<ExtractedArtic
     date: meta.date || parsed.publishedTime?.slice(0, 10) || "",
     text,
   };
+}
+
+/**
+ * Quick, quiet check that a URL is actually readable full text a debater could
+ * cut from — used by the Article Finder to only show accessible sources. Uses a
+ * shorter timeout than a real cut and never throws (a failure just means "not
+ * accessible"). Returns enough info to reuse the fetched text without a second
+ * download when the caller wants it.
+ */
+export async function verifyAccessible(
+  url: string,
+  timeoutMs = 6500,
+): Promise<{ ok: boolean; chars: number }> {
+  try {
+    const article = await extractArticleFromUrl(url, timeoutMs);
+    const chars = article.text.trim().length;
+    return { ok: chars >= MIN_ARTICLE_CHARS, chars };
+  } catch {
+    return { ok: false, chars: 0 };
+  }
 }
 
 interface PageMetadata {

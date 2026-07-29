@@ -5,7 +5,33 @@ import {
   searchAcademic,
   type CandidateArticle,
 } from "@/services/academicSearch";
+import { verifyAccessible } from "@/services/articleExtract";
 import type { Article, SearchParams } from "@/types";
+
+// How many top-ranked candidates to fetch-verify, and how many to return.
+const VERIFY_LIMIT = 10;
+const RETURN_LIMIT = 8;
+
+/**
+ * Fetch-check the top candidates in parallel and keep only those that yield
+ * real readable full text — so every article shown is one the debater can
+ * actually open and cut from. If NONE verify (rare with the open-access
+ * filter), return the ranked list anyway so the search isn't empty; the
+ * cutter's abstract fallback still lets them cut something.
+ */
+async function verifyAndFilter(articles: Article[]): Promise<Article[]> {
+  const head = articles.slice(0, VERIFY_LIMIT);
+  const checked = await Promise.all(
+    head.map(async (a) => ({ article: a, ok: (await verifyAccessible(a.url)).ok })),
+  );
+  const accessible = checked
+    .filter((c) => c.ok)
+    .map((c) => ({ ...c.article, accessible: true }));
+
+  if (accessible.length > 0) return accessible.slice(0, RETURN_LIMIT);
+
+  return articles.slice(0, RETURN_LIMIT).map((a) => ({ ...a, accessible: false }));
+}
 
 /** Honest failure — no reputable sources exist. Never fabricate one instead. */
 export class NoSourcesFoundError extends Error {
@@ -184,7 +210,7 @@ async function runSearch(params: SearchParams): Promise<Article[]> {
   } catch (err) {
     if (err instanceof RateLimitedError) {
       console.warn("articleFinder: ranker rate-limited; using heuristic ranking");
-      return heuristicRanking(shortlist);
+      return verifyAndFilter(heuristicRanking(shortlist));
     }
     throw err;
   }
@@ -202,5 +228,7 @@ async function runSearch(params: SearchParams): Promise<Article[]> {
   if (articles.length === 0) {
     throw new NoSourcesFoundError();
   }
-  return articles;
+
+  // Only surface sources the debater can actually open and cut from.
+  return verifyAndFilter(articles);
 }

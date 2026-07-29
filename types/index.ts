@@ -70,6 +70,11 @@ export interface Article {
    * DOI/publisher page) can't be fetched. Not shown in the UI.
    */
   abstract?: string;
+  /**
+   * True when the Article Finder fetched this URL and confirmed it yields real,
+   * readable full text a debater can open and cut from (not paywalled/blocked).
+   */
+  accessible?: boolean;
 }
 
 /**

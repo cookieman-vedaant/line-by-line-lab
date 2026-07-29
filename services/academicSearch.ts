@@ -95,10 +95,12 @@ export function pickWorkUrl(w: OpenAlexWork): string {
 async function searchOpenAlex(query: string, fromDate: string | null): Promise<CandidateArticle[]> {
   const params = new URLSearchParams({
     search: query,
-    "per-page": "12",
+    "per-page": "20",
     sort: "relevance_score:desc",
   });
-  const filters = ["has_abstract:true"];
+  // open_access.is_oa:true — only works a debater can actually READ for free
+  // (free full text exists), so results are far more likely to be cuttable.
+  const filters = ["has_abstract:true", "open_access.is_oa:true"];
   if (fromDate) filters.push(`from_publication_date:${fromDate}`);
   params.set("filter", filters.join(","));
 
