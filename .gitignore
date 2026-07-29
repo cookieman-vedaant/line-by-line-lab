@@ -37,6 +37,13 @@ yarn-error.log*
 # personal tooling
 .obsidian/
 
+# local-only agent / dev-process docs (kept on disk, never published to GitHub)
+/AGENTS.md
+/CLAUDE.md
+/MEMORY.md
+/REVIEW-CHECKLIST.md
+/agent_docs/
+
 # vercel
 .vercel
 
