@@ -14,7 +14,9 @@ export const maxDuration = 120;
 const cutRequestSchema = z
   .object({
     source: z.object({
-      url: z.string().url().startsWith("http").optional(),
+      // Any http(s) string — the fetch validates it functionally. (Avoids
+      // Zod 4's strict/deprecated .url() rejecting unusual-but-valid links.)
+      url: z.string().trim().startsWith("http").max(2000).optional(),
       text: z.string().max(300000).optional(),
       title: z.string().max(500).optional(),
       author: z.string().max(300).optional(),
@@ -40,8 +42,18 @@ export async function POST(req: Request) {
 
   const parsed = cutRequestSchema.safeParse(body);
   if (!parsed.success) {
+    // Report exactly what failed (which field), plus a hint for the common
+    // cause: an out-of-date page still running old code.
+    const detail = parsed.error.issues
+      .map((i) => {
+        const field = i.path.join(".").replace(/^source\./, "");
+        return field ? `${field}: ${i.message}` : i.message;
+      })
+      .join("; ");
     return NextResponse.json(
-      { error: "A claim, a card length, and either an article URL or pasted text are required." },
+      {
+        error: `Request rejected — ${detail}. If you filled everything in, hard-refresh the page (Ctrl+Shift+R / Cmd+Shift+R) to load the latest version.`,
+      },
       { status: 400 },
     );
   }

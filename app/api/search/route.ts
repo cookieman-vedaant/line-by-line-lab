@@ -25,8 +25,16 @@ export async function POST(req: Request) {
 
   const parsed = searchRequestSchema.safeParse(body);
   if (!parsed.success) {
+    const detail = parsed.error.issues
+      .map((i) => {
+        const field = i.path.join(".");
+        return field ? `${field}: ${i.message}` : i.message;
+      })
+      .join("; ");
     return NextResponse.json(
-      { error: "Evidence type and a claim are required." },
+      {
+        error: `Request rejected — ${detail}. If you filled everything in, hard-refresh the page (Ctrl+Shift+R / Cmd+Shift+R) to load the latest version.`,
+      },
       { status: 400 },
     );
   }
