@@ -89,7 +89,7 @@ const selectorSchema = z.union([
 
 const SELECTOR_SYSTEM = `You are the passage selector inside a debate card-cutting tool (Lincoln-Douglas). You receive a claim and an article split into numbered paragraphs. Pick the CONTIGUOUS run of paragraphs that best supports the claim at the requested card length.
 
-Selection question: "If a debater could only read one section of this article, which section best proves this claim?" Optimize for the strongest WARRANT — the causal reasoning proving the claim — not the first or longest paragraph.
+Selection question: "If a debater could only read one section of this article, which section best proves this claim — TOGETHER with the reasoning and warrants that support it?" Pick the section that contains the claim's support AND the surrounding logic that explains WHY it is true (mechanisms, key premises, evidence, implications) — a complete, self-contained argument, not just the single sentence that matches the claim. Optimize for the strongest WARRANT — the causal reasoning proving the claim — not the first or longest paragraph.
 
 Card length targets (share of the article's total words):
 - Short: the single strongest passage — roughly 5-30%.
@@ -119,7 +119,13 @@ There are THREE layers of emphasis, exactly like a hand-cut debate card:
 
 Work through the passage from beginning to end so emphasis is distributed throughout, not clustered at the top.
 
-- underlines: the read-aloud text — full clauses/sentences COPIED EXACTLY from the passage. Underline the sentences that carry the argument for the claim, across every relevant paragraph. A debater reading only the underlined text should hear the complete argument. Each string stays within one paragraph.
+- underlines: the read-aloud text — full clauses/sentences COPIED EXACTLY from the passage. Underline the COMPLETE chain of reasoning that supports the claim, NOT only the sentences that restate it. Think like a skilled debater building a fully-warranted card, and underline a sentence if it does ANY of these for the claim:
+    • states or restates the claim;
+    • gives the WHY or HOW — the causal mechanism, logic, or warrant behind it;
+    • establishes a definition, premise, or assumption the argument depends on;
+    • supplies supporting evidence, data, an authority, or a concrete example;
+    • draws out an implication, consequence, or stake that follows from it.
+  A sentence does NOT need to contain the claim's exact words to be worth underlining — capture the surrounding reasoning that a judge needs to understand not just WHAT is claimed but WHY it is true and what follows. ERR TOWARD UNDERLINING MORE substantive reasoning; leave plain only genuine filler (throat-clearing transitions, tangents, citations, pure repetition). A debater reading only the underlined text should hear a complete, self-contained, well-warranted argument — not a bare list of claim restatements. Each string stays within one paragraph.
 
 - highlights: the load-bearing warrant phrases WITHIN the underlined sentences — the words the debater stresses. Follow these rules strictly:
   • A highlight is a COHERENT, self-contained phrase that still makes sense read on its own — usually a short clause of about 3 to 10 words that keeps the key term TOGETHER with the words that state the point about it (subject + what is said about it). Example shape: "is the single strongest predictor of support", not "predictor".
@@ -134,7 +140,7 @@ Worked example (match this style exactly):
   GOOD -> highlights: ["Christian nationalism is the single strongest predictor of support", "outweighing income, education, and party affiliation"]
   BAD  -> highlights: ["Christian nationalism", "Christian nationalism", "predictor", "support"]   (lone, repeated, out-of-context buzzwords — NEVER do this)
 
-- Prioritize by the claim: the phrases you highlight should be the ones that most directly state WHY or HOW the claim is true.
+- Prioritize by the claim AND its warrants: highlight the phrases that most directly state WHY or HOW the claim is true — the load-bearing reasoning, mechanisms, and consequences — not only phrases that echo the claim's keywords. Because you are now underlining the full reasoning chain, spread highlights across that reasoning (the warrant and implication sentences too), not just the sentences that restate the claim.
 - tag: a punchy 1-2 sentence statement of what the evidence proves, phrased from the user's claim (this is YOUR wording). Mark 1-3 key phrases with __underline__ markers.
 - cite: AuthorLastName YY, no apostrophe (e.g. "Rodrigues 16"). Multiple authors: "FirstAuthor et al. YY". No known author: publication name + YY.
 - citeDetails: full cite content WITHOUT brackets: author (+ qualifications if known), "Article Title." Publication, date, URL if known.

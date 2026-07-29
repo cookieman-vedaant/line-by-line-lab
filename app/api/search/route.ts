@@ -9,7 +9,7 @@ export const maxDuration = 60;
 
 const searchRequestSchema = z.object({
   evidenceType: z.enum(EVIDENCE_TYPES),
-  claim: z.string().trim().min(3, "Claim is too short").max(500),
+  claim: z.string().trim().min(3, "Claim is too short").max(1000),
   sourceType: z.enum(SOURCE_TYPES).optional(),
   publicationAge: z.enum(PUBLICATION_AGES).optional(),
   cardLength: z.enum(CARD_LENGTHS).optional(),

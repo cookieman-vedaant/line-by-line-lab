@@ -23,7 +23,7 @@ const cutRequestSchema = z
       publication: z.string().max(300).optional(),
       date: z.string().max(50).optional(),
     }),
-    claim: z.string().trim().min(3).max(500),
+    claim: z.string().trim().min(3).max(1000),
     cardLength: z.enum(CARD_LENGTHS),
   })
   .refine((r) => Boolean(r.source.url) || Boolean(r.source.text?.trim()), {
