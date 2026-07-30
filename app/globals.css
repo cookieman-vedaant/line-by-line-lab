@@ -68,6 +68,16 @@
   --font-mono: var(--font-mono);
 }
 
+/* Font pairs — the theme agent switches these via data-font on <html>. The
+   default (zine) is used when no data-font is set (Bold/Dark builtins). */
+:root { --font-display: var(--font-zine); --font-mono: var(--font-zine-mono); }
+[data-font="zine"]      { --font-display: var(--font-zine);      --font-mono: var(--font-zine-mono); }
+[data-font="space"]     { --font-display: var(--font-space);     --font-mono: var(--font-space-mono); }
+[data-font="editorial"] { --font-display: var(--font-editorial); --font-mono: var(--font-zine-mono); }
+[data-font="terminal"]  { --font-display: var(--font-terminal);  --font-mono: var(--font-terminal); }
+[data-font="rounded"]   { --font-display: var(--font-rounded);   --font-mono: var(--font-zine-mono); }
+[data-font="impact"]    { --font-display: var(--font-impact);    --font-mono: var(--font-zine-mono); }
+
 body {
   background-color: var(--paper);
   color: var(--ink);
@@ -243,6 +253,67 @@ body * {
   letter-spacing: 0.08em;
 }
 
+/* ---- CUSTOM (agent-generated) themes ------------------------------------ */
+/* Colors/shape come from inline vars set by lib/theme.ts; texture + mood are
+   derived here off those vars (color-mix) so any generated palette recolors. */
+[data-theme="custom"][data-bg="dots"] body {
+  background-image: radial-gradient(color-mix(in srgb, var(--ink) 10%, transparent) 1.4px, transparent 1.4px);
+  background-size: 22px 22px;
+  background-position: -11px -11px;
+}
+[data-theme="custom"][data-bg="grid"] body {
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--ink) 7%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--ink) 7%, transparent) 1px, transparent 1px);
+  background-size: 46px 46px, 46px 46px;
+}
+[data-theme="custom"][data-bg="gradient"] body {
+  background-image: linear-gradient(160deg, color-mix(in srgb, var(--accent) 16%, var(--paper)), var(--paper) 62%);
+}
+[data-theme="custom"][data-bg="solid"] body {
+  background-image: none;
+}
+[data-theme="custom"][data-bg="glow"] body::before {
+  content: "";
+  position: fixed;
+  inset: -25%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(38% 38% at 22% 18%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 62%),
+    radial-gradient(40% 40% at 82% 26%, color-mix(in srgb, var(--accent-2) 22%, transparent), transparent 62%),
+    radial-gradient(46% 46% at 50% 92%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 62%);
+  animation: aurora 22s ease-in-out infinite alternate;
+}
+
+/* Sleek mood reinterprets the shared blocks (mirrors [data-theme="cut"]). */
+[data-theme="custom"][data-mood="sleek"] .frame {
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+}
+[data-theme="custom"][data-mood="sleek"] .bg-accent {
+  background-image: linear-gradient(135deg, var(--accent), var(--accent-2));
+}
+[data-theme="custom"][data-mood="sleek"] .btn-press:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 30px -10px rgba(0, 0, 0, 0.7), 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent);
+  filter: brightness(1.05);
+}
+[data-theme="custom"][data-mood="sleek"] li.frame:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  box-shadow: var(--shadow-lg), 0 0 34px -6px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+/* Bold mood: hard offset press (mirrors [data-theme="rostrum"]). */
+[data-theme="custom"][data-mood="bold"] .btn-press:hover:not(:disabled) {
+  transform: translate(1px, 1px);
+  box-shadow: 3px 3px 0 0 var(--stroke);
+}
+[data-theme="custom"][data-mood="bold"] .btn-press:active:not(:disabled) {
+  transform: translate(4px, 4px);
+  box-shadow: 0 0 0 0 var(--stroke);
+}
+
 /* ---- Motion ------------------------------------------------------------- */
 @keyframes rise-in {
   from {
@@ -282,7 +353,8 @@ body * {
 @media (prefers-reduced-motion: reduce) {
   .reveal,
   .tab-panel,
-  [data-theme="cut"] body::before {
+  [data-theme="cut"] body::before,
+  [data-theme="custom"] body::before {
     opacity: 1;
     animation: none;
   }
