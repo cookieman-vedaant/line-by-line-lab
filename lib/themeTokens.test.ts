@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   CSS_VAR_KEYS,
+  PRESETS,
+  PRESET_ORDER,
   contrastRatio,
   ensureReadable,
   hexToRgb,
@@ -94,5 +96,19 @@ describe("themeToPayload", () => {
     expect(p.dataset).toEqual({ bg: "grid", mood: "sleek", font: "space" });
     expect(p.vars["--accent"]).toBe("#5ce0ff");
     expect(p.name).toBe("T");
+  });
+});
+
+describe("PRESETS", () => {
+  it("every preset is schema-valid and readable as authored", () => {
+    for (const id of PRESET_ORDER) {
+      const spec = PRESETS[id];
+      expect(themeSpecSchema.safeParse(spec).success).toBe(true);
+      expect(contrastRatio(spec.ink, spec.paper)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(spec.accent, spec.paper)).toBeGreaterThanOrEqual(3);
+      expect(contrastRatio(spec.paper2, spec.paper)).toBeGreaterThanOrEqual(1.06);
+      // Authored to already pass the guard — no auto-fix should be needed.
+      expect(ensureReadable(spec)).toEqual(spec);
+    }
   });
 });

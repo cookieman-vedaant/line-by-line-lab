@@ -154,3 +154,29 @@ export function themeToPayload(spec: ThemeSpec): AppliedTheme {
     vars: themeToCssVars(spec),
   };
 }
+
+// ---- Built-in presets -----------------------------------------------------
+// One-click themes (also the AI's few-shot vibe + a fallback when it's busy).
+// Each is authored to already clear the readability thresholds.
+
+export type PresetId = "pikachu" | "charizard" | "jojo";
+
+export const PRESETS: Record<PresetId, ThemeSpec> = {
+  pikachu: {
+    name: "Pikachu", paper: "#fffdf0", paper2: "#ffe98a", ink: "#241d05", stroke: "#241d05",
+    accent: "#d4351f", accent2: "#f7c700", warn: "#d4351f", highlight: "#ffe14d",
+    borderWidth: 3, radius: 6, mood: "bold", background: "dots", font: "rounded",
+  },
+  charizard: {
+    name: "Charizard", paper: "#17110d", paper2: "#2a1e16", ink: "#f7ede2", stroke: "#3a2a20",
+    accent: "#ff6a1f", accent2: "#ffb020", warn: "#ff4a2e", highlight: "#ffd27a",
+    borderWidth: 1, radius: 12, mood: "sleek", background: "glow", font: "impact",
+  },
+  jojo: {
+    name: "JoJo", paper: "#12101a", paper2: "#221a2e", ink: "#f3e9ff", stroke: "#3a2b4d",
+    accent: "#ff2e88", accent2: "#b06bff", warn: "#ff5470", highlight: "#ffd84d",
+    borderWidth: 2, radius: 4, mood: "sleek", background: "gradient", font: "impact",
+  },
+};
+
+export const PRESET_ORDER: PresetId[] = ["pikachu", "charizard", "jojo"];
