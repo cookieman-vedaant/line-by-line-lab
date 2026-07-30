@@ -40,9 +40,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
+    // suppressHydrationWarning: the pre-paint script below legitimately rewrites
+    // <html> attributes (theme, bg/mood/font, inline CSS vars) before React
+    // hydrates, so the attribute mismatch on this element is expected.
     <html
       lang="en"
       data-theme="rostrum"
+      suppressHydrationWarning
       className={`${fontVars} h-full antialiased`}
     >
       <head>
