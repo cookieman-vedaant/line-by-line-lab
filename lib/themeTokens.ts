@@ -69,3 +69,44 @@ export function contrastRatio(a: string, b: string): number {
   const [hi, lo] = la >= lb ? [la, lb] : [lb, la];
   return (hi + 0.05) / (lo + 0.05);
 }
+
+/** Nudge every channel of `hex` toward black (0) or white (255) by `pct` %. */
+function nudge(hex: string, toward: "black" | "white", pct: number): string {
+  const { r, g, b } = hexToRgb(hex);
+  const target = toward === "white" ? 255 : 0;
+  const f = pct / 100;
+  return rgbToHex({
+    r: r + (target - r) * f,
+    g: g + (target - g) * f,
+    b: b + (target - b) * f,
+  });
+}
+
+/** Push `color` away from `bg` until it clears `min` contrast (or we run out). */
+function pushForContrast(color: string, bg: string, min: number): string {
+  let out = color;
+  const toward = relativeLuminance(bg) > 0.5 ? "black" : "white";
+  for (let i = 0; i < 24 && contrastRatio(out, bg) < min; i++) {
+    out = nudge(out, toward, 8);
+  }
+  return out;
+}
+
+/**
+ * Guarantee a theme is usable no matter what the AI returned: body text clears
+ * WCAG AA on the page, the accent (which carries bold button/badge text) clears
+ * a solid ratio, and the surface is visibly distinct from the page. Deterministic
+ * and bounded; a spec that already passes is returned unchanged.
+ */
+export function ensureReadable(spec: ThemeSpec): ThemeSpec {
+  const out = { ...spec };
+  out.ink = pushForContrast(out.ink, out.paper, 4.5);
+  out.accent = pushForContrast(out.accent, out.paper, 3);
+  if (contrastRatio(out.paper2, out.paper) < 1.06) {
+    const toward = relativeLuminance(out.paper) > 0.5 ? "black" : "white";
+    for (let i = 0; i < 12 && contrastRatio(out.paper2, out.paper) < 1.06; i++) {
+      out.paper2 = nudge(out.paper2, toward, 4);
+    }
+  }
+  return out;
+}
