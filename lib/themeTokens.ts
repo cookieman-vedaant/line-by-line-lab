@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AppliedTheme, FontId, ThemeSpec } from "@/types";
+import type { AppliedTheme, ThemeSpec } from "@/types";
 
 /**
  * Pure token logic for the theme agent: the ThemeSpec schema, color/contrast
