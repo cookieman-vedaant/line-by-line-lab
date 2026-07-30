@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  CSS_VAR_KEYS,
   contrastRatio,
   ensureReadable,
   hexToRgb,
   relativeLuminance,
   themeSpecSchema,
+  themeToCssVars,
+  themeToPayload,
 } from "@/lib/themeTokens";
 
 describe("color helpers", () => {
@@ -57,5 +60,39 @@ describe("ensureReadable", () => {
   it("separates paper2 from paper when identical", () => {
     const fixed = ensureReadable({ ...base, paper2: "#ffffff" });
     expect(contrastRatio(fixed.paper2, fixed.paper)).toBeGreaterThanOrEqual(1.06);
+  });
+});
+
+const mapSpec = {
+  name: "T", paper: "#0b0b0b", paper2: "#161616", ink: "#eeeeee", stroke: "#333333",
+  accent: "#5ce0ff", accent2: "#7c86ff", warn: "#ff6b6b", highlight: "#ffd27a",
+  borderWidth: 1, radius: 14, mood: "sleek", background: "grid", font: "space",
+} as const;
+
+describe("themeToCssVars", () => {
+  it("maps colors and structure to CSS variables", () => {
+    const v = themeToCssVars(mapSpec);
+    expect(v["--paper"]).toBe("#0b0b0b");
+    expect(v["--paper-2"]).toBe("#161616");
+    expect(v["--red"]).toBe("#ff6b6b");
+    expect(v["--yellow"]).toBe("#ffd27a");
+    expect(v["--bw"]).toBe("1px");
+    expect(v["--radius"]).toBe("14px");
+    expect(v["--shadow"]).toContain("inset"); // sleek = soft glow shadow
+  });
+  it("bold mood uses a hard offset shadow", () => {
+    expect(themeToCssVars({ ...mapSpec, mood: "bold" })["--shadow"]).toContain("0 0 var(--stroke)");
+  });
+  it("CSS_VAR_KEYS lists exactly the keys produced", () => {
+    expect(new Set(Object.keys(themeToCssVars(mapSpec)))).toEqual(new Set(CSS_VAR_KEYS));
+  });
+});
+
+describe("themeToPayload", () => {
+  it("packages dataset + vars", () => {
+    const p = themeToPayload(mapSpec);
+    expect(p.dataset).toEqual({ bg: "grid", mood: "sleek", font: "space" });
+    expect(p.vars["--accent"]).toBe("#5ce0ff");
+    expect(p.name).toBe("T");
   });
 });

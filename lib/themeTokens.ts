@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { FontId, ThemeSpec } from "@/types";
+import type { AppliedTheme, FontId, ThemeSpec } from "@/types";
 
 /**
  * Pure token logic for the theme agent: the ThemeSpec schema, color/contrast
@@ -109,4 +109,48 @@ export function ensureReadable(spec: ThemeSpec): ThemeSpec {
     }
   }
   return out;
+}
+
+// ---- spec → CSS variables -------------------------------------------------
+
+const BOLD_SHADOWS = {
+  "--shadow": "5px 5px 0 0 var(--stroke)",
+  "--shadow-lg": "8px 8px 0 0 var(--stroke)",
+  "--shadow-btn": "4px 4px 0 0 var(--stroke)",
+} as const;
+
+const SLEEK_SHADOWS = {
+  "--shadow": "0 14px 40px -20px rgba(0,0,0,0.9), inset 0 1px 0 rgba(255,255,255,0.04)",
+  "--shadow-lg": "0 30px 70px -28px rgba(0,0,0,0.92), inset 0 1px 0 rgba(255,255,255,0.05)",
+  "--shadow-btn": "0 10px 26px -14px rgba(0,0,0,0.7)",
+} as const;
+
+/** The exact custom properties themeToCssVars sets (used to clear them on reset). */
+export const CSS_VAR_KEYS = [
+  "--paper", "--paper-2", "--ink", "--stroke", "--accent", "--accent-2",
+  "--red", "--yellow", "--bw", "--radius", "--shadow", "--shadow-lg", "--shadow-btn",
+] as const;
+
+export function themeToCssVars(spec: ThemeSpec): Record<string, string> {
+  return {
+    "--paper": spec.paper,
+    "--paper-2": spec.paper2,
+    "--ink": spec.ink,
+    "--stroke": spec.stroke,
+    "--accent": spec.accent,
+    "--accent-2": spec.accent2,
+    "--red": spec.warn,
+    "--yellow": spec.highlight,
+    "--bw": `${spec.borderWidth}px`,
+    "--radius": `${spec.radius}px`,
+    ...(spec.mood === "sleek" ? SLEEK_SHADOWS : BOLD_SHADOWS),
+  };
+}
+
+export function themeToPayload(spec: ThemeSpec): AppliedTheme {
+  return {
+    name: spec.name,
+    dataset: { bg: spec.background, mood: spec.mood, font: spec.font },
+    vars: themeToCssVars(spec),
+  };
 }
