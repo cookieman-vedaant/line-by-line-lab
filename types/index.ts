@@ -153,3 +153,47 @@ export interface AssistantResult {
   articles?: Article[];
   card?: Card;
 }
+
+// ---- Theme agent ---------------------------------------------------------
+
+/** Curated font pairs the theme agent can choose from (see app/globals.css). */
+export type FontId = "zine" | "space" | "editorial" | "terminal" | "rounded" | "impact";
+
+/** Background atmosphere styles a generated theme can use. */
+export type BackgroundStyle = "dots" | "grid" | "glow" | "gradient" | "solid";
+
+/** Visual language: hard-offset shadows (bold) vs soft glow (sleek). */
+export type ThemeMood = "bold" | "sleek";
+
+/**
+ * A validated theme token set produced by the theme agent or a built-in preset.
+ * Applied over the existing token system (see lib/themeTokens.ts) — so restyling
+ * the whole app is just swapping these values. Colors are #rrggbb hex.
+ */
+export interface ThemeSpec {
+  name: string;
+  paper: string;
+  paper2: string;
+  ink: string;
+  stroke: string;
+  accent: string;
+  accent2: string;
+  warn: string;
+  highlight: string;
+  borderWidth: number; // px, 1..4
+  radius: number; // px, 0..20
+  mood: ThemeMood;
+  background: BackgroundStyle;
+  font: FontId;
+}
+
+/**
+ * Precomputed application payload: what gets persisted and replayed by the
+ * pre-paint script (no theme-mapping logic is duplicated — the script just
+ * replays `vars` + `dataset`).
+ */
+export interface AppliedTheme {
+  name: string;
+  dataset: { bg: BackgroundStyle; mood: ThemeMood; font: FontId };
+  vars: Record<string, string>;
+}
