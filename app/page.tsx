@@ -1,5 +1,5 @@
 import EvidenceWorkbench from "@/components/EvidenceWorkbench";
-import ThemeSwitcher from "@/components/ThemeSwitcher";
+import ThemeStudio from "@/components/ThemeStudio";
 
 export default function Home() {
   return (
@@ -10,7 +10,7 @@ export default function Home() {
             <span className="inline-block h-2.5 w-2.5 rotate-45 bg-red" />
             debate evidence engine
           </p>
-          <ThemeSwitcher />
+          <ThemeStudio />
         </div>
 
         <h1 className="reveal reveal-2 mt-4 font-display text-6xl font-extrabold leading-[0.9] tracking-tight sm:text-8xl">

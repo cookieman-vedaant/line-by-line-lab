@@ -5,6 +5,7 @@ import type {
   Card,
   CutRequest,
   SearchParams,
+  ThemeSpec,
 } from "@/types";
 
 /** Browser-side helpers for the two API routes; normalize outcomes for the UI. */
@@ -105,6 +106,26 @@ export async function extractPdf(file: File): Promise<PdfOutcome> {
       return { ok: false, error: data.error ?? "Couldn't read that PDF. Try another file." };
     }
     return { ok: true, text: data.text, pages: data.pages, truncated: data.truncated };
+  } catch {
+    return { ok: false, error: "Could not reach the server. Is it running?" };
+  }
+}
+
+export type ThemeOutcome = { ok: true; spec: ThemeSpec } | { ok: false; error: string };
+
+/** Ask the theme agent to design a ThemeSpec from a short vibe. */
+export async function requestTheme(prompt: string): Promise<ThemeOutcome> {
+  try {
+    const res = await fetch("/api/theme", {
+      method: "POST",
+      headers: apiHeaders(),
+      body: JSON.stringify({ prompt }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.spec) {
+      return { ok: false, error: data.error ?? "Theme design failed. Try again." };
+    }
+    return { ok: true, spec: data.spec };
   } catch {
     return { ok: false, error: "Could not reach the server. Is it running?" };
   }
