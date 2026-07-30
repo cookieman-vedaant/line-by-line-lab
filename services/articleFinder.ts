@@ -1,23 +1,31 @@
 import { z } from "zod";
 import { TtlCache } from "@/lib/cache";
 import { RateLimitedError, generateJson } from "@/lib/gemini";
+import { filterReputable } from "@/lib/sourceFilter";
 import {
+  dedupeCandidates,
   searchAcademic,
   type CandidateArticle,
 } from "@/services/academicSearch";
 import { verifyAccessible } from "@/services/articleExtract";
+import { searchWeb } from "@/services/webSearch";
 import type { Article, SearchParams } from "@/types";
 
 // How many top-ranked candidates to fetch-verify, and how many to return.
 const VERIFY_LIMIT = 10;
 const RETURN_LIMIT = 8;
+// Cap open-web hits so they broaden the pool without crowding out the academic
+// depth a debater needs for warrants and Ks.
+const WEB_LIMIT = 12;
 
 /**
- * Fetch-check the top candidates in parallel and keep only those that yield
- * real readable full text — so every article shown is one the debater can
- * actually open and cut from. If NONE verify (rare with the open-access
- * filter), return the ranked list anyway so the search isn't empty; the
- * cutter's abstract fallback still lets them cut something.
+ * Fetch-check the top candidates in parallel and mark which yield real, readable
+ * full text (not paywalled/abstract-only). Return accessible ones FIRST — badged
+ * so the debater knows they can open and cut them — then top up with the
+ * remaining ranked candidates so the list is never near-empty. Every article is
+ * labeled `accessible` true/false so the UI and Coach can prefer the openable
+ * ones while still surfacing the full ranked set (the cutter's abstract fallback
+ * still lets a debater cut from a non-accessible pick).
  */
 async function verifyAndFilter(articles: Article[]): Promise<Article[]> {
   const head = articles.slice(0, VERIFY_LIMIT);
@@ -27,10 +35,12 @@ async function verifyAndFilter(articles: Article[]): Promise<Article[]> {
   const accessible = checked
     .filter((c) => c.ok)
     .map((c) => ({ ...c.article, accessible: true }));
+  const rest = checked
+    .filter((c) => !c.ok)
+    .map((c) => ({ ...c.article, accessible: false }));
 
-  if (accessible.length > 0) return accessible.slice(0, RETURN_LIMIT);
-
-  return articles.slice(0, RETURN_LIMIT).map((a) => ({ ...a, accessible: false }));
+  // Accessible first, then ranked-but-unverified to fill out the list.
+  return [...accessible, ...rest].slice(0, RETURN_LIMIT);
 }
 
 /** Honest failure — no reputable sources exist. Never fabricate one instead. */
@@ -55,9 +65,9 @@ const DEBATE_KNOWLEDGE = `You understand competitive debate (Lincoln-Douglas) na
 
 const EXPANDER_SYSTEM = `${DEBATE_KNOWLEDGE}
 
-You turn a debate claim into search queries for scholarly databases (OpenAlex, Semantic Scholar). Academic papers don't use debate phrasing — translate the claim into the underlying academic and policy concepts, shaped by the evidence type.
+You turn a debate claim into search queries used against BOTH scholarly databases (OpenAlex, Semantic Scholar) AND an open-web search engine (reputable news, think tanks, government and organization reports). Sources don't use debate phrasing — translate the claim into the underlying academic, policy, and news concepts, shaped by the evidence type.
 
-Return ONLY JSON: {"queries": ["...", "..."]} — 2 to 3 keyword-style queries (3-8 words each), no boolean operators, each attacking the claim from a different scholarly angle.`;
+Return ONLY JSON: {"queries": ["...", "..."]} — 2 to 3 keyword-style queries (3-8 words each), no boolean operators, each attacking the claim from a different angle. Order them best-first: the first query should be the single strongest, most direct phrasing (it's the one the web search prioritizes).`;
 
 const expanderSchema = z.object({
   queries: z.array(z.string().min(3)).min(1).max(4),
@@ -65,12 +75,13 @@ const expanderSchema = z.object({
 
 const RANKER_SYSTEM = `${DEBATE_KNOWLEDGE}
 
-You are the ranking stage of a debate evidence search engine. You receive a claim, an evidence type, and a numbered list of REAL articles retrieved from scholarly databases. Your job is to pick the articles a debater should actually read.
+You are the ranking stage of a debate evidence search engine. You receive a claim, an evidence type, and a numbered list of REAL articles retrieved from scholarly databases AND the open web (reputable news, think tanks, government and organization reports). Your job is to pick the articles a debater should actually read.
 
 Rules:
 - Select ONLY from the provided candidates, by their index number. Never invent an article.
-- Judge debate usefulness for THIS claim and THIS evidence type from each abstract — not just topical overlap. An article that argues the claim is better than one that merely mentions it.
-- Ranking factors in order: relevance to the exact claim, debate usefulness for the evidence type, publication credibility (peer-reviewed journals and university publications highest), author expertise, recency.
+- Judge debate usefulness for THIS claim and THIS evidence type from each abstract/snippet — not just topical overlap. An article that argues the claim is better than one that merely mentions it.
+- Both scholarly and reputable web sources are valid evidence. Peer-reviewed journals and university publications carry the most authority for deep warrants and Ks; reputable news, think tanks (e.g. Brookings, RAND, CFR), and government/organization reports are strong for uniqueness, recency, and real-world impacts. Judge each source's credibility on its merits — don't reflexively rank all academic above all web.
+- Ranking factors in order: relevance to the exact claim, debate usefulness for the evidence type, source credibility, author/institution expertise, recency.
 - Drop candidates that are clearly off-topic or that argue AGAINST the claim (unless nothing supports it — then return none).
 - ERR TOWARD INCLUSION: a debater can skim a marginal article, but can't read one you hid. Include partial or indirect support and note the limits in the explanation.
 - explanation: 1-2 concrete sentences on exactly what claim the article supports and why it's useful for this evidence type.
@@ -155,11 +166,14 @@ function searchCacheKey(p: SearchParams): string {
   ]);
 }
 
-export async function findArticles(params: SearchParams): Promise<Article[]> {
-  return searchCache.wrap(searchCacheKey(params), () => runSearch(params));
+export async function findArticles(
+  params: SearchParams,
+  clientKey?: string,
+): Promise<Article[]> {
+  return searchCache.wrap(searchCacheKey(params), () => runSearch(params, clientKey));
 }
 
-async function runSearch(params: SearchParams): Promise<Article[]> {
+async function runSearch(params: SearchParams, clientKey?: string): Promise<Article[]> {
   // 1. Debate-aware query expansion (Gemini, free tier). If it's unparseable
   //    OR the quota is hit, fall back to the raw claim — never fail the search
   //    over the (optional) expansion step.
@@ -177,8 +191,19 @@ async function runSearch(params: SearchParams): Promise<Article[]> {
     // Quota hit on expansion — proceed with the raw claim as the query.
   }
 
-  // 2. Retrieve real articles from the free scholarly databases.
-  const candidates = await searchAcademic(queries, params.publicationAge);
+  // 2. Retrieve real articles from BOTH the open web (Brave) and the free
+  //    scholarly databases, in parallel. Web brings news/think-tank breadth;
+  //    academic brings depth. Merge, drop non-citable domains (reddit, wikipedia,
+  //    social, etc.), then dedupe. Web is capped so it can't crowd out academic
+  //    depth. Either source failing degrades gracefully — as long as one returns
+  //    something, the search still works.
+  const [webHits, academicHits] = await Promise.all([
+    searchWeb(queries, clientKey),
+    searchAcademic(queries, params.publicationAge),
+  ]);
+  const candidates = filterReputable(
+    dedupeCandidates([...webHits.slice(0, WEB_LIMIT), ...academicHits]),
+  );
   if (candidates.length === 0) {
     throw new NoSourcesFoundError();
   }

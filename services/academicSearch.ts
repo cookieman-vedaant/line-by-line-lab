@@ -16,7 +16,7 @@ export interface CandidateArticle {
   url: string;
   abstract: string;
   citationCount: number;
-  source: "openalex" | "semanticscholar";
+  source: "openalex" | "semanticscholar" | "web";
 }
 
 const FETCH_TIMEOUT_MS = 10000;

@@ -1,4 +1,9 @@
-import { GoogleGenAI } from "@google/genai";
+import {
+  GoogleGenAI,
+  type Content,
+  type GenerateContentResponse,
+  type ToolListUnion,
+} from "@google/genai";
 import { extractJson } from "@/lib/json";
 
 // Free-tier friendly default; override with GEMINI_MODEL in .env.local.
@@ -112,6 +117,50 @@ export async function generateJson(opts: GenerateJsonOptions): Promise<unknown> 
         },
       });
       return extractJson(response.text ?? "");
+    } catch (err) {
+      if (!isTransient(err)) throw err;
+      if (attempt >= maxRetries) throw new RateLimitedError();
+      await sleep(RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)]);
+    }
+  }
+}
+
+interface GenerateContentRawOptions {
+  system: string;
+  /** Full multi-turn conversation (incl. function-response turns). */
+  contents: Content[];
+  /** Optional function-calling tools. */
+  tools?: ToolListUnion;
+  model?: string;
+  temperature?: number;
+  maxOutputTokens?: number;
+  retries?: number;
+}
+
+/**
+ * Lower-level Gemini call for the assistant/agent loop: sends the full `contents`
+ * (multi-turn + function-response turns) and optional tools, and returns the raw
+ * response so the caller can read `functionCalls` / `text`. Same transient-retry
+ * behavior as generateJson (thinking disabled to conserve free-tier tokens).
+ */
+export async function generateContentRaw(
+  opts: GenerateContentRawOptions,
+): Promise<GenerateContentResponse> {
+  const ai = getGemini();
+  const maxRetries = opts.retries ?? RETRY_DELAYS_MS.length;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await ai.models.generateContent({
+        model: opts.model ?? GEMINI_MODEL,
+        contents: opts.contents,
+        config: {
+          systemInstruction: opts.system,
+          temperature: opts.temperature ?? 0.3,
+          maxOutputTokens: opts.maxOutputTokens ?? 4096,
+          thinkingConfig: { thinkingBudget: 0 },
+          ...(opts.tools ? { tools: opts.tools } : {}),
+        },
+      });
     } catch (err) {
       if (!isTransient(err)) throw err;
       if (attempt >= maxRetries) throw new RateLimitedError();

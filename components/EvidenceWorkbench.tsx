@@ -4,6 +4,7 @@ import { useState } from "react";
 import ArticleResults from "@/components/ArticleResults";
 import CardCutterPanel from "@/components/CardCutterPanel";
 import CardView from "@/components/CardView";
+import CoachPanel from "@/components/CoachPanel";
 import SearchForm from "@/components/SearchForm";
 import { requestCut, requestSearch } from "@/lib/apiClient";
 import type { Article, Card, CardLength, SearchParams } from "@/types";
@@ -15,7 +16,7 @@ type SearchState =
   | { status: "empty"; notice: string }
   | { status: "error"; message: string };
 
-type Tab = "find" | "cut";
+type Tab = "find" | "cut" | "coach";
 
 export default function EvidenceWorkbench() {
   const [tab, setTab] = useState<Tab>("find");
@@ -87,10 +88,23 @@ export default function EvidenceWorkbench() {
 
   return (
     <div className="flex flex-col gap-8">
-      <nav aria-label="Tool" className="flex gap-3">
+      <nav aria-label="Tool" className="flex flex-wrap gap-3">
         {tabButton("find", "Find Articles")}
         {tabButton("cut", "Cut a Card")}
+        {tabButton("coach", "Coach")}
       </nav>
+
+      <div className={tab === "coach" ? "" : "hidden"}>
+        <div className="tab-panel">
+          <CoachPanel
+            context={
+              lastParams
+                ? { claim: lastParams.claim, evidenceType: lastParams.evidenceType }
+                : undefined
+            }
+          />
+        </div>
+      </div>
 
       {/* Both panels stay mounted (typed text survives a tab switch); the
           hidden one is display:none, so its content replays the tab-in

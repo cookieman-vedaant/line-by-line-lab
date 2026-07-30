@@ -1,5 +1,6 @@
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
+import { hasPaywallPhrase, hasStructuredPaywallSignal } from "@/lib/paywall";
 
 /** Honest failure — the article couldn't be fetched or parsed. */
 export class ArticleUnreadableError extends Error {
@@ -22,6 +23,13 @@ export interface ExtractedArticle {
 
 const FETCH_TIMEOUT_MS = 15000;
 const MIN_ARTICLE_CHARS = 400;
+// A page with a hard paywall marker but LESS than this much extracted text is a
+// locked teaser/abstract, not a readable article — reject it.
+const PAYWALL_TEASER_CHARS = 1500;
+// Bar for `verifyAccessible` to call a page "cuttable full text". Well above a
+// typical abstract (~1,000–1,800 chars) so abstract-only landing pages — the
+// Article Finder's old blind spot — stop being marked accessible.
+const MIN_ACCESSIBLE_CHARS = 2200;
 
 /**
  * Fetch a URL and extract clean article text with Mozilla Readability —
@@ -73,6 +81,21 @@ export async function extractArticleFromUrl(
     );
   }
 
+  // Paywall / abstract-only gate: a structured "locked/metered" signal is
+  // reliable on its own; a fuzzy paywall phrase only counts when the extracted
+  // body is short (a teaser behind a wall, not a full article that merely links
+  // "subscribe" somewhere). Either way, only a teaser is free — reject it so we
+  // never cut a thin, warrant-less card from it.
+  const bodyChars = parsed.textContent.trim().length;
+  if (
+    hasStructuredPaywallSignal(html) ||
+    (bodyChars < PAYWALL_TEASER_CHARS && hasPaywallPhrase(html))
+  ) {
+    throw new ArticleUnreadableError(
+      "This article is behind a paywall — only a teaser or abstract is free to read. Try pasting the full text instead.",
+    );
+  }
+
   const text = htmlToParagraphText(parsed.content ?? "", parsed.textContent);
 
   return {
@@ -100,7 +123,9 @@ export async function verifyAccessible(
   try {
     const article = await extractArticleFromUrl(url, timeoutMs);
     const chars = article.text.trim().length;
-    return { ok: chars >= MIN_ARTICLE_CHARS, chars };
+    // "Accessible" means genuinely cuttable full text — not just an abstract.
+    // extractArticleFromUrl already rejected paywalled/teaser pages by throwing.
+    return { ok: chars >= MIN_ACCESSIBLE_CHARS, chars };
   } catch {
     return { ok: false, chars: 0 };
   }

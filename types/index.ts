@@ -119,3 +119,31 @@ export interface CutRequest {
   claim: string;
   cardLength: CardLength;
 }
+
+/** One turn in the Coach conversation (the assistant feature). */
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/** Optional context so the Coach knows what the debater is working on. */
+export interface AssistantContext {
+  evidenceType?: EvidenceType;
+  claim?: string;
+}
+
+/** What `/api/assistant` accepts: the running conversation + optional context. */
+export interface AssistantRequest {
+  messages: ChatMessage[];
+  context?: AssistantContext;
+}
+
+/**
+ * What `/api/assistant` returns: the Coach's reply, plus any artifacts produced
+ * this turn (articles it found / a card it cut) for the client to render richly.
+ */
+export interface AssistantResult {
+  reply: string;
+  articles?: Article[];
+  card?: Card;
+}

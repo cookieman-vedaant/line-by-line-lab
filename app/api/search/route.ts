@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { MissingApiKeyError, RateLimitedError } from "@/lib/gemini";
+import { clientKeyFromRequest } from "@/lib/requestClient";
 import { NoSourcesFoundError, findArticles } from "@/services/articleFinder";
 import { CARD_LENGTHS, EVIDENCE_TYPES, PUBLICATION_AGES, SOURCE_TYPES } from "@/types";
 
@@ -40,7 +41,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const articles = await findArticles(parsed.data);
+    const articles = await findArticles(parsed.data, clientKeyFromRequest(req));
     return NextResponse.json({ articles });
   } catch (err) {
     // An honest empty result, not a server failure.
