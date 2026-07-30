@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { TtlCache } from "@/lib/cache";
 import { RateLimitedError, generateJson } from "@/lib/gemini";
+import { createSharedCache } from "@/lib/sharedCache";
 import { filterReputable } from "@/lib/sourceFilter";
 import {
   dedupeCandidates,
@@ -63,15 +63,31 @@ const DEBATE_KNOWLEDGE = `You understand competitive debate (Lincoln-Douglas) na
 - The evidence type changes what makes a source useful. A "Link" needs causal connection between actions and outcomes. An "Impact" needs magnitude/probability of harm. "Uniqueness" needs status-quo trend evidence. "Solvency" needs evidence a mechanism works. "Framework" needs normative/philosophical grounding. A "K Link" needs critical-theory engagement with the claim's assumptions.
 - Structures: tags, warrants, extensions, overviews. Argument types: disadvantages, counterplans, kritiks, theory, framework. Reasoning: turns, offense, defense, weighing.`;
 
-const EXPANDER_SYSTEM = `${DEBATE_KNOWLEDGE}
+// Debate-specific jargon that hurts scholarly/web search — stripped to make a
+// cleaner second query. The raw claim is always query #1.
+const DEBATE_JARGON =
+  /\b(the aff|the neg|aff|neg|plan|cp|counterplan|the resolution|resolved|solvency|uniqueness|the link|impact card|turn|perm|the k|kritik|framework|fiat|status quo|squo)\b/gi;
 
-You turn a debate claim into search queries used against BOTH scholarly databases (OpenAlex, Semantic Scholar) AND an open-web search engine (reputable news, think tanks, government and organization reports). Sources don't use debate phrasing — translate the claim into the underlying academic, policy, and news concepts, shaped by the evidence type.
-
-Return ONLY JSON: {"queries": ["...", "..."]} — 2 to 3 keyword-style queries (3-8 words each), no boolean operators, each attacking the claim from a different angle. Order them best-first: the first query should be the single strongest, most direct phrasing (it's the one the web search prioritizes).`;
-
-const expanderSchema = z.object({
-  queries: z.array(z.string().min(3)).min(1).max(4),
-});
+/**
+ * Build search queries WITHOUT an AI call: the raw claim, plus a jargon-stripped
+ * variant when it differs. This replaces the old Gemini query-expander — halving
+ * a search's AI calls (2→1) so the quota is spent on the quality-critical
+ * ranking step. OpenAlex / Semantic Scholar / the web engine all match natural
+ * language, so the raw claim is a fine primary query.
+ */
+export function heuristicQueries(claim: string): string[] {
+  const raw = claim.trim();
+  const cleaned = raw
+    .replace(DEBATE_JARGON, " ")
+    .replace(/[^\w\s-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const queries = [raw];
+  if (cleaned && cleaned.toLowerCase() !== raw.toLowerCase() && cleaned.split(" ").length >= 3) {
+    queries.push(cleaned);
+  }
+  return queries;
+}
 
 const RANKER_SYSTEM = `${DEBATE_KNOWLEDGE}
 
@@ -155,7 +171,11 @@ function heuristicRanking(candidates: CandidateArticle[]): Article[] {
 }
 
 // Repeat searches (same params) reuse the result for 30 min — zero AI cost.
-const searchCache = new TtlCache<Article[]>(30 * 60 * 1000);
+// Shared across instances/users via Redis when configured (in-memory otherwise).
+const searchCache = createSharedCache<Article[]>({
+  ttlMs: 30 * 60 * 1000,
+  namespace: "search",
+});
 
 function searchCacheKey(p: SearchParams): string {
   return JSON.stringify([
@@ -174,22 +194,8 @@ export async function findArticles(
 }
 
 async function runSearch(params: SearchParams, clientKey?: string): Promise<Article[]> {
-  // 1. Debate-aware query expansion (Gemini, free tier). If it's unparseable
-  //    OR the quota is hit, fall back to the raw claim — never fail the search
-  //    over the (optional) expansion step.
-  let queries: string[] = [params.claim];
-  try {
-    const expansionRaw = await generateJson({
-      system: EXPANDER_SYSTEM,
-      prompt: `Evidence type: ${params.evidenceType}\nClaim: ${params.claim}`,
-      maxOutputTokens: 1024,
-    });
-    const expansion = expanderSchema.safeParse(expansionRaw);
-    if (expansion.success) queries = expansion.data.queries;
-  } catch (err) {
-    if (!(err instanceof RateLimitedError)) throw err;
-    // Quota hit on expansion — proceed with the raw claim as the query.
-  }
+  // 1. Build search queries with NO AI call (see heuristicQueries).
+  const queries = heuristicQueries(params.claim);
 
   // 2. Retrieve real articles from BOTH the open web (Brave) and the free
   //    scholarly databases, in parallel. Web brings news/think-tank breadth;

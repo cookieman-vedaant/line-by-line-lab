@@ -2,8 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import CardView from "@/components/CardView";
-import { requestAssistant } from "@/lib/apiClient";
+import { extractPdf, requestAssistant } from "@/lib/apiClient";
 import type { Article, AssistantContext, Card } from "@/types";
+
+interface UploadedDoc {
+  name: string;
+  text: string;
+  pages: number;
+  truncated: boolean;
+}
 
 interface Turn {
   role: "user" | "assistant";
@@ -29,7 +36,10 @@ export default function CoachPanel({ context }: CoachPanelProps) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [doc, setDoc] = useState<UploadedDoc | null>(null);
+  const [docBusy, setDocBusy] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -44,9 +54,12 @@ export default function CoachPanel({ context }: CoachPanelProps) {
     setInput("");
     setBusy(true);
 
+    const mergedContext: AssistantContext | undefined =
+      context || doc ? { ...context, ...(doc ? { document: doc.text } : {}) } : undefined;
+
     const outcome = await requestAssistant({
       messages: nextTurns.map((t) => ({ role: t.role, content: t.content })),
-      context,
+      context: mergedContext,
     });
     setBusy(false);
 
@@ -77,6 +90,21 @@ export default function CoachPanel({ context }: CoachPanelProps) {
     }
   }
 
+  async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-picking the same file later
+    if (!file || docBusy) return;
+    setError(null);
+    setDocBusy(true);
+    const outcome = await extractPdf(file);
+    setDocBusy(false);
+    if (!outcome.ok) {
+      setError(outcome.error);
+      return;
+    }
+    setDoc({ name: file.name, text: outcome.text, pages: outcome.pages, truncated: outcome.truncated });
+  }
+
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-4">
@@ -87,8 +115,10 @@ export default function CoachPanel({ context }: CoachPanelProps) {
             </p>
             <p className="mt-2 text-sm font-medium leading-relaxed text-ink/80">
               Ask me anything — brainstorm arguments, build a link chain, structure a case or
-              block, plan strategy, or find real evidence and cut a card. I&apos;ll coach you
-              through it; I won&apos;t write your case for you or make up sources.
+              block, plan strategy, or find real evidence and cut a card. Or{" "}
+              <span className="text-accent">upload your case as a PDF</span> and I&apos;ll give
+              you feedback on your own arguments. I&apos;ll coach you and push you to improve — I
+              won&apos;t write your case for you or make up sources.
             </p>
             <div className="mt-4 flex flex-col gap-2">
               {STARTERS.map((s) => (
@@ -171,23 +201,60 @@ export default function CoachPanel({ context }: CoachPanelProps) {
         <div ref={endRef} />
       </div>
 
-      <form onSubmit={onSubmit} className="sticky bottom-0 flex items-end gap-2 bg-paper pt-2">
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={onKeyDown}
-          rows={2}
-          placeholder="Ask the coach to find an article or cut a card…"
-          className="w-full frame resize-y bg-paper-2 px-3 py-2.5 text-sm font-medium text-ink
-            placeholder:text-ink/40 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/35"
+      <form onSubmit={onSubmit} className="sticky bottom-0 flex flex-col gap-2 bg-paper pt-2">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/pdf,.pdf"
+          onChange={onPickFile}
+          className="hidden"
         />
-        <button
-          type="submit"
-          disabled={busy || !input.trim()}
-          className="btn-press frame bg-accent px-5 py-3 font-display text-sm font-bold uppercase tracking-wide text-paper"
-        >
-          {busy ? "…" : "Send"}
-        </button>
+        <div className="flex items-center gap-2">
+          {doc ? (
+            <span className="frame flex items-center gap-2 bg-paper-2 px-2.5 py-1 text-xs font-medium text-ink">
+              📄 {doc.name} · {doc.pages}p{doc.truncated ? " · trimmed" : ""}
+              <button
+                type="button"
+                onClick={() => setDoc(null)}
+                aria-label="Remove uploaded PDF"
+                className="font-bold text-ink/50 hover:text-accent"
+              >
+                ✕
+              </button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={docBusy}
+              className="btn-press frame bg-paper-2 px-2.5 py-1 text-xs font-bold text-ink hover:text-accent disabled:opacity-60"
+            >
+              {docBusy ? "▸ reading PDF…" : "📎 Upload your case (PDF)"}
+            </button>
+          )}
+        </div>
+        <div className="flex items-end gap-2">
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={onKeyDown}
+            rows={2}
+            placeholder={
+              doc
+                ? "Ask for feedback on your case — or anything else…"
+                : "Ask your coach anything — or upload your case for feedback…"
+            }
+            className="w-full frame resize-y bg-paper-2 px-3 py-2.5 text-sm font-medium text-ink
+              placeholder:text-ink/40 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/35"
+          />
+          <button
+            type="submit"
+            disabled={busy || !input.trim()}
+            className="btn-press frame bg-accent px-5 py-3 font-display text-sm font-bold uppercase tracking-wide text-paper"
+          >
+            {busy ? "…" : "Send"}
+          </button>
+        </div>
       </form>
     </div>
   );

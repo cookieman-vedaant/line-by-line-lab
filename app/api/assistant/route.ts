@@ -22,6 +22,9 @@ const requestSchema = z.object({
     .object({
       evidenceType: z.enum(EVIDENCE_TYPES).optional(),
       claim: z.string().max(1000).optional(),
+      // Headroom above the /api/pdf extract cap (200k) so a full-file upload is
+      // never rejected here; the assistant service does the final bounding.
+      document: z.string().max(210000).optional(),
     })
     .optional(),
 });

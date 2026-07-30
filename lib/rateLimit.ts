@@ -1,3 +1,5 @@
+import { getRedis } from "@/lib/redis";
+
 /**
  * Best-effort rate limiter that protects the free Tavily web-search budget.
  *
@@ -75,17 +77,58 @@ function numEnv(value: string | undefined, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
 }
 
-// App-wide singleton. Limits are env-tunable without a code change.
-const limiter = createWebSearchLimiter({
-  dailyLimit: numEnv(process.env.WEB_SEARCH_DAILY_LIMIT, DEFAULT_DAILY_LIMIT),
-  monthlyLimit: numEnv(process.env.WEB_SEARCH_MONTHLY_LIMIT, DEFAULT_MONTHLY_LIMIT),
-});
+const DAILY_LIMIT = numEnv(process.env.WEB_SEARCH_DAILY_LIMIT, DEFAULT_DAILY_LIMIT);
+const MONTHLY_LIMIT = numEnv(process.env.WEB_SEARCH_MONTHLY_LIMIT, DEFAULT_MONTHLY_LIMIT);
+
+// App-wide IN-MEMORY singleton (per instance) — the fallback when Redis is off.
+const limiter = createWebSearchLimiter({ dailyLimit: DAILY_LIMIT, monthlyLimit: MONTHLY_LIMIT });
 
 /**
- * Consume one web-search unit for `clientKey`. Returns false when the client's
- * daily cap or the global monthly cap is reached — the caller then serves
- * academic-only results instead of hitting the paid-quota web search.
+ * Consume one web-search unit for `clientKey`, IN-MEMORY (per instance). false =
+ * over the client's daily cap or the global monthly cap → serve academic-only.
+ * Prefer consumeWebSearchShared for the durable, cross-instance version.
  */
 export function consumeWebSearch(clientKey: string): boolean {
   return limiter.consume(clientKey);
+}
+
+/**
+ * Durable, CROSS-INSTANCE limiter backed by Redis. Same daily + monthly caps,
+ * but the counters live in Redis so they survive cold starts and are shared
+ * across serverless instances — a real budget guarantee, not a soft one. Falls
+ * back to the in-memory limiter when Redis isn't configured or errors.
+ */
+export async function consumeWebSearchShared(
+  clientKey: string,
+  now: Date = new Date(),
+): Promise<boolean> {
+  const redis = getRedis();
+  if (!redis) return consumeWebSearch(clientKey);
+
+  const day = now.toISOString().slice(0, 10);
+  const month = now.toISOString().slice(0, 7);
+  const dailyKey = `web:daily:${day}:${clientKey}`;
+  const monthlyKey = `web:monthly:${month}`;
+
+  try {
+    // Global monthly backstop first.
+    const monthlyCount = await redis.incr(monthlyKey);
+    if (monthlyCount === 1) await redis.expire(monthlyKey, 60 * 60 * 24 * 32);
+    if (monthlyCount > MONTHLY_LIMIT) {
+      await redis.decr(monthlyKey); // over budget — don't actually consume
+      return false;
+    }
+    // Per-client daily cap.
+    const dailyCount = await redis.incr(dailyKey);
+    if (dailyCount === 1) await redis.expire(dailyKey, 60 * 60 * 26);
+    if (dailyCount > DAILY_LIMIT) {
+      await redis.decr(dailyKey);
+      await redis.decr(monthlyKey); // roll back the monthly unit we reserved
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn("web limiter (redis) failed; using in-memory fallback", String(err));
+    return consumeWebSearch(clientKey);
+  }
 }

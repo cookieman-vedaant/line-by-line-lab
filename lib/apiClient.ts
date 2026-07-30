@@ -89,6 +89,27 @@ export async function requestAssistant(req: AssistantRequest): Promise<Assistant
   }
 }
 
+export type PdfOutcome =
+  | { ok: true; text: string; pages: number; truncated: boolean }
+  | { ok: false; error: string };
+
+/** Upload a PDF for server-side text extraction (the Coach's "scan my case"). */
+export async function extractPdf(file: File): Promise<PdfOutcome> {
+  try {
+    const form = new FormData();
+    form.append("file", file);
+    // No Content-Type header — the browser sets the multipart boundary itself.
+    const res = await fetch("/api/pdf", { method: "POST", body: form });
+    const data = await res.json();
+    if (!res.ok) {
+      return { ok: false, error: data.error ?? "Couldn't read that PDF. Try another file." };
+    }
+    return { ok: true, text: data.text, pages: data.pages, truncated: data.truncated };
+  } catch {
+    return { ok: false, error: "Could not reach the server. Is it running?" };
+  }
+}
+
 export type CutOutcome = { ok: true; card: Card } | { ok: false; error: string };
 
 export async function requestCut(req: CutRequest): Promise<CutOutcome> {

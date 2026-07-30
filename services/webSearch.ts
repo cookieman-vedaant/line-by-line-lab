@@ -1,4 +1,4 @@
-import { consumeWebSearch } from "@/lib/rateLimit";
+import { consumeWebSearchShared } from "@/lib/rateLimit";
 import { type CandidateArticle } from "@/services/academicSearch";
 
 /**
@@ -106,7 +106,7 @@ export async function searchWeb(
   const key = process.env.TAVILY_API_KEY;
   if (!key) return []; // not configured → open-web tier is simply off
 
-  if (clientKey && !consumeWebSearch(clientKey)) {
+  if (clientKey && !(await consumeWebSearchShared(clientKey))) {
     console.info(`webSearch: "${clientKey}" over web-search cap → academic-only`);
     return [];
   }

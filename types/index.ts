@@ -130,6 +130,12 @@ export interface ChatMessage {
 export interface AssistantContext {
   evidenceType?: EvidenceType;
   claim?: string;
+  /**
+   * Text extracted from a PDF the debater uploaded (their own case/block/card).
+   * The Coach critiques THIS as the debater's own work — never as a source to
+   * quote. Extracted in the browser; the server only ever sees the text.
+   */
+  document?: string;
 }
 
 /** What `/api/assistant` accepts: the running conversation + optional context. */

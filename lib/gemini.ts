@@ -4,6 +4,7 @@ import {
   type GenerateContentResponse,
   type ToolListUnion,
 } from "@google/genai";
+import { throttleGemini } from "@/lib/geminiThrottle";
 import { extractJson } from "@/lib/json";
 
 // Free-tier friendly default; override with GEMINI_MODEL in .env.local.
@@ -30,6 +31,46 @@ export const GEMINI_MARKER_MODEL =
 const RETRY_DELAYS_MS = [3000, 7000];
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Add jitter so many clients retrying after a shared 429 don't thunder-herd.
+const withJitter = (ms: number): number => ms + Math.floor(Math.random() * 1000);
+
+// In-process concurrency gate: cap simultaneous Gemini calls PER INSTANCE so a
+// burst of users can't fire a dozen requests at once (which 429s the shared
+// free key). Overflow waits for a slot; the slot is released during retry
+// backoff so waiters get a turn. Env-tunable. (Cross-instance smoothing is the
+// Redis throttle in Tier 2.)
+const MAX_CONCURRENCY = (() => {
+  const n = Number(process.env.GEMINI_MAX_CONCURRENCY);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 4;
+})();
+
+let activeCalls = 0;
+const slotQueue: Array<() => void> = [];
+
+function acquireSlot(): Promise<void> {
+  if (activeCalls < MAX_CONCURRENCY) {
+    activeCalls += 1;
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => slotQueue.push(resolve));
+}
+
+function releaseSlot(): void {
+  const next = slotQueue.shift();
+  if (next) next(); // hand the slot straight to a waiter — active count unchanged
+  else activeCalls -= 1;
+}
+
+/** Run one Gemini API call while holding a concurrency slot. */
+async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
+  await acquireSlot();
+  try {
+    return await fn();
+  } finally {
+    releaseSlot();
+  }
+}
 
 /**
  * Transient model errors worth retrying: rate limits (429), and — critically —
@@ -101,26 +142,29 @@ export async function generateJson(opts: GenerateJsonOptions): Promise<unknown> 
   // fail immediately.
   for (let attempt = 0; ; attempt++) {
     try {
-      const response = await ai.models.generateContent({
-        model: opts.model ?? GEMINI_MODEL,
-        contents: opts.prompt,
-        config: {
-          systemInstruction: opts.system,
-          responseMimeType: "application/json",
-          temperature: 0.2,
-          maxOutputTokens: opts.maxOutputTokens ?? 8192,
-          // Our calls are structured extraction/selection, not open reasoning.
-          // Disabling thinking keeps the whole token budget for the JSON answer
-          // (2.5 models otherwise spend it thinking and truncate output), and
-          // uses fewer tokens per call — easing free-tier rate limits.
-          thinkingConfig: { thinkingBudget: 0 },
-        },
-      });
+      await throttleGemini();
+      const response = await withSlot(() =>
+        ai.models.generateContent({
+          model: opts.model ?? GEMINI_MODEL,
+          contents: opts.prompt,
+          config: {
+            systemInstruction: opts.system,
+            responseMimeType: "application/json",
+            temperature: 0.2,
+            maxOutputTokens: opts.maxOutputTokens ?? 8192,
+            // Our calls are structured extraction/selection, not open reasoning.
+            // Disabling thinking keeps the whole token budget for the JSON answer
+            // (2.5 models otherwise spend it thinking and truncate output), and
+            // uses fewer tokens per call — easing free-tier rate limits.
+            thinkingConfig: { thinkingBudget: 0 },
+          },
+        }),
+      );
       return extractJson(response.text ?? "");
     } catch (err) {
       if (!isTransient(err)) throw err;
       if (attempt >= maxRetries) throw new RateLimitedError();
-      await sleep(RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)]);
+      await sleep(withJitter(RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)]));
     }
   }
 }
@@ -150,21 +194,24 @@ export async function generateContentRaw(
   const maxRetries = opts.retries ?? RETRY_DELAYS_MS.length;
   for (let attempt = 0; ; attempt++) {
     try {
-      return await ai.models.generateContent({
-        model: opts.model ?? GEMINI_MODEL,
-        contents: opts.contents,
-        config: {
-          systemInstruction: opts.system,
-          temperature: opts.temperature ?? 0.3,
-          maxOutputTokens: opts.maxOutputTokens ?? 4096,
-          thinkingConfig: { thinkingBudget: 0 },
-          ...(opts.tools ? { tools: opts.tools } : {}),
-        },
-      });
+      await throttleGemini();
+      return await withSlot(() =>
+        ai.models.generateContent({
+          model: opts.model ?? GEMINI_MODEL,
+          contents: opts.contents,
+          config: {
+            systemInstruction: opts.system,
+            temperature: opts.temperature ?? 0.3,
+            maxOutputTokens: opts.maxOutputTokens ?? 4096,
+            thinkingConfig: { thinkingBudget: 0 },
+            ...(opts.tools ? { tools: opts.tools } : {}),
+          },
+        }),
+      );
     } catch (err) {
       if (!isTransient(err)) throw err;
       if (attempt >= maxRetries) throw new RateLimitedError();
-      await sleep(RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)]);
+      await sleep(withJitter(RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)]));
     }
   }
 }

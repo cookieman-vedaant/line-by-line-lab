@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { TtlCache } from "@/lib/cache";
 import { tagMarkupToDelimiters } from "@/lib/cardMarkup";
 import { applyEmphasis } from "@/lib/emphasis";
 import { GEMINI_MARKER_MODEL, GEMINI_MODEL, RateLimitedError, generateJson } from "@/lib/gemini";
+import { createSharedCache } from "@/lib/sharedCache";
 import {
   ArticleUnreadableError,
   extractArticleFromUrl,
@@ -257,8 +257,9 @@ async function selectPassage(
 }
 
 // Re-cutting the same source at the same length/claim (common while iterating)
-// reuses the card for 30 min — zero AI cost.
-const cutCache = new TtlCache<Card>(30 * 60 * 1000, 30);
+// reuses the card for 30 min — zero AI cost. Shared across instances/users via
+// Redis when configured (in-memory otherwise).
+const cutCache = createSharedCache<Card>({ ttlMs: 30 * 60 * 1000, namespace: "cut", maxLocal: 30 });
 
 /** Stable, compact key for a cut request (hashes long pasted text). */
 function cutCacheKey(req: CutRequest): string {
