@@ -36,7 +36,14 @@ export default function AuthForm({ next }: { next?: string }) {
     const dest = next && next.startsWith("/") ? next : "/lab";
 
     if (mode === "signup") {
-      const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        // Send the confirmation link back to THIS origin's callback (prod when
+        // signing up on prod). Requires the origin to be in Supabase's allowed
+        // Redirect URLs; otherwise Supabase falls back to the Site URL.
+        options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=%2Flab` },
+      });
       setBusy(false);
       if (error) return setError(error.message);
       if (!data.session) {

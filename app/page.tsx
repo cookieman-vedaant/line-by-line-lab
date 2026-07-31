@@ -23,10 +23,11 @@ const FEATURES: [string, string, string][] = [
 export default async function Landing({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string | string[] }>;
+  searchParams: Promise<{ next?: string | string[]; error?: string | string[] }>;
 }) {
   const params = await searchParams;
   const next = typeof params.next === "string" ? params.next : undefined;
+  const error = typeof params.error === "string" ? params.error : undefined;
 
   const supabase = await createSupabaseServerClient();
   const {
@@ -79,7 +80,14 @@ export default async function Landing({
             </Link>
           </div>
         ) : (
-          <AuthForm next={next} />
+          <div className="flex flex-col gap-3">
+            {error && (
+              <p role="alert" className="frame w-full max-w-sm bg-red px-3 py-2 text-xs font-semibold text-white">
+                {error}
+              </p>
+            )}
+            <AuthForm next={next} />
+          </div>
         )}
       </div>
 
