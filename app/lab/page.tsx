@@ -1,5 +1,6 @@
 import Link from "next/link";
 import EvidenceWorkbench from "@/components/EvidenceWorkbench";
+import HumanGate from "@/components/HumanGate";
 import ThemeStudio from "@/components/ThemeStudio";
 
 // The app itself (Find Articles / Cut a Card / Coach). Reached from the landing
@@ -48,7 +49,11 @@ export default function Lab() {
       </header>
 
       <div className="reveal reveal-4">
-        <EvidenceWorkbench />
+        {/* Human gate (Turnstile). Off unless a site key is configured; when on,
+            the workbench (and its API calls) unlock only after the check. */}
+        <HumanGate>
+          <EvidenceWorkbench />
+        </HumanGate>
       </div>
     </main>
   );

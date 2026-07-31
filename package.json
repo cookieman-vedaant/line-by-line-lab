@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@google/genai": "^2.10.0",
+    "@marsidev/react-turnstile": "^1.5.4",
     "@mozilla/readability": "^0.6.0",
     "@upstash/redis": "^1.38.0",
     "botid": "^1.5.11",

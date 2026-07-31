@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { rateLimitShared } from "@/lib/apiRateLimit";
+import { requestIsVerifiedHuman } from "@/lib/turnstile";
 
 /**
  * The single front door every public API route calls before doing real work.
@@ -69,6 +70,12 @@ export interface GuardOptions {
   bodyLimitBytes?: number;
   /** Count this request toward the global daily AI ceiling (default true). */
   countGlobal?: boolean;
+  /**
+   * Require a valid "human" cookie (Turnstile gate). Default true. Set false on
+   * the route that ISSUES the cookie (/api/verify-human). No-op when the gate is
+   * off (no TURNSTILE_SECRET_KEY).
+   */
+  requireHuman?: boolean;
 }
 
 function block(status: number, error: string): NextResponse {
@@ -85,6 +92,15 @@ function block(status: number, error: string): NextResponse {
 export async function guardApi(req: Request, opts: GuardOptions): Promise<NextResponse | null> {
   if (!sameOriginOk(req)) {
     return block(403, "This request looks cross-site. Refresh the page and try again.");
+  }
+
+  // Human gate (Turnstile). No-op when the gate is off; when on, a valid signed
+  // cookie is required — bots can't get one, so they're blocked here cheaply.
+  if (opts.requireHuman !== false && !requestIsVerifiedHuman(req)) {
+    return block(
+      403,
+      "Please verify you're human — reload the page and complete the quick check, then try again.",
+    );
   }
 
   if (bodyTooLarge(req, opts.bodyLimitBytes ?? DEFAULT_BODY_LIMIT)) {

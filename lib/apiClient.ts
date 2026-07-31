@@ -157,6 +157,26 @@ export async function requestProfile(rounds: Round[]): Promise<ProfileOutcome> {
   }
 }
 
+export type VerifyHumanOutcome = { ok: true; ttlMs: number } | { ok: false; error: string };
+
+/** Send a solved Turnstile token; on success the server sets the human cookie. */
+export async function verifyHuman(token: string): Promise<VerifyHumanOutcome> {
+  try {
+    const res = await fetch("/api/verify-human", {
+      method: "POST",
+      headers: apiHeaders(),
+      body: JSON.stringify({ token }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      return { ok: false, error: data.error ?? "Verification failed. Try again." };
+    }
+    return { ok: true, ttlMs: data.ttlMs ?? 2 * 60 * 60 * 1000 };
+  } catch {
+    return { ok: false, error: "Could not reach the server. Is it running?" };
+  }
+}
+
 export type CutOutcome = { ok: true; card: Card } | { ok: false; error: string };
 
 export async function requestCut(req: CutRequest): Promise<CutOutcome> {
