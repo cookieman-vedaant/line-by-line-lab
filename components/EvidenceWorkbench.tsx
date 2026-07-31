@@ -5,6 +5,7 @@ import ArticleResults from "@/components/ArticleResults";
 import CardCutterPanel from "@/components/CardCutterPanel";
 import CardView from "@/components/CardView";
 import CoachPanel from "@/components/CoachPanel";
+import RoundLogPanel from "@/components/RoundLogPanel";
 import SearchForm from "@/components/SearchForm";
 import { requestCut, requestSearch } from "@/lib/apiClient";
 import type { Article, Card, CardLength, SearchParams } from "@/types";
@@ -16,7 +17,7 @@ type SearchState =
   | { status: "empty"; notice: string }
   | { status: "error"; message: string };
 
-type Tab = "find" | "cut" | "coach";
+type Tab = "find" | "cut" | "coach" | "record";
 
 export default function EvidenceWorkbench() {
   const [tab, setTab] = useState<Tab>("find");
@@ -92,7 +93,14 @@ export default function EvidenceWorkbench() {
         {tabButton("find", "Find Articles")}
         {tabButton("cut", "Cut a Card")}
         {tabButton("coach", "Coach")}
+        {tabButton("record", "Record")}
       </nav>
+
+      <div className={tab === "record" ? "" : "hidden"}>
+        <div className="tab-panel">
+          <RoundLogPanel />
+        </div>
+      </div>
 
       <div className={tab === "coach" ? "" : "hidden"}>
         <div className="tab-panel">

@@ -197,3 +197,41 @@ export interface AppliedTheme {
   dataset: { bg: BackgroundStyle; mood: ThemeMood; font: FontId };
   vars: Record<string, string>;
 }
+
+// ---- Round Log (personal performance tracker) ----------------------------
+
+/** Which side the debater was on in a round. */
+export const ROUND_SIDES = ["Aff", "Neg"] as const;
+export type RoundSide = (typeof ROUND_SIDES)[number];
+
+/** Round outcome. */
+export const ROUND_RESULTS = ["W", "L"] as const;
+export type RoundResult = (typeof ROUND_RESULTS)[number];
+
+/**
+ * One logged debate round. Stored LOCALLY in the browser (no account); a future
+ * login layer syncs this same shape to a per-user table. `report` is the
+ * debater's own note on why the round went the way it did — the raw material the
+ * AI profile (Phase 2) reads to surface recurring weaknesses. `opponent` is
+ * optional, private, and local-only (never used to build a profile of others).
+ */
+export interface Round {
+  id: string;
+  tournament: string;
+  roundLabel: string; // e.g. "R1", "Quarters", "Round 4"
+  side: RoundSide;
+  result: RoundResult;
+  opponent?: string;
+  report: string;
+  createdAt: string; // ISO timestamp
+}
+
+/** Derived record summary — computed purely from a Round[] (see lib/roundStats). */
+export interface RoundSummary {
+  total: number;
+  wins: number;
+  losses: number;
+  winRate: number; // 0..1; 0 when there are no rounds
+  aff: { wins: number; losses: number };
+  neg: { wins: number; losses: number };
+}
