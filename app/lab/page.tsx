@@ -1,6 +1,7 @@
 import Link from "next/link";
 import EvidenceWorkbench from "@/components/EvidenceWorkbench";
 import HumanGate from "@/components/HumanGate";
+import LiveCount from "@/components/LiveCount";
 import ThemeStudio from "@/components/ThemeStudio";
 
 // The app itself (Find Articles / Cut a Card / Coach). Reached from the landing
@@ -26,7 +27,10 @@ export default function Lab() {
               debate evidence engine
             </p>
           </div>
-          <ThemeStudio />
+          <div className="flex items-center gap-2 sm:gap-3">
+            <LiveCount />
+            <ThemeStudio />
+          </div>
         </div>
 
         <h1 className="reveal reveal-2 mt-4 font-display text-6xl font-extrabold leading-[0.9] tracking-tight sm:text-8xl">

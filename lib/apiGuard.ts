@@ -76,6 +76,9 @@ export interface GuardOptions {
    * off (no TURNSTILE_SECRET_KEY).
    */
   requireHuman?: boolean;
+  /** Override the per-IP per-minute rate limit (default from API_RATE_PER_MIN).
+   *  Raise it for frequent lightweight pings (e.g. presence heartbeats). */
+  perMinute?: number;
 }
 
 function block(status: number, error: string): NextResponse {
@@ -109,7 +112,7 @@ export async function guardApi(req: Request, opts: GuardOptions): Promise<NextRe
 
   const ip = clientIp(req);
 
-  const perMin = await rateLimitShared(`m:${opts.name}:${ip}`, PER_IP_PER_MIN, 60);
+  const perMin = await rateLimitShared(`m:${opts.name}:${ip}`, opts.perMinute ?? PER_IP_PER_MIN, 60);
   if (!perMin.allowed) {
     return block(429, "You're going a bit fast — wait a few seconds and try again.");
   }

@@ -157,6 +157,18 @@ export async function requestProfile(rounds: Round[]): Promise<ProfileOutcome> {
   }
 }
 
+/** Send a presence heartbeat; returns the live online count, or null on failure. */
+export async function pingPresence(): Promise<number | null> {
+  try {
+    const res = await fetch("/api/presence", { method: "POST", headers: apiHeaders() });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return typeof data.count === "number" ? data.count : null;
+  } catch {
+    return null;
+  }
+}
+
 export type VerifyHumanOutcome = { ok: true; ttlMs: number } | { ok: false; error: string };
 
 /** Send a solved Turnstile token; on success the server sets the human cookie. */
