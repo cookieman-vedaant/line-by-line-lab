@@ -29,6 +29,8 @@ const requestSchema = z.object({
       document: z.string().max(210000).optional(),
       // Compact local profile summary (skill + weaknesses) so the Coach adapts.
       profile: z.string().max(2000).optional(),
+      // Compact local round-log summary (record + recent rounds) for specifics.
+      record: z.string().max(6000).optional(),
     })
     .optional(),
 });

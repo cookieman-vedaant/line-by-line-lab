@@ -106,6 +106,7 @@ export default function RoundLogPanel() {
     label: string,
   ) => (
     <button
+      key={value}
       type="button"
       onClick={() => set(value)}
       aria-pressed={current === value}

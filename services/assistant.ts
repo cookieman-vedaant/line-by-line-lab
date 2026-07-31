@@ -244,7 +244,13 @@ export function buildSystem(context?: AssistantContext): string {
 
   if (context.profile && context.profile.trim().length > 0) {
     sections.push(
-      `ABOUT THIS DEBATER (built from their own logged rounds — use it to pitch your coaching at the right level and to target their recurring weaknesses. Do NOT bring it up unprompted, quote it back, or lecture them about it; just let it shape how you coach): ${context.profile.trim()}`,
+      `DEBATER PROFILE — an AI read of this debater's game, built from their own Record tab. Use it to pitch your coaching at their level and to target their recurring weaknesses. When they ask how to improve something (often one of these weaknesses), ground your help in this profile and their rounds below. Don't recite it robotically or raise it out of nowhere — but you DO have it, so let it make your coaching specific and personal: ${context.profile.trim()}`,
+    );
+  }
+
+  if (context.record && context.record.trim().length > 0) {
+    sections.push(
+      `DEBATER'S LOGGED ROUNDS — their own results and notes from the Record tab. This is real context about how their tournaments are going. Use it to make your help concrete: when they ask about a weakness or a loss, point to the actual round(s) and give specific, actionable fixes and drills. Treat it as private context for helping them, not something to read back verbatim:\n${context.record.trim()}`,
     );
   }
 

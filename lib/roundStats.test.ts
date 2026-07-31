@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatRecord, summarizeRounds } from "@/lib/roundStats";
+import { formatRecord, roundLogToContext, summarizeRounds } from "@/lib/roundStats";
 import type { Round } from "@/types";
 
 function round(side: "Aff" | "Neg", result: "W" | "L"): Round {
@@ -55,5 +55,29 @@ describe("summarizeRounds", () => {
 describe("formatRecord", () => {
   it("renders a wins–losses string", () => {
     expect(formatRecord(7, 3)).toBe("7–3");
+  });
+});
+
+describe("roundLogToContext", () => {
+  it("returns an empty string when there are no rounds", () => {
+    expect(roundLogToContext([])).toBe("");
+  });
+
+  it("includes the record and each round's report + opponent", () => {
+    const rounds: Round[] = [
+      { ...round("Aff", "L"), tournament: "Berkeley", roundLabel: "R1", opponent: "Lincoln AB", report: "lost on framework" },
+      { ...round("Neg", "W"), tournament: "Berkeley", roundLabel: "R2", report: "clean impact weighing" },
+    ];
+    const ctx = roundLogToContext(rounds);
+    expect(ctx).toContain("Record: 1–1");
+    expect(ctx).toContain("Berkeley R1");
+    expect(ctx).toContain("vs Lincoln AB");
+    expect(ctx).toContain("lost on framework");
+    expect(ctx).toContain("clean impact weighing");
+  });
+
+  it("is bounded in length", () => {
+    const many = Array.from({ length: 50 }, () => ({ ...round("Aff", "W"), report: "x".repeat(300) }));
+    expect(roundLogToContext(many).length).toBeLessThanOrEqual(4000);
   });
 });

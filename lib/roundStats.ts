@@ -32,3 +32,28 @@ export function summarizeRounds(rounds: Round[]): RoundSummary {
 export function formatRecord(wins: number, losses: number): string {
   return `${wins}–${losses}`;
 }
+
+/**
+ * Compact text summary of the debater's rounds for the Coach's context: the
+ * overall record plus the most recent rounds with their reports. Bounded so it
+ * never bloats the prompt. Returns "" when there are no rounds. Assumes `rounds`
+ * is newest-first (as stored).
+ */
+export function roundLogToContext(rounds: Round[], maxRounds = 20, maxChars = 4000): string {
+  if (rounds.length === 0) return "";
+  const s = summarizeRounds(rounds);
+  const header = `Record: ${formatRecord(s.wins, s.losses)} (Aff ${formatRecord(
+    s.aff.wins,
+    s.aff.losses,
+  )}, Neg ${formatRecord(s.neg.wins, s.neg.losses)}) across ${s.total} round${
+    s.total === 1 ? "" : "s"
+  }.`;
+  const recent = rounds.slice(0, maxRounds).map((r, i) => {
+    const opp = r.opponent ? ` vs ${r.opponent}` : "";
+    const rep = r.report.trim() ? `: ${r.report.trim()}` : "";
+    return `${i + 1}. ${r.tournament} ${r.roundLabel} — ${r.side}, ${
+      r.result === "W" ? "Win" : "Loss"
+    }${opp}${rep}`;
+  });
+  return `${header}\nRecent rounds:\n${recent.join("\n")}`.slice(0, maxChars);
+}

@@ -39,11 +39,17 @@ describe("buildSystem — uploaded document", () => {
 describe("buildSystem — debater profile", () => {
   it("embeds the profile so the Coach can pitch to the debater's level", () => {
     const system = buildSystem({ profile: "Skill tier: Varsity. Recurring weaknesses: answering framework." });
-    expect(system).toContain("ABOUT THIS DEBATER");
+    expect(system).toContain("DEBATER PROFILE");
     expect(system).toContain("answering framework");
   });
 
   it("omits the profile section when none is given", () => {
-    expect(buildSystem({ claim: "x" })).not.toContain("ABOUT THIS DEBATER");
+    expect(buildSystem({ claim: "x" })).not.toContain("DEBATER PROFILE");
+  });
+
+  it("embeds the logged rounds so the Coach can ground help in specifics", () => {
+    const system = buildSystem({ record: "Record: 1–1. Recent rounds:\n1. Berkeley R1 — Aff, Loss: dropped the perm" });
+    expect(system).toContain("DEBATER'S LOGGED ROUNDS");
+    expect(system).toContain("dropped the perm");
   });
 });

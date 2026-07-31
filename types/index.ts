@@ -143,6 +143,12 @@ export interface AssistantContext {
    * debater's own coaching, never stored server-side.
    */
   profile?: string;
+  /**
+   * A compact summary of the debater's actual logged rounds (record + recent
+   * rounds with their reports) from the Record tab, so the Coach can ground its
+   * help in specific rounds. Personal + per-device — same isolation as `profile`.
+   */
+  record?: string;
 }
 
 /** What `/api/assistant` accepts: the running conversation + optional context. */

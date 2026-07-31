@@ -9,6 +9,12 @@ import {
   profileToContext,
   subscribeProfile,
 } from "@/lib/profileStore";
+import {
+  getRoundsServerSnapshot,
+  getRoundsSnapshot,
+  subscribeRounds,
+} from "@/lib/roundLog";
+import { roundLogToContext } from "@/lib/roundStats";
 import type { Article, AssistantContext, Card } from "@/types";
 
 interface UploadedDoc {
@@ -53,6 +59,8 @@ export default function CoachPanel({ context }: CoachPanelProps) {
     getProfileSnapshot,
     getProfileServerSnapshot,
   );
+  // The debater's actual logged rounds, so the Coach can ground help in specifics.
+  const rounds = useSyncExternalStore(subscribeRounds, getRoundsSnapshot, getRoundsServerSnapshot);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -67,13 +75,18 @@ export default function CoachPanel({ context }: CoachPanelProps) {
     setInput("");
     setBusy(true);
 
+    // Give the Coach the full per-debater context from around the app: the last
+    // search claim (context prop), any uploaded case (doc), the AI profile, and
+    // the actual logged rounds. All personal + per-device.
     const profileText = storedProfile ? profileToContext(storedProfile.profile) : undefined;
+    const recordText = roundLogToContext(rounds) || undefined;
     const mergedContext: AssistantContext | undefined =
-      context || doc || profileText
+      context || doc || profileText || recordText
         ? {
             ...context,
             ...(doc ? { document: doc.text } : {}),
             ...(profileText ? { profile: profileText } : {}),
+            ...(recordText ? { record: recordText } : {}),
           }
         : undefined;
 
