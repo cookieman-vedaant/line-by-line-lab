@@ -1,3 +1,4 @@
+import Link from "next/link";
 import EvidenceWorkbench from "@/components/EvidenceWorkbench";
 import ThemeStudio from "@/components/ThemeStudio";
 
@@ -9,10 +10,21 @@ export default function Lab() {
     <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-5 py-12 sm:py-16">
       <header className="mb-10 sm:mb-14">
         <div className="reveal reveal-1 flex items-center justify-between gap-4">
-          <p className="label-mono flex items-center gap-2 text-xs text-accent">
-            <span className="inline-block h-2.5 w-2.5 rotate-45 bg-red" />
-            debate evidence engine
-          </p>
+          <div className="flex items-center gap-3">
+            {/* Home → the landing / Get Started page. When auth is added later,
+                this still points at "/" (which becomes sign-in); no change needed. */}
+            <Link
+              href="/"
+              aria-label="Back to the Get Started page"
+              className="label-mono frame btn-press inline-flex items-center gap-1.5 bg-paper-2 px-3 py-1.5 text-[10px] font-bold text-ink hover:text-accent"
+            >
+              <span aria-hidden>←</span> Home
+            </Link>
+            <p className="label-mono hidden items-center gap-2 text-xs text-accent sm:flex">
+              <span className="inline-block h-2.5 w-2.5 rotate-45 bg-red" />
+              debate evidence engine
+            </p>
+          </div>
           <ThemeStudio />
         </div>
 
