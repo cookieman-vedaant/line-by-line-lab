@@ -159,24 +159,58 @@ export function themeToPayload(spec: ThemeSpec): AppliedTheme {
 // One-click themes (also the AI's few-shot vibe + a fallback when it's busy).
 // Each is authored to already clear the readability thresholds.
 
-export type PresetId = "pikachu" | "charizard" | "jojo";
+export type PresetId =
+  | "pikachu"
+  | "charizard"
+  | "jojo"
+  | "gengar"
+  | "matrix"
+  | "vaporwave";
 
 export const PRESETS: Record<PresetId, ThemeSpec> = {
+  // Electric, playful: bright yellow surfaces, Pokémon red, rounded font.
   pikachu: {
-    name: "Pikachu", paper: "#fffdf0", paper2: "#ffe98a", ink: "#241d05", stroke: "#241d05",
-    accent: "#d4351f", accent2: "#f7c700", warn: "#d4351f", highlight: "#ffe14d",
-    borderWidth: 3, radius: 6, mood: "bold", background: "dots", font: "rounded",
+    name: "Pikachu", paper: "#fff9db", paper2: "#ffe14d", ink: "#2b2000", stroke: "#2b2000",
+    accent: "#e3350d", accent2: "#f5c518", warn: "#e3350d", highlight: "#ffd600",
+    borderWidth: 3, radius: 8, mood: "bold", background: "dots", font: "rounded",
   },
+  // Dark & fiery: near-black with flame orange, glowing, heavy condensed font.
   charizard: {
-    name: "Charizard", paper: "#17110d", paper2: "#2a1e16", ink: "#f7ede2", stroke: "#3a2a20",
-    accent: "#ff6a1f", accent2: "#ffb020", warn: "#ff4a2e", highlight: "#ffd27a",
-    borderWidth: 1, radius: 12, mood: "sleek", background: "glow", font: "impact",
+    name: "Charizard", paper: "#140b06", paper2: "#251208", ink: "#ffe9d6", stroke: "#4a2410",
+    accent: "#ff5b1f", accent2: "#ffc21c", warn: "#ff3b1f", highlight: "#ffd27a",
+    borderWidth: 1, radius: 14, mood: "sleek", background: "glow", font: "impact",
   },
+  // Gaudy & dramatic: deep purple, hot pink + gold, sharp corners, bombastic font.
   jojo: {
-    name: "JoJo", paper: "#12101a", paper2: "#221a2e", ink: "#f3e9ff", stroke: "#3a2b4d",
-    accent: "#ff2e88", accent2: "#b06bff", warn: "#ff5470", highlight: "#ffd84d",
-    borderWidth: 2, radius: 4, mood: "sleek", background: "gradient", font: "impact",
+    name: "JoJo", paper: "#1a0b2e", paper2: "#2d1147", ink: "#ffe8fb", stroke: "#52246e",
+    accent: "#ff2f9e", accent2: "#ffd100", warn: "#ff477e", highlight: "#ffd100",
+    borderWidth: 2, radius: 2, mood: "sleek", background: "gradient", font: "impact",
+  },
+  // Spooky purple Pokémon: violet + pink glow, rounded font.
+  gengar: {
+    name: "Gengar", paper: "#15111f", paper2: "#241b33", ink: "#ece4ff", stroke: "#3d2f57",
+    accent: "#a24bff", accent2: "#ff4fa3", warn: "#ff5470", highlight: "#c9ff4f",
+    borderWidth: 2, radius: 10, mood: "sleek", background: "glow", font: "rounded",
+  },
+  // Terminal hacker: black + phosphor green, hard grid, monospace, sharp corners.
+  matrix: {
+    name: "Matrix", paper: "#04120a", paper2: "#0a2015", ink: "#b9ffcf", stroke: "#164b2c",
+    accent: "#22ff88", accent2: "#0aff9d", warn: "#ff5c5c", highlight: "#a6ff00",
+    borderWidth: 1, radius: 0, mood: "sleek", background: "grid", font: "terminal",
+  },
+  // Retro 80s dream: indigo + pink/cyan gradient, serif display.
+  vaporwave: {
+    name: "Vaporwave", paper: "#1b0f3a", paper2: "#2a1656", ink: "#f4ecff", stroke: "#4a2b8a",
+    accent: "#ff5fd2", accent2: "#4be0ff", warn: "#ff5f9e", highlight: "#ffe14d",
+    borderWidth: 2, radius: 12, mood: "sleek", background: "gradient", font: "editorial",
   },
 };
 
-export const PRESET_ORDER: PresetId[] = ["pikachu", "charizard", "jojo"];
+export const PRESET_ORDER: PresetId[] = [
+  "pikachu",
+  "charizard",
+  "jojo",
+  "gengar",
+  "matrix",
+  "vaporwave",
+];
