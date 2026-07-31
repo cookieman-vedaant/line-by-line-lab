@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { extractText, getDocumentProxy } from "unpdf";
+import { guardApi } from "@/lib/apiGuard";
 
 // PDF parsing is CPU work; give it room but not forever.
 export const maxDuration = 30;
@@ -19,6 +20,15 @@ const MAX_TEXT_CHARS = 200000;
  * file itself is never stored.
  */
 export async function POST(req: Request) {
+  // Allow the 12 MB file (+ multipart overhead); PDF parsing isn't an AI call,
+  // so it's rate-limited but doesn't count toward the global AI ceiling.
+  const blocked = await guardApi(req, {
+    name: "pdf",
+    bodyLimitBytes: MAX_BYTES + 1024 * 1024,
+    countGlobal: false,
+  });
+  if (blocked) return blocked;
+
   let form: FormData;
   try {
     form = await req.formData();

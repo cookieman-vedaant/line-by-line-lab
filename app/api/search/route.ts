@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { guardApi } from "@/lib/apiGuard";
 import { MissingApiKeyError, RateLimitedError } from "@/lib/gemini";
 import { clientKeyFromRequest } from "@/lib/requestClient";
 import { NoSourcesFoundError, findArticles } from "@/services/articleFinder";
@@ -17,6 +18,9 @@ const searchRequestSchema = z.object({
 });
 
 export async function POST(req: Request) {
+  const blocked = await guardApi(req, { name: "search" });
+  if (blocked) return blocked;
+
   let body: unknown;
   try {
     body = await req.json();

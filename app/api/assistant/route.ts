@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { guardApi } from "@/lib/apiGuard";
 import { MissingApiKeyError, RateLimitedError } from "@/lib/gemini";
 import { clientKeyFromRequest } from "@/lib/requestClient";
 import { runAssistant } from "@/services/assistant";
@@ -30,6 +31,10 @@ const requestSchema = z.object({
 });
 
 export async function POST(req: Request) {
+  // A Coach turn can carry an uploaded document + long history — allow 1 MB.
+  const blocked = await guardApi(req, { name: "coach", bodyLimitBytes: 1024 * 1024 });
+  if (blocked) return blocked;
+
   let body: unknown;
   try {
     body = await req.json();

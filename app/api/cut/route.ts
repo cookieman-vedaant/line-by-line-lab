@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { guardApi } from "@/lib/apiGuard";
 import { MissingApiKeyError, RateLimitedError } from "@/lib/gemini";
 import {
   ArticleUnreadableError,
@@ -33,6 +34,10 @@ const cutRequestSchema = z
   });
 
 export async function POST(req: Request) {
+  // Cut can carry a large pasted article, so allow a bigger body than default.
+  const blocked = await guardApi(req, { name: "cut", bodyLimitBytes: 1024 * 1024 });
+  if (blocked) return blocked;
+
   let body: unknown;
   try {
     body = await req.json();
