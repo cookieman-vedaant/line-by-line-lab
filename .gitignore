@@ -37,6 +37,13 @@ yarn-error.log*
 # personal tooling
 .obsidian/
 
+# Claude Code / MCP local tooling (installed skills, MCP connector config, local
+# settings) — kept on disk, never committed. May reference project connections.
+.mcp.json
+.claude/
+.agents/
+skills-lock.json
+
 # local-only agent / dev-process docs (kept on disk, never published to GitHub)
 /AGENTS.md
 /CLAUDE.md

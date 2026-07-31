@@ -1,5 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import AuthForm from "@/components/AuthForm";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = {
   title: "Line by Line Lab — debate evidence, cut in minutes",
@@ -14,16 +16,23 @@ const FEATURES: [string, string, string][] = [
 ];
 
 /**
- * Landing / intro page (route "/"). Its only job is to introduce the app and
- * hand off to it via "Get Started". The app lives at /lab and is completely
- * independent — this page imports none of its logic, so it can't affect any
- * feature.
- *
- * FUTURE AUTH: when a login + payment system is added, this page becomes the
- * sign-in / sign-up surface and the CTA below points at the auth flow (or auth
- * gates /lab via middleware). Nothing in /lab needs to change for that.
+ * Home page (route "/") — now the sign-in surface. Signed-out visitors see the
+ * intro + an email/password form; signed-in visitors get a link into the app.
+ * Route protection lives in middleware.ts (this page is just the entry point).
  */
-export default function Landing() {
+export default async function Landing({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string | string[] }>;
+}) {
+  const params = await searchParams;
+  const next = typeof params.next === "string" ? params.next : undefined;
+
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-start justify-center px-5 py-16 sm:py-24">
       <p className="reveal reveal-1 label-mono flex items-center gap-2 text-xs text-accent">
@@ -58,20 +67,25 @@ export default function Landing() {
         ))}
       </ul>
 
-      {/* CTA — the single entry point into the app. Swap this href for the auth
-          flow when login is added; the app at /lab is unaffected. */}
-      <div className="reveal reveal-4 mt-10">
-        <Link
-          href="/lab"
-          className="btn-press frame shadow-hard inline-flex items-center gap-2 bg-accent px-7 py-4 font-display text-lg font-bold uppercase tracking-wide text-paper"
-        >
-          Get Started <span aria-hidden>→</span>
-        </Link>
+      <div className="reveal reveal-4 mt-10 w-full">
+        {user ? (
+          <div className="flex flex-col items-start gap-3">
+            <p className="label-mono text-[11px] text-ink/60">Signed in as {user.email}</p>
+            <Link
+              href="/lab"
+              className="btn-press frame shadow-hard inline-flex items-center gap-2 bg-accent px-7 py-4 font-display text-lg font-bold uppercase tracking-wide text-paper"
+            >
+              Enter the Lab <span aria-hidden>→</span>
+            </Link>
+          </div>
+        ) : (
+          <AuthForm next={next} />
+        )}
       </div>
 
       <div className="masthead-rule reveal reveal-4 mt-12 h-[3px] w-full bg-ink" />
       <p className="reveal reveal-4 mt-4 label-mono text-[10px] text-ink/50">
-        Free · No account needed · Built for Lincoln-Douglas debaters
+        Free to start · Built for Lincoln-Douglas debaters
       </p>
     </main>
   );

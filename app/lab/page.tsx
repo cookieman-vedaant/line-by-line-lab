@@ -2,12 +2,18 @@ import Link from "next/link";
 import EvidenceWorkbench from "@/components/EvidenceWorkbench";
 import HumanGate from "@/components/HumanGate";
 import LiveCount from "@/components/LiveCount";
+import SignOutButton from "@/components/SignOutButton";
 import ThemeStudio from "@/components/ThemeStudio";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-// The app itself (Find Articles / Cut a Card / Coach). Reached from the landing
-// page's "Get Started". Lives on its own route so a future auth layer can gate
-// /lab without touching the intro page or any feature here.
-export default function Lab() {
+// The app itself (Find Articles / Cut a Card / Coach). Gated by middleware.ts —
+// a logged-out visitor is redirected to "/" before this ever renders.
+export default async function Lab() {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-5 py-12 sm:py-16">
       <header className="mb-10 sm:mb-14">
@@ -30,6 +36,15 @@ export default function Lab() {
           <div className="flex items-center gap-2 sm:gap-3">
             <LiveCount />
             <ThemeStudio />
+            {user && (
+              <span
+                className="label-mono hidden max-w-[12ch] truncate text-[10px] text-ink/50 md:inline"
+                title={user.email ?? undefined}
+              >
+                {user.email}
+              </span>
+            )}
+            <SignOutButton />
           </div>
         </div>
 
