@@ -1,6 +1,14 @@
 "use client";
 
 import { useState, useSyncExternalStore } from "react";
+import { requestProfile } from "@/lib/apiClient";
+import {
+  getProfileServerSnapshot,
+  getProfileSnapshot,
+  roundsSignature,
+  storeProfile,
+  subscribeProfile,
+} from "@/lib/profileStore";
 import {
   addRound,
   deleteRound,
@@ -16,6 +24,23 @@ const inputClasses =
   "placeholder:text-ink/40 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/35";
 const labelClasses = "label-mono mb-2 block text-xs text-ink";
 
+/** A labeled bullet list for a profile section; renders nothing when empty. */
+function profileList(label: string, items: string[]) {
+  if (items.length === 0) return null;
+  return (
+    <div>
+      <p className="label-mono text-[10px] text-accent">{label}</p>
+      <ul className="mt-1 flex flex-col gap-0.5">
+        {items.map((item) => (
+          <li key={item} className="text-sm font-medium leading-snug text-ink/85">
+            • {item}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /**
  * The Round Log ("Record" tab): a debater logs their own tournament rounds
  * (W/L + a short "why"). Data is local-first (lib/roundLog). Phase 1 = capture +
@@ -23,6 +48,7 @@ const labelClasses = "label-mono mb-2 block text-xs text-ink";
  */
 export default function RoundLogPanel() {
   const rounds = useSyncExternalStore(subscribeRounds, getRoundsSnapshot, getRoundsServerSnapshot);
+  const stored = useSyncExternalStore(subscribeProfile, getProfileSnapshot, getProfileServerSnapshot);
   const [tournament, setTournament] = useState("");
   const [roundLabel, setRoundLabel] = useState("");
   const [side, setSide] = useState<RoundSide>("Aff");
@@ -30,6 +56,23 @@ export default function RoundLogPanel() {
   const [opponent, setOpponent] = useState("");
   const [report, setReport] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+
+  const stale = stored !== null && stored.signature !== roundsSignature(rounds);
+
+  async function analyze() {
+    if (rounds.length === 0 || profileBusy) return;
+    setProfileBusy(true);
+    setProfileError(null);
+    const outcome = await requestProfile(rounds);
+    setProfileBusy(false);
+    if (!outcome.ok) {
+      setProfileError(outcome.error);
+      return;
+    }
+    storeProfile(outcome.profile, roundsSignature(rounds));
+  }
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -104,6 +147,70 @@ export default function RoundLogPanel() {
               </div>
             </div>
           </div>
+        )}
+      </section>
+
+      {/* AI profile — the debater's own read, cached locally (per device) */}
+      <section className="frame bg-paper-2 p-5">
+        <div className="flex items-center justify-between gap-3">
+          <p className="label-mono text-[10px] text-ink/60">
+            Your profile <span className="text-ink/40">· AI read on your game</span>
+          </p>
+          {stored && (
+            <button
+              type="button"
+              onClick={analyze}
+              disabled={profileBusy}
+              className="btn-press frame bg-paper px-3 py-1 text-[10px] font-bold text-ink hover:text-accent disabled:opacity-60"
+            >
+              {profileBusy ? "…" : "Re-analyze"}
+            </button>
+          )}
+        </div>
+
+        {!stored ? (
+          <div className="mt-2">
+            <p className="text-sm font-medium leading-snug text-ink/70">
+              {rounds.length === 0
+                ? "Log a few rounds with notes, then get an AI read on your skill level and recurring weaknesses — it tailors the Coach to you."
+                : "Get an AI read on your skill level and recurring weaknesses. It personalizes the Coach to your game."}
+            </p>
+            <button
+              type="button"
+              onClick={analyze}
+              disabled={rounds.length === 0 || profileBusy}
+              className="btn-press frame mt-3 bg-accent px-4 py-2 font-display text-xs font-bold
+                uppercase tracking-wide text-paper disabled:opacity-60"
+            >
+              {profileBusy ? "Analyzing…" : "✦ Analyze my rounds"}
+            </button>
+          </div>
+        ) : (
+          <div className="mt-3 flex flex-col gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="label-mono frame bg-accent px-2 py-0.5 text-[10px] font-bold text-paper">
+                {stored.profile.skillTier}
+              </span>
+              {stale && (
+                <span className="label-mono text-[10px] font-bold text-red">
+                  rounds changed — re-analyze
+                </span>
+              )}
+            </div>
+            <p className="text-sm font-medium leading-snug">{stored.profile.summary}</p>
+            {profileList("Strengths", stored.profile.strengths)}
+            {profileList("Work on", stored.profile.weaknesses)}
+            {profileList("Focus next", stored.profile.focusAreas)}
+          </div>
+        )}
+
+        {profileBusy && (
+          <p className="label-mono mt-3 animate-pulse text-xs text-accent">▸ reading your rounds…</p>
+        )}
+        {profileError && (
+          <p role="alert" className="mt-3 text-[11px] font-semibold text-red">
+            {profileError}
+          </p>
         )}
       </section>
 

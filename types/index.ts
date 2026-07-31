@@ -136,6 +136,13 @@ export interface AssistantContext {
    * quote. Extracted in the browser; the server only ever sees the text.
    */
   document?: string;
+  /**
+   * A compact summary of the debater's own profile (skill tier + recurring
+   * weaknesses), built locally from their Round Log so the Coach pitches feedback
+   * at the right level. Personal + per-device — sent only as context for the
+   * debater's own coaching, never stored server-side.
+   */
+  profile?: string;
 }
 
 /** What `/api/assistant` accepts: the running conversation + optional context. */
@@ -234,4 +241,22 @@ export interface RoundSummary {
   winRate: number; // 0..1; 0 when there are no rounds
   aff: { wins: number; losses: number };
   neg: { wins: number; losses: number };
+}
+
+/** Estimated skill tier inferred from a debater's logged rounds. */
+export const SKILL_TIERS = ["Novice", "Developing", "Varsity", "Circuit"] as const;
+export type SkillTier = (typeof SKILL_TIERS)[number];
+
+/**
+ * AI-synthesized read on the debater, derived from their OWN logged rounds and
+ * reports. Personal data: cached LOCALLY per device (never stored server-side —
+ * `/api/profile` is stateless). Feeds the Coach so its feedback targets this
+ * debater's weaknesses at their level.
+ */
+export interface DebaterProfile {
+  skillTier: SkillTier;
+  summary: string; // 1–2 sentence read on the debater
+  strengths: string[]; // recurring strengths
+  weaknesses: string[]; // recurring weaknesses to work on
+  focusAreas: string[]; // concrete things to prep/drill next
 }

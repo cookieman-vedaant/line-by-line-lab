@@ -27,6 +27,8 @@ const requestSchema = z.object({
       // Headroom above the /api/pdf extract cap (200k) so a full-file upload is
       // never rejected here; the assistant service does the final bounding.
       document: z.string().max(210000).optional(),
+      // Compact local profile summary (skill + weaknesses) so the Coach adapts.
+      profile: z.string().max(2000).optional(),
     })
     .optional(),
 });

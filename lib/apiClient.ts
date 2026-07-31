@@ -4,6 +4,8 @@ import type {
   AssistantResult,
   Card,
   CutRequest,
+  DebaterProfile,
+  Round,
   SearchParams,
   ThemeSpec,
 } from "@/types";
@@ -126,6 +128,30 @@ export async function requestTheme(prompt: string): Promise<ThemeOutcome> {
       return { ok: false, error: data.error ?? "Theme design failed. Try again." };
     }
     return { ok: true, spec: data.spec };
+  } catch {
+    return { ok: false, error: "Could not reach the server. Is it running?" };
+  }
+}
+
+export type ProfileOutcome = { ok: true; profile: DebaterProfile } | { ok: false; error: string };
+
+/**
+ * Send the debater's own rounds to be analyzed into a profile. The rounds come
+ * from localStorage; the endpoint is stateless (stores nothing), and the result
+ * is cached locally per device — personal data never becomes shared.
+ */
+export async function requestProfile(rounds: Round[]): Promise<ProfileOutcome> {
+  try {
+    const res = await fetch("/api/profile", {
+      method: "POST",
+      headers: apiHeaders(),
+      body: JSON.stringify({ rounds }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.profile) {
+      return { ok: false, error: data.error ?? "Couldn't build your profile. Try again." };
+    }
+    return { ok: true, profile: data.profile };
   } catch {
     return { ok: false, error: "Could not reach the server. Is it running?" };
   }

@@ -35,3 +35,15 @@ describe("buildSystem — uploaded document", () => {
     expect(system.toLowerCase()).toContain("truncated");
   });
 });
+
+describe("buildSystem — debater profile", () => {
+  it("embeds the profile so the Coach can pitch to the debater's level", () => {
+    const system = buildSystem({ profile: "Skill tier: Varsity. Recurring weaknesses: answering framework." });
+    expect(system).toContain("ABOUT THIS DEBATER");
+    expect(system).toContain("answering framework");
+  });
+
+  it("omits the profile section when none is given", () => {
+    expect(buildSystem({ claim: "x" })).not.toContain("ABOUT THIS DEBATER");
+  });
+});

@@ -1,8 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import CardView from "@/components/CardView";
 import { extractPdf, requestAssistant } from "@/lib/apiClient";
+import {
+  getProfileServerSnapshot,
+  getProfileSnapshot,
+  profileToContext,
+  subscribeProfile,
+} from "@/lib/profileStore";
 import type { Article, AssistantContext, Card } from "@/types";
 
 interface UploadedDoc {
@@ -40,6 +46,13 @@ export default function CoachPanel({ context }: CoachPanelProps) {
   const [docBusy, setDocBusy] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // The debater's own profile (from their Round Log), read from local storage so
+  // the Coach can pitch feedback at their level. Personal + per-device.
+  const storedProfile = useSyncExternalStore(
+    subscribeProfile,
+    getProfileSnapshot,
+    getProfileServerSnapshot,
+  );
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -54,8 +67,15 @@ export default function CoachPanel({ context }: CoachPanelProps) {
     setInput("");
     setBusy(true);
 
+    const profileText = storedProfile ? profileToContext(storedProfile.profile) : undefined;
     const mergedContext: AssistantContext | undefined =
-      context || doc ? { ...context, ...(doc ? { document: doc.text } : {}) } : undefined;
+      context || doc || profileText
+        ? {
+            ...context,
+            ...(doc ? { document: doc.text } : {}),
+            ...(profileText ? { profile: profileText } : {}),
+          }
+        : undefined;
 
     const outcome = await requestAssistant({
       messages: nextTurns.map((t) => ({ role: t.role, content: t.content })),

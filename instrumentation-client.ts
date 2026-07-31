@@ -17,5 +17,6 @@ initBotId({
     { path: "/api/assistant", method: "POST" },
     { path: "/api/theme", method: "POST" },
     { path: "/api/pdf", method: "POST" },
+    { path: "/api/profile", method: "POST" },
   ],
 });

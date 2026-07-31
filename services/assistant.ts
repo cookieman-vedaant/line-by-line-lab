@@ -242,6 +242,12 @@ export function buildSystem(context?: AssistantContext): string {
     );
   }
 
+  if (context.profile && context.profile.trim().length > 0) {
+    sections.push(
+      `ABOUT THIS DEBATER (built from their own logged rounds — use it to pitch your coaching at the right level and to target their recurring weaknesses. Do NOT bring it up unprompted, quote it back, or lecture them about it; just let it shape how you coach): ${context.profile.trim()}`,
+    );
+  }
+
   if (context.document && context.document.trim().length > 0) {
     const full = context.document.trim();
     const doc = full.slice(0, MAX_DOCUMENT_CHARS);
