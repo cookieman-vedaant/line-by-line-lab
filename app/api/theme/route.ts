@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { guardApi } from "@/lib/apiGuard";
+import { botBlock } from "@/lib/botCheck";
 import { MissingApiKeyError, RateLimitedError } from "@/lib/gemini";
 import { ThemeGenerationError, generateTheme } from "@/services/themeAgent";
 
@@ -10,6 +11,8 @@ export const maxDuration = 30;
 const requestSchema = z.object({ prompt: z.string().trim().min(1).max(120) });
 
 export async function POST(req: Request) {
+  const bot = await botBlock();
+  if (bot) return bot;
   const blocked = await guardApi(req, { name: "theme" });
   if (blocked) return blocked;
 

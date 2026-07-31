@@ -13,6 +13,7 @@
     "@google/genai": "^2.10.0",
     "@mozilla/readability": "^0.6.0",
     "@upstash/redis": "^1.38.0",
+    "botid": "^1.5.11",
     "jsdom": "^29.1.1",
     "linkedom": "^0.18.13",
     "next": "16.2.10",
