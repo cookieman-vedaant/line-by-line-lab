@@ -1,15 +1,16 @@
 import type { DebaterProfile, Round } from "@/types";
+import type { SaveResult } from "@/lib/roundLog";
 
 /**
- * Local-first cache of the AI debater profile. Like the Round Log, this is
- * PERSONAL data and lives only in the browser (`lbl-profile`) — never on the
- * server. We also store a signature of the rounds the profile was built from, so
+ * Account-backed cache of the AI debater profile. Like the Round Log, this is
+ * PERSONAL data, now stored per-user in Supabase (`debater_profile`) via
+ * `/api/debater-profile`, so the AI's read on the debater follows them across
+ * devices. We also keep a signature of the rounds the profile was built from, so
  * the UI can tell the debater when their profile is out of date.
  *
- * Exposed as an external store (subscribe + snapshot) for useSyncExternalStore.
+ * Exposed as an external store (subscribe + snapshot) for useSyncExternalStore;
+ * the data loads asynchronously via `loadProfile()`.
  */
-
-const KEY = "lbl-profile";
 
 export interface StoredProfile {
   profile: DebaterProfile;
@@ -50,19 +51,13 @@ export function profileToContext(profile: DebaterProfile): string {
 
 // ---- external store surface ----------------------------------------------
 
-let cache: StoredProfile | null | undefined; // undefined = not loaded yet
+let cache: StoredProfile | null = null;
+let loaded = false;
+let loading: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 
-function load(): StoredProfile | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as StoredProfile;
-    return parsed && parsed.profile ? parsed : null;
-  } catch {
-    return null;
-  }
+function notify(): void {
+  for (const l of listeners) l();
 }
 
 export function subscribeProfile(cb: () => void): () => void {
@@ -73,7 +68,6 @@ export function subscribeProfile(cb: () => void): () => void {
 }
 
 export function getProfileSnapshot(): StoredProfile | null {
-  if (cache === undefined) cache = load();
   return cache;
 }
 
@@ -81,27 +75,61 @@ export function getProfileServerSnapshot(): StoredProfile | null {
   return null;
 }
 
-export function storeProfile(profile: DebaterProfile, signature: string): void {
-  const stored: StoredProfile = { profile, signature, generatedAt: new Date().toISOString() };
-  cache = stored;
-  if (typeof window !== "undefined") {
-    try {
-      window.localStorage.setItem(KEY, JSON.stringify(stored));
-    } catch {
-      /* storage disabled — profile just won't persist */
-    }
-  }
-  listeners.forEach((l) => l());
+export function getProfileLoadedSnapshot(): boolean {
+  return loaded;
+}
+export function getProfileLoadedServerSnapshot(): boolean {
+  return false;
 }
 
-export function clearProfile(): void {
-  cache = null;
-  if (typeof window !== "undefined") {
+/** Fetch the signed-in user's saved profile. Idempotent (runs once). */
+export async function loadProfile(force = false): Promise<void> {
+  if (loading) return loading;
+  if (loaded && !force) return;
+  loading = (async () => {
     try {
-      window.localStorage.removeItem(KEY);
+      const res = await fetch("/api/debater-profile", { headers: { Accept: "application/json" } });
+      if (res.ok) {
+        const data = (await res.json()) as { stored?: StoredProfile | null };
+        cache = data.stored ?? null;
+      }
     } catch {
-      /* ignore */
+      /* offline — keep whatever we have */
+    } finally {
+      loaded = true;
+      loading = null;
+      notify();
     }
+  })();
+  return loading;
+}
+
+/** Save (upsert) the profile to the account, then update the cache. */
+export async function storeProfile(profile: DebaterProfile, signature: string): Promise<SaveResult> {
+  try {
+    const res = await fetch("/api/debater-profile", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ profile, signature }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { stored?: StoredProfile; error?: string };
+    if (!res.ok || !data.stored) {
+      return { ok: false, error: data.error ?? "Couldn't save your profile. Please try again." };
+    }
+    cache = data.stored;
+    notify();
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Could not reach the server. Is it running?" };
   }
-  listeners.forEach((l) => l());
+}
+
+export async function clearProfile(): Promise<void> {
+  cache = null;
+  notify();
+  try {
+    await fetch("/api/debater-profile", { method: "DELETE" });
+  } catch {
+    /* best effort */
+  }
 }

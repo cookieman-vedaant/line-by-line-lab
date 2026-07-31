@@ -6,12 +6,14 @@ import { extractPdf, requestAssistant } from "@/lib/apiClient";
 import {
   getProfileServerSnapshot,
   getProfileSnapshot,
+  loadProfile,
   profileToContext,
   subscribeProfile,
 } from "@/lib/profileStore";
 import {
   getRoundsServerSnapshot,
   getRoundsSnapshot,
+  loadRounds,
   subscribeRounds,
 } from "@/lib/roundLog";
 import { roundLogToContext } from "@/lib/roundStats";
@@ -65,6 +67,13 @@ export default function CoachPanel({ context }: CoachPanelProps) {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [turns, busy]);
+
+  // Pull the debater's account data (rounds + profile) so the Coach can ground
+  // its help in their record, even if they open Coach before the Record tab.
+  useEffect(() => {
+    void loadRounds();
+    void loadProfile();
+  }, []);
 
   async function send(text: string) {
     const msg = text.trim();

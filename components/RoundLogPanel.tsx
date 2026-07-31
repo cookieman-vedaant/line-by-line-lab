@@ -1,10 +1,16 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { requestProfile } from "@/lib/apiClient";
+import {
+  clearLocalRoundData,
+  readLocalProfile,
+  readLocalRounds,
+} from "@/lib/localMigration";
 import {
   getProfileServerSnapshot,
   getProfileSnapshot,
+  loadProfile,
   roundsSignature,
   storeProfile,
   subscribeProfile,
@@ -12,8 +18,12 @@ import {
 import {
   addRound,
   deleteRound,
+  getRoundsLoadedServerSnapshot,
+  getRoundsLoadedSnapshot,
   getRoundsServerSnapshot,
   getRoundsSnapshot,
+  importLocalRounds,
+  loadRounds,
   subscribeRounds,
 } from "@/lib/roundLog";
 import { formatRecord, summarizeRounds } from "@/lib/roundStats";
@@ -48,6 +58,11 @@ function profileList(label: string, items: string[]) {
  */
 export default function RoundLogPanel() {
   const rounds = useSyncExternalStore(subscribeRounds, getRoundsSnapshot, getRoundsServerSnapshot);
+  const roundsLoaded = useSyncExternalStore(
+    subscribeRounds,
+    getRoundsLoadedSnapshot,
+    getRoundsLoadedServerSnapshot,
+  );
   const stored = useSyncExternalStore(subscribeProfile, getProfileSnapshot, getProfileServerSnapshot);
   const [tournament, setTournament] = useState("");
   const [roundLabel, setRoundLabel] = useState("");
@@ -56,8 +71,54 @@ export default function RoundLogPanel() {
   const [opponent, setOpponent] = useState("");
   const [report, setReport] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [profileBusy, setProfileBusy] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
+  // Rounds saved on THIS device before the user had an account (localStorage).
+  // If present, we offer a one-click import into their account, then clear them.
+  const [localImport, setLocalImport] = useState<{ count: number; hasProfile: boolean } | null>(null);
+  const [importing, setImporting] = useState(false);
+
+  // Load the account's rounds + profile once, and check for on-device data to
+  // import. The localStorage read is deferred (post-hydration, off the effect's
+  // synchronous path) so it neither breaks SSR nor trips set-state-in-effect.
+  useEffect(() => {
+    void loadRounds();
+    void loadProfile();
+    let cancelled = false;
+    void Promise.resolve().then(() => {
+      if (cancelled) return;
+      const localRounds = readLocalRounds();
+      const localProfile = readLocalProfile();
+      if (localRounds.length > 0 || localProfile) {
+        setLocalImport({ count: localRounds.length, hasProfile: Boolean(localProfile) });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function importLocal() {
+    if (importing) return;
+    setImporting(true);
+    setError(null);
+    const localRounds = readLocalRounds();
+    const localProfile = readLocalProfile();
+    const outcome = await importLocalRounds(localRounds);
+    if (!outcome.ok) {
+      setError(outcome.error);
+      setImporting(false);
+      return;
+    }
+    // Carry over the on-device AI profile too, if the account has none yet.
+    if (localProfile && stored === null) {
+      await storeProfile(localProfile.profile, localProfile.signature);
+    }
+    clearLocalRoundData();
+    setLocalImport(null);
+    setImporting(false);
+  }
 
   const stale = stored !== null && stored.signature !== roundsSignature(rounds);
 
@@ -66,22 +127,26 @@ export default function RoundLogPanel() {
     setProfileBusy(true);
     setProfileError(null);
     const outcome = await requestProfile(rounds);
-    setProfileBusy(false);
     if (!outcome.ok) {
+      setProfileBusy(false);
       setProfileError(outcome.error);
       return;
     }
-    storeProfile(outcome.profile, roundsSignature(rounds));
+    const saved = await storeProfile(outcome.profile, roundsSignature(rounds));
+    setProfileBusy(false);
+    if (!saved.ok) setProfileError(saved.error);
   }
 
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (saving) return;
     if (!tournament.trim() || !roundLabel.trim()) {
       setError("Add at least the tournament and the round (e.g. “Berkeley”, “R3”).");
       return;
     }
     setError(null);
-    addRound({
+    setSaving(true);
+    const outcome = await addRound({
       tournament: tournament.trim(),
       roundLabel: roundLabel.trim(),
       side,
@@ -89,6 +154,11 @@ export default function RoundLogPanel() {
       opponent: opponent.trim() || undefined,
       report: report.trim(),
     });
+    setSaving(false);
+    if (!outcome.ok) {
+      setError(outcome.error);
+      return;
+    }
     // Keep tournament (usually the same across a session); clear the rest.
     setRoundLabel("");
     setOpponent("");
@@ -120,10 +190,45 @@ export default function RoundLogPanel() {
 
   return (
     <div className="flex flex-col gap-8">
+      {/* One-time import of rounds saved on this device before signing in. */}
+      {localImport && (
+        <section className="frame bg-yellow p-4 text-black">
+          <p className="font-display text-sm font-bold">Import your saved rounds?</p>
+          <p className="mt-1 text-sm font-medium leading-snug">
+            {localImport.count > 0
+              ? `${localImport.count} round${localImport.count === 1 ? "" : "s"} saved on this device`
+              : "An AI profile saved on this device"}
+            {localImport.hasProfile && localImport.count > 0 ? " (and your AI profile)" : ""} — from
+            before you signed in. Add {localImport.count > 0 ? "them" : "it"} to your account so your
+            record follows you on every device.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              onClick={() => void importLocal()}
+              disabled={importing}
+              className="btn-press frame bg-ink px-4 py-2 font-display text-xs font-bold uppercase tracking-wide text-paper disabled:opacity-60"
+            >
+              {importing ? "Importing…" : "✦ Import to my account"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setLocalImport(null)}
+              disabled={importing}
+              className="btn-press frame bg-paper-2 px-4 py-2 font-display text-xs font-bold uppercase tracking-wide text-ink disabled:opacity-60"
+            >
+              Not now
+            </button>
+          </div>
+        </section>
+      )}
+
       {/* Record summary */}
       <section className="frame shadow-hard bg-paper-2 p-5">
         <p className="label-mono text-[10px] text-ink/60">Your record</p>
-        {summary.total === 0 ? (
+        {!roundsLoaded ? (
+          <p className="mt-2 label-mono animate-pulse text-xs text-accent">▸ syncing your rounds…</p>
+        ) : summary.total === 0 ? (
           <p className="mt-2 text-sm font-medium text-ink/70">
             No rounds yet. Log one below — your record and (soon) tailored coaching build from these.
           </p>
@@ -292,10 +397,11 @@ export default function RoundLogPanel() {
 
         <button
           type="submit"
+          disabled={saving}
           className="btn-press frame mt-1 w-full bg-accent px-6 py-3.5 font-display
-            text-base font-bold uppercase tracking-wide text-paper sm:w-auto sm:self-start"
+            text-base font-bold uppercase tracking-wide text-paper disabled:opacity-60 sm:w-auto sm:self-start"
         >
-          + Log Round
+          {saving ? "Saving…" : "+ Log Round"}
         </button>
       </form>
 
@@ -326,7 +432,10 @@ export default function RoundLogPanel() {
                     </span>
                     <button
                       type="button"
-                      onClick={() => deleteRound(r.id)}
+                      onClick={async () => {
+                        const outcome = await deleteRound(r.id);
+                        if (!outcome.ok) setError(outcome.error);
+                      }}
                       aria-label={`Delete ${r.tournament} ${r.roundLabel}`}
                       className="btn-press frame bg-paper px-2 py-0.5 text-[10px] font-bold text-ink hover:text-red"
                     >

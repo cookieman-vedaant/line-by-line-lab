@@ -1,46 +1,33 @@
 import type { Round } from "@/types";
 
 /**
- * Local-first storage for the Round Log. Rounds live in the browser under
- * `lbl-rounds` — no account, instant use, $0. This file is the ONLY place that
- * touches storage, so a future login layer can swap these internals for a synced
- * per-user backend (e.g. Supabase) without changing the UI.
+ * Account-backed storage for the Round Log. Rounds live in the signed-in user's
+ * Supabase rows (per-user via RLS) and are reached through `/api/rounds`, so they
+ * follow the debater across every device they log into — and stay private to
+ * them. This file is the ONLY place the UI touches round storage.
  *
- * Exposed as an external store (subscribe + snapshot) so components read it with
- * useSyncExternalStore: SSR-safe (stable empty server snapshot) and reactive —
- * a mutation anywhere re-renders every reader.
+ * Still an external store (subscribe + snapshot) for useSyncExternalStore, but
+ * the data now loads ASYNCHRONOUSLY: call `loadRounds()` on mount to fetch from
+ * the server once; mutations write through to the API and update the cache.
  */
 
-const KEY = "lbl-rounds";
 const EMPTY: Round[] = [];
 
-// Cached snapshot: getSnapshot must return a STABLE reference until the data
-// actually changes, or useSyncExternalStore loops. `cache` only changes in commit().
-let cache: Round[] | null = null;
+// getSnapshot must return a STABLE reference until the data actually changes, or
+// useSyncExternalStore loops. `cache` only changes in a mutation/load below.
+let cache: Round[] = EMPTY;
+let loaded = false;
+let loading: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 
-function load(): Round[] {
-  if (typeof window === "undefined") return EMPTY;
-  try {
-    const raw = window.localStorage.getItem(KEY);
-    const parsed: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? (parsed as Round[]) : [];
-  } catch {
-    return EMPTY;
-  }
+function notify(): void {
+  for (const l of listeners) l();
 }
 
-function commit(next: Round[]): void {
-  cache = next;
-  if (typeof window !== "undefined") {
-    try {
-      window.localStorage.setItem(KEY, JSON.stringify(next));
-    } catch {
-      /* storage disabled / full — the round just won't persist this session */
-    }
-  }
-  listeners.forEach((l) => l());
-}
+export type SaveResult = { ok: true } | { ok: false; error: string };
+
+/** What a caller supplies to log a round (id + createdAt are assigned server-side). */
+export type NewRound = Omit<Round, "id" | "createdAt">;
 
 // ---- external store surface ----------------------------------------------
 
@@ -53,38 +40,118 @@ export function subscribeRounds(cb: () => void): () => void {
 
 /** Client snapshot — the live list (newest first). Stable until a mutation. */
 export function getRoundsSnapshot(): Round[] {
-  if (cache === null) cache = load();
   return cache;
 }
 
-/** Server snapshot — always the same empty array (no localStorage on the server). */
+/** Server snapshot — always the same empty array (no data on the server). */
 export function getRoundsServerSnapshot(): Round[] {
   return EMPTY;
 }
 
-/** Non-reactive read for callers outside React (e.g. building Coach context). */
+/** True once the first server load has finished — drives a loading state. */
+export function getRoundsLoadedSnapshot(): boolean {
+  return loaded;
+}
+export function getRoundsLoadedServerSnapshot(): boolean {
+  return false;
+}
+
+/** Non-reactive read for callers outside React (kept for compatibility). */
 export function getRounds(): Round[] {
-  return getRoundsSnapshot();
+  return cache;
 }
 
-// ---- mutations ------------------------------------------------------------
+// ---- loading + mutations --------------------------------------------------
 
-/** What a caller supplies to log a round (id + createdAt are assigned here). */
-export type NewRound = Omit<Round, "id" | "createdAt">;
-
-export function addRound(input: NewRound): void {
-  const round: Round = {
-    ...input,
-    id: crypto.randomUUID(),
-    createdAt: new Date().toISOString(),
-  };
-  commit([round, ...getRoundsSnapshot()]);
+/**
+ * Fetch the signed-in user's rounds from the server. Idempotent: concurrent
+ * callers share one request, and it runs only once unless `force` is set (used
+ * after an import to refresh the canonical, ordered list).
+ */
+export async function loadRounds(force = false): Promise<void> {
+  if (loading) return loading;
+  if (loaded && !force) return;
+  loading = (async () => {
+    try {
+      const res = await fetch("/api/rounds", { headers: { Accept: "application/json" } });
+      if (res.ok) {
+        const data = (await res.json()) as { rounds?: Round[] };
+        cache = Array.isArray(data.rounds) ? data.rounds : EMPTY;
+      }
+      // A non-OK response (e.g. 401 before sign-in) leaves the cache empty; a
+      // later loadRounds(true) after sign-in will populate it.
+    } catch {
+      /* offline — keep whatever we have */
+    } finally {
+      loaded = true;
+      loading = null;
+      notify();
+    }
+  })();
+  return loading;
 }
 
-export function deleteRound(id: string): void {
-  commit(getRoundsSnapshot().filter((r) => r.id !== id));
+/** Log a round: POST to the server, then prepend the saved row to the cache. */
+export async function addRound(input: NewRound): Promise<SaveResult> {
+  try {
+    const res = await fetch("/api/rounds", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ round: input }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { round?: Round; error?: string };
+    if (!res.ok || !data.round) {
+      return { ok: false, error: data.error ?? "Couldn't save your round. Please try again." };
+    }
+    cache = [data.round, ...cache];
+    notify();
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Could not reach the server. Is it running?" };
+  }
 }
 
-export function clearRounds(): void {
-  commit([]);
+/** Delete a round: optimistic remove, rolled back if the server rejects it. */
+export async function deleteRound(id: string): Promise<SaveResult> {
+  const prev = cache;
+  cache = cache.filter((r) => r.id !== id);
+  notify();
+  try {
+    const res = await fetch(`/api/rounds?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (!res.ok) {
+      cache = prev;
+      notify();
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      return { ok: false, error: data.error ?? "Couldn't delete that round." };
+    }
+    return { ok: true };
+  } catch {
+    cache = prev;
+    notify();
+    return { ok: false, error: "Could not reach the server. Is it running?" };
+  }
+}
+
+/**
+ * One-time import of rounds saved on THIS device before the user had an account
+ * (old localStorage). Bulk-inserts them, then refetches so the cache matches the
+ * server exactly.
+ */
+export async function importLocalRounds(rounds: NewRound[]): Promise<SaveResult> {
+  if (rounds.length === 0) return { ok: true };
+  try {
+    const res = await fetch("/api/rounds", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rounds }),
+    });
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      return { ok: false, error: data.error ?? "Import failed. Please try again." };
+    }
+    await loadRounds(true);
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Could not reach the server. Is it running?" };
+  }
 }
