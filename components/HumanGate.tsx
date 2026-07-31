@@ -1,36 +1,31 @@
 "use client";
 
 import { Turnstile } from "@marsidev/react-turnstile";
-import { useState, useSyncExternalStore } from "react";
+import { useState } from "react";
 import { verifyHuman } from "@/lib/apiClient";
-import {
-  getHumanServerSnapshot,
-  getHumanSnapshot,
-  markHumanVerified,
-  subscribeHuman,
-  turnstileSiteKey,
-} from "@/lib/humanGate";
+import { turnstileSiteKey } from "@/lib/humanGate";
 
 /**
- * Gates its children behind a one-time Cloudflare Turnstile check. A person
- * solves the widget once per session; a bot can't, so it never gets the cookie
- * the protected API routes require. When no Turnstile site key is configured the
- * gate is off and children render straight through.
+ * Gates its children behind a Cloudflare Turnstile check. The check runs EVERY
+ * time a visitor enters the Lab — verification lives in component state only, so
+ * a reload or navigating away and back re-challenges. A bot can't solve it, so
+ * it never gets the cookie the protected API routes require. When no Turnstile
+ * site key is configured the gate is off and children render straight through.
  */
 export default function HumanGate({ children }: { children: React.ReactNode }) {
-  const verified = useSyncExternalStore(subscribeHuman, getHumanSnapshot, getHumanServerSnapshot);
+  const [verified, setVerified] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const siteKey = turnstileSiteKey();
 
-  if (verified || !siteKey) return <>{children}</>;
+  if (!siteKey || verified) return <>{children}</>;
 
   async function onToken(token: string) {
     setError(null);
     setVerifying(true);
     const outcome = await verifyHuman(token);
     setVerifying(false);
-    if (outcome.ok) markHumanVerified(outcome.ttlMs);
+    if (outcome.ok) setVerified(true);
     else setError(outcome.error);
   }
 
@@ -44,8 +39,8 @@ export default function HumanGate({ children }: { children: React.ReactNode }) {
         Verify you&apos;re human
       </h2>
       <p className="mt-2 max-w-md text-sm font-medium leading-snug text-ink/70">
-        One quick check keeps bots from draining the free AI. It takes a second, and you
-        won&apos;t see it again for a while.
+        One quick check keeps bots from draining the free AI. It runs each time you open the Lab
+        and only takes a second.
       </p>
 
       <div className="mt-5">
