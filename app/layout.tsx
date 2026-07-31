@@ -12,9 +12,9 @@ import {
 import "./globals.css";
 
 // Curated font pairs the theme agent switches between via data-font on <html>
-// (mapped to --font-display/--font-mono in globals.css). The default pair (zine =
-// Bricolage + DM Mono) preloads; the rest load only when a theme actually uses
-// them, so visitors never download all eight.
+// (each --font-* var feeds the runtime --app-display/--app-mono in globals.css).
+// The default pair (zine = Bricolage + DM Mono) preloads; the rest load only when
+// a theme actually uses them, so visitors never download all eight.
 const zine = Bricolage_Grotesque({ variable: "--font-zine", subsets: ["latin"] });
 const zineMono = DM_Mono({ variable: "--font-zine-mono", subsets: ["latin"], weight: ["400", "500"] });
 const space = Space_Grotesk({ variable: "--font-space", subsets: ["latin"], preload: false });

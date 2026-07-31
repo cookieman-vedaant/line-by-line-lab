@@ -63,25 +63,32 @@
   --color-background: var(--paper);
   --color-foreground: var(--ink);
 
-  --font-sans: var(--font-display);
-  --font-display: var(--font-display);
-  --font-mono: var(--font-mono);
+  /* Tailwind's font utilities (font-display / font-sans / font-mono) resolve to
+     the runtime-switchable --app-* vars below. Critical: these @theme keys must
+     NOT be named the same as the vars we override in :root/[data-font]. When a
+     @theme key (e.g. --font-display) shares a name with a var we redefine in
+     :root, the dev CSS pipeline (lightningcss) merges the two :root blocks and
+     drops our override — so data-font never changes the font. Keeping the two
+     namespaces separate (--font-* theme keys vs --app-* runtime vars) fixes it. */
+  --font-sans: var(--app-display);
+  --font-display: var(--app-display);
+  --font-mono: var(--app-mono);
 }
 
 /* Font pairs — the theme agent switches these via data-font on <html>. The
    default (zine) is used when no data-font is set (Bold/Dark builtins). */
-:root { --font-display: var(--font-zine); --font-mono: var(--font-zine-mono); }
-[data-font="zine"]      { --font-display: var(--font-zine);      --font-mono: var(--font-zine-mono); }
-[data-font="space"]     { --font-display: var(--font-space);     --font-mono: var(--font-space-mono); }
-[data-font="editorial"] { --font-display: var(--font-editorial); --font-mono: var(--font-zine-mono); }
-[data-font="terminal"]  { --font-display: var(--font-terminal);  --font-mono: var(--font-terminal); }
-[data-font="rounded"]   { --font-display: var(--font-rounded);   --font-mono: var(--font-zine-mono); }
-[data-font="impact"]    { --font-display: var(--font-impact);    --font-mono: var(--font-zine-mono); }
+:root { --app-display: var(--font-zine); --app-mono: var(--font-zine-mono); }
+[data-font="zine"]      { --app-display: var(--font-zine);      --app-mono: var(--font-zine-mono); }
+[data-font="space"]     { --app-display: var(--font-space);     --app-mono: var(--font-space-mono); }
+[data-font="editorial"] { --app-display: var(--font-editorial); --app-mono: var(--font-zine-mono); }
+[data-font="terminal"]  { --app-display: var(--font-terminal);  --app-mono: var(--font-terminal); }
+[data-font="rounded"]   { --app-display: var(--font-rounded);   --app-mono: var(--font-zine-mono); }
+[data-font="impact"]    { --app-display: var(--font-impact);    --app-mono: var(--font-zine-mono); }
 
 body {
   background-color: var(--paper);
   color: var(--ink);
-  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--app-display), ui-sans-serif, system-ui, sans-serif;
 }
 
 /* Per-theme background atmosphere (never a flat fill). */
@@ -248,7 +255,7 @@ body * {
 
 /* Uppercase mono label — labels, badges, cites. */
 .label-mono {
-  font-family: var(--font-mono), ui-monospace, monospace;
+  font-family: var(--app-mono), ui-monospace, monospace;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
