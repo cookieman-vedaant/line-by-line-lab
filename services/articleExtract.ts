@@ -46,11 +46,22 @@ export async function extractArticleFromUrl(
     // before making the request — a user-supplied link can't reach an internal or
     // cloud-metadata address. It also handles the browser-like UA target + timeout.
     const res = await safeFetch(url, {
+      // A full, Chrome-like header set. Many publishers serve a thin/blocked page
+      // to requests that only send a UA; matching a real browser's headers gets
+      // the full article from servers that sniff for them. (It does NOT defeat a
+      // JS challenge like Cloudflare's "Just a moment" — those need a real browser,
+      // so those sites still fall back to the abstract.)
       headers: {
-        // Some sites block requests without a browser-like UA.
         "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
       },
       timeoutMs,
     });
