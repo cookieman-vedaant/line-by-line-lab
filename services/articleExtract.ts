@@ -1,6 +1,7 @@
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 import { hasPaywallPhrase, hasStructuredPaywallSignal } from "@/lib/paywall";
+import { BlockedUrlError, safeFetch } from "@/lib/ssrfGuard";
 
 /** Honest failure — the article couldn't be fetched or parsed. */
 export class ArticleUnreadableError extends Error {
@@ -41,15 +42,17 @@ export async function extractArticleFromUrl(
 ): Promise<ExtractedArticle> {
   let html: string;
   try {
-    const res = await fetch(url, {
+    // safeFetch validates the URL (and every redirect hop) against the SSRF guard
+    // before making the request — a user-supplied link can't reach an internal or
+    // cloud-metadata address. It also handles the browser-like UA target + timeout.
+    const res = await safeFetch(url, {
       headers: {
         // Some sites block requests without a browser-like UA.
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
         Accept: "text/html,application/xhtml+xml",
       },
-      redirect: "follow",
-      signal: AbortSignal.timeout(timeoutMs),
+      timeoutMs,
     });
     if (!res.ok) {
       throw new ArticleUnreadableError(
@@ -59,6 +62,11 @@ export async function extractArticleFromUrl(
     html = await res.text();
   } catch (err) {
     if (err instanceof ArticleUnreadableError) throw err;
+    if (err instanceof BlockedUrlError) {
+      throw new ArticleUnreadableError(
+        "That URL can't be fetched (it points to a private or blocked address). Paste the article text instead.",
+      );
+    }
     throw new ArticleUnreadableError(
       "The article couldn't be fetched (timeout or network error). Try pasting the article text instead.",
     );
