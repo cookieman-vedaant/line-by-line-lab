@@ -11,6 +11,16 @@ const inputClasses =
   "placeholder:text-ink/40 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/35";
 const labelClasses = "label-mono mb-2 block text-xs text-ink";
 
+/** Flatten the whole contradiction report to plain text for a one-click copy. */
+function reportToText(r: RehighlightResult): string {
+  return r.contradictions
+    .map(
+      (c, i) =>
+        `${i + 1}. [${c.kind}] "${c.quote}"\n   ${c.explanation}\n   How to run it: ${c.howToUse}`,
+    )
+    .join("\n\n");
+}
+
 export default function RehighlighterPanel() {
   const [mode, setMode] = useState<"card" | "url">("card");
   const [card, setCard] = useState("");
@@ -19,6 +29,18 @@ export default function RehighlighterPanel() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<RehighlightResult | null>(null);
+  const [copiedAll, setCopiedAll] = useState(false);
+
+  async function handleCopyAll() {
+    if (!result) return;
+    try {
+      await navigator.clipboard.writeText(reportToText(result));
+      setCopiedAll(true);
+      setTimeout(() => setCopiedAll(false), 2000);
+    } catch {
+      // Clipboard blocked — no-op; the report is still on screen.
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -162,9 +184,19 @@ export default function RehighlighterPanel() {
             />
           </div>
           <div>
-            <h3 className="label-mono mb-3 text-xs text-ink/70">
-              Contradictions ({result.contradictions.length})
-            </h3>
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h3 className="label-mono text-xs text-ink/70">
+                Contradictions ({result.contradictions.length})
+              </h3>
+              <button
+                type="button"
+                onClick={handleCopyAll}
+                className={`btn-press shrink-0 border-[3px] border-black px-2.5 py-1 font-display text-[10px]
+                  font-bold uppercase tracking-wide ${copiedAll ? "bg-black text-white" : "bg-paper text-ink"}`}
+              >
+                {copiedAll ? "Copied ✓" : "Copy all"}
+              </button>
+            </div>
             <div className="flex flex-col gap-4">
               {result.contradictions.map((c, i) => (
                 <ContradictionCard key={i} item={c} index={i} />
