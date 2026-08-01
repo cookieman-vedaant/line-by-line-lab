@@ -38,7 +38,7 @@ export async function POST(req: Request) {
   const bot = await botBlock();
   if (bot) return bot;
   // Cut can carry a large pasted article, so allow a bigger body than default.
-  const blocked = await guardApi(req, { name: "cut", bodyLimitBytes: 1024 * 1024 });
+  const blocked = await guardApi(req, { name: "cut", bodyLimitBytes: 1024 * 1024, requireAuth: true });
   if (blocked) return blocked;
 
   let body: unknown;

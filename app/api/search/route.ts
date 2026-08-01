@@ -21,7 +21,7 @@ const searchRequestSchema = z.object({
 export async function POST(req: Request) {
   const bot = await botBlock();
   if (bot) return bot;
-  const blocked = await guardApi(req, { name: "search" });
+  const blocked = await guardApi(req, { name: "search", requireAuth: true });
   if (blocked) return blocked;
 
   let body: unknown;

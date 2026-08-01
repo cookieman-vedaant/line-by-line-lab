@@ -13,7 +13,7 @@ const requestSchema = z.object({ prompt: z.string().trim().min(1).max(120) });
 export async function POST(req: Request) {
   const bot = await botBlock();
   if (bot) return bot;
-  const blocked = await guardApi(req, { name: "theme" });
+  const blocked = await guardApi(req, { name: "theme", requireAuth: true });
   if (blocked) return blocked;
 
   let body: unknown;

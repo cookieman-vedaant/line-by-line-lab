@@ -6,6 +6,12 @@ vi.mock("@/services/themeAgent", () => ({
   ThemeGenerationError: class ThemeGenerationError extends Error {},
 }));
 
+// The route now requires a signed-in session (guardApi requireAuth). Simulate a
+// logged-in user so the guard passes without a real request/cookie context.
+vi.mock("@/lib/supabase/user", () => ({
+  requireUser: vi.fn(async () => ({ ok: true, user: { id: "test-user" }, supabase: {} })),
+}));
+
 import { POST } from "@/app/api/theme/route";
 
 function post(body: unknown): Request {

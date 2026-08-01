@@ -29,7 +29,7 @@ const requestSchema = z.object({ rounds: z.array(roundSchema).min(1).max(200) })
 export async function POST(req: Request) {
   const bot = await botBlock();
   if (bot) return bot;
-  const blocked = await guardApi(req, { name: "profile" });
+  const blocked = await guardApi(req, { name: "profile", requireAuth: true });
   if (blocked) return blocked;
 
   let body: unknown;

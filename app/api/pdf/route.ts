@@ -29,6 +29,7 @@ export async function POST(req: Request) {
     name: "pdf",
     bodyLimitBytes: MAX_BYTES + 1024 * 1024,
     countGlobal: false,
+    requireAuth: true,
   });
   if (blocked) return blocked;
 

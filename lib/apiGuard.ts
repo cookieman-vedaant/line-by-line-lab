@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { rateLimitShared } from "@/lib/apiRateLimit";
+import { requireUser } from "@/lib/supabase/user";
 import { requestIsVerifiedHuman } from "@/lib/turnstile";
 
 /**
@@ -79,6 +80,13 @@ export interface GuardOptions {
   /** Override the per-IP per-minute rate limit (default from API_RATE_PER_MIN).
    *  Raise it for frequent lightweight pings (e.g. presence heartbeats). */
   perMinute?: number;
+  /**
+   * Require a signed-in Supabase session (401 if none). Defense in depth on top
+   * of the page middleware: the app's tools are only meant for logged-in users,
+   * so a direct unauthenticated API call is rejected even if the middleware
+   * route-gate were somehow bypassed. Default off.
+   */
+  requireAuth?: boolean;
 }
 
 function block(status: number, error: string): NextResponse {
@@ -104,6 +112,13 @@ export async function guardApi(req: Request, opts: GuardOptions): Promise<NextRe
       403,
       "Please verify you're human — reload the page and complete the quick check, then try again.",
     );
+  }
+
+  // Session gate (defense in depth). Rejects unauthenticated calls to app-only
+  // tools even if the page middleware were bypassed.
+  if (opts.requireAuth) {
+    const auth = await requireUser();
+    if (!auth.ok) return auth.response;
   }
 
   if (bodyTooLarge(req, opts.bodyLimitBytes ?? DEFAULT_BODY_LIMIT)) {

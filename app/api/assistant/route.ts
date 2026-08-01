@@ -39,7 +39,7 @@ export async function POST(req: Request) {
   const bot = await botBlock();
   if (bot) return bot;
   // A Coach turn can carry an uploaded document + long history — allow 1 MB.
-  const blocked = await guardApi(req, { name: "coach", bodyLimitBytes: 1024 * 1024 });
+  const blocked = await guardApi(req, { name: "coach", bodyLimitBytes: 1024 * 1024, requireAuth: true });
   if (blocked) return blocked;
 
   let body: unknown;
