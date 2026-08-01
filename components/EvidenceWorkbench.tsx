@@ -5,6 +5,7 @@ import ArticleResults from "@/components/ArticleResults";
 import CardCutterPanel from "@/components/CardCutterPanel";
 import CardView from "@/components/CardView";
 import CoachPanel from "@/components/CoachPanel";
+import RehighlighterPanel from "@/components/RehighlighterPanel";
 import RoundLogPanel from "@/components/RoundLogPanel";
 import SearchForm from "@/components/SearchForm";
 import { requestCut, requestSearch } from "@/lib/apiClient";
@@ -18,7 +19,7 @@ type SearchState =
   | { status: "empty"; notice: string }
   | { status: "error"; message: string };
 
-type Tab = "find" | "cut" | "coach" | "record";
+type Tab = "find" | "cut" | "rehighlight" | "coach" | "record";
 
 export default function EvidenceWorkbench() {
   const [tab, setTab] = useState<Tab>("find");
@@ -127,6 +128,7 @@ export default function EvidenceWorkbench() {
       <nav aria-label="Tool" className="flex flex-wrap gap-3">
         {tabButton("find", "Find Articles")}
         {tabButton("cut", "Cut a Card")}
+        {tabButton("rehighlight", "Re-Highlight")}
         {tabButton("coach", "Coach")}
         {tabButton("record", "Record")}
       </nav>
@@ -152,6 +154,12 @@ export default function EvidenceWorkbench() {
             initialClaim={lastParams?.claim}
             onCardCut={(card, source) => setLastCut({ card, source })}
           />
+        </div>
+      </div>
+
+      <div className={tab === "rehighlight" ? "" : "hidden"}>
+        <div className="tab-panel">
+          <RehighlighterPanel />
         </div>
       </div>
 

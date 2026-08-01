@@ -9,6 +9,8 @@ interface CardViewProps {
   /** Where the article came from, for the footer link (optional for pasted text). */
   sourceUrl?: string;
   sourceName?: string;
+  /** Masthead label (defaults to the cutter's). */
+  kicker?: string;
 }
 
 /**
@@ -125,7 +127,7 @@ async function copyCard(card: Card, highlightHex: string): Promise<void> {
 
 /* ---------- Component ---------- */
 
-export default function CardView({ card, sourceUrl, sourceName }: CardViewProps) {
+export default function CardView({ card, sourceUrl, sourceName, kicker = "✂ Cut Card" }: CardViewProps) {
   const [copied, setCopied] = useState(false);
   const [highlightColor, setHighlightColor] = useState<HighlightColor>("cyan");
   // A freshly cut card is a new object — reset the highlighter back to default.
@@ -155,7 +157,7 @@ export default function CardView({ card, sourceUrl, sourceName }: CardViewProps)
           fixed-dark — only the copy button carries the theme accent. */}
       <div className="mb-4 flex items-center justify-between gap-4 border-b-[3px] border-black pb-3">
         <span className="label-mono border-[3px] border-black bg-black px-2 py-1 text-[10px] text-white">
-          ✂ Cut Card
+          {kicker}
         </span>
         <div className="flex items-center gap-3">
           {/* Highlighter color — recolors every highlight in this card, in both

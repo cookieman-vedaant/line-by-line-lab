@@ -14,6 +14,7 @@ initBotId({
   protect: [
     { path: "/api/search", method: "POST" },
     { path: "/api/cut", method: "POST" },
+    { path: "/api/rehighlight", method: "POST" },
     { path: "/api/assistant", method: "POST" },
     { path: "/api/theme", method: "POST" },
     { path: "/api/pdf", method: "POST" },

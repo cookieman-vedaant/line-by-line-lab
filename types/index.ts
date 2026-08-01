@@ -278,3 +278,52 @@ export interface DebaterProfile {
   weaknesses: string[]; // recurring weaknesses to work on
   focusAreas: string[]; // concrete things to prep/drill next
 }
+
+// ---- Card Re-Highlighter (indict an opponent's card from its own source) ----
+
+/** How a passage in the source undercuts the opponent's card. */
+export type ContradictionKind =
+  | "contradiction" // the article states/implies the opposite
+  | "omitted_context" // context the card cut that changes the meaning
+  | "author_hedge" // the author qualifies or limits the claim
+  | "miscut"; // the highlighted span misrepresents the sentence
+
+/** One verbatim way the source works against the opponent's card. */
+export interface Contradiction {
+  quote: string; // VERBATIM from the article (programmatically verified)
+  kind: ContradictionKind;
+  explanation: string; // analysis of the real text (allowed; never new evidence)
+  howToUse: string; // how to deploy it in-round
+}
+
+/** Where the Re-Highlighter gets the source article. At least one of card/url/text. */
+export interface RehighlightSource {
+  card?: string; // pasted opponent card (tag + cite + body)
+  url?: string; // source article URL
+  text?: string; // raw pasted article text (fallback)
+  title?: string; // optional metadata for the cite (pasted-text path)
+  author?: string;
+  publication?: string;
+  date?: string;
+}
+
+/** What `/api/rehighlight` accepts. */
+export interface RehighlightRequest {
+  source: RehighlightSource;
+  opponentClaim?: string; // auto-derived from the card's tag when omitted
+}
+
+/**
+ * What `/api/rehighlight` returns. `card` is the re-highlighted SOURCE article
+ * (verbatim body with emphasis on the counter-warrant passages), rendered by the
+ * existing CardView. `contradictions` is verbatim-verified — an empty array is a
+ * valid, honest "this card holds up" result. `notice` flags a degraded run
+ * (e.g. the full article couldn't be fetched, so only the pasted card was read).
+ */
+export interface RehighlightResult {
+  card: Card;
+  contradictions: Contradiction[];
+  articleTitle: string;
+  sourceUrl?: string;
+  notice?: string;
+}
