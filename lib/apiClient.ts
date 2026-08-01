@@ -5,6 +5,8 @@ import type {
   Card,
   CutRequest,
   DebaterProfile,
+  RehighlightRequest,
+  RehighlightResult,
   Round,
   SearchParams,
   ThemeSpec,
@@ -203,6 +205,31 @@ export async function requestCut(req: CutRequest): Promise<CutOutcome> {
       return { ok: false, error: data.error ?? "Card cutting failed. Try another article." };
     }
     return { ok: true, card: data.card };
+  } catch {
+    return { ok: false, error: "Could not reach the server. Is it running?" };
+  }
+}
+
+export type RehighlightOutcome =
+  | { ok: true; result: RehighlightResult }
+  | { ok: false; error: string };
+
+/** Re-highlight an opponent's card against its own source. */
+export async function requestRehighlight(req: RehighlightRequest): Promise<RehighlightOutcome> {
+  try {
+    const res = await fetch("/api/rehighlight", {
+      method: "POST",
+      headers: apiHeaders(),
+      body: JSON.stringify(req),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.result) {
+      return {
+        ok: false,
+        error: data.error ?? "Re-highlight failed. Try another card or paste the article URL.",
+      };
+    }
+    return { ok: true, result: data.result };
   } catch {
     return { ok: false, error: "Could not reach the server. Is it running?" };
   }
