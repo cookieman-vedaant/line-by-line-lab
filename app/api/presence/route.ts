@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { guardApi } from "@/lib/apiGuard";
 import { countOnline } from "@/lib/presence";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -37,9 +38,24 @@ export async function POST(req: Request) {
   const auth = await requireUser();
   if (!auth.ok) return auth.response;
 
-  // 1) Stamp THIS user active. The RLS-bound client updates only their own row.
-  //    Best-effort — a hiccup here must not break the live count.
-  const stamp = await auth.supabase
+  // Prefer the service-role admin client for BOTH the stamp and the count. Using
+  // it for the stamp matters: the write is scoped to the caller's OWN row by their
+  // verified session id (auth.user.id — never client input), so a missing/edge
+  // RLS UPDATE policy on `profiles` can't silently drop the heartbeat (Postgres
+  // returns no error for an RLS-blocked update, so that failure is invisible).
+  // If the admin client is unavailable (e.g. SUPABASE_SERVICE_ROLE_KEY isn't set
+  // in this environment), fall back to the user's RLS client for the stamp and
+  // just report the caller as online — never 500, never hide the chip.
+  let admin: SupabaseClient | null = null;
+  try {
+    admin = createSupabaseAdminClient();
+  } catch (err) {
+    console.warn("presence: admin client unavailable; using RLS client, count=1", err);
+  }
+
+  // 1) Stamp THIS user active (their own row only). Best-effort — a hiccup here
+  //    must not break the live count.
+  const stamp = await (admin ?? auth.supabase)
     .from("profiles")
     .update({ last_seen: new Date().toISOString() })
     .eq("id", auth.user.id);
@@ -47,17 +63,19 @@ export async function POST(req: Request) {
     console.warn("presence last_seen update failed", stamp.error.message);
   }
 
-  // 2) Count everyone active in the window. Service-role so it sees all rows;
-  //    only the number leaves the server, never who. We stamped first, so the
-  //    caller is always included. If the admin client is unavailable (e.g. the
-  //    SUPABASE_SERVICE_ROLE_KEY isn't set in this environment) or the query
-  //    hiccups, fall back to 1 rather than 500-ing — the chip should still show
-  //    the user themselves instead of disappearing.
+  // 2) Count everyone active in the window. Only the NUMBER leaves the server,
+  //    never who. We just stamped the caller, so they're always in the window —
+  //    and because a signed-in caller IS online by definition, we floor the
+  //    result at 1. This is the crux of the "chip won't show" bug: countOnline
+  //    returns 0 (not null) for an empty window, so `?? 1` couldn't catch it and
+  //    the route returned {count: 0}, which LiveCount hides at `count < 1`.
   let count = 1;
-  try {
-    count = (await countOnline(createSupabaseAdminClient())) ?? 1;
-  } catch (err) {
-    console.warn("presence count unavailable; showing 1", err);
+  if (admin) {
+    try {
+      count = Math.max(1, (await countOnline(admin)) ?? 1);
+    } catch (err) {
+      console.warn("presence count unavailable; showing 1", err);
+    }
   }
 
   return NextResponse.json({ count });
