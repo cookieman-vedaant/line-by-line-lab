@@ -23,7 +23,7 @@ function renderNodes(nodes: MarkupNode[], plainClass: string) {
       return (
         <mark
           key={i}
-          className="bg-cyan-300 font-bold underline decoration-2 text-[12pt] text-black"
+          className="bg-cyan-300 font-bold underline decoration-2 text-[11pt] text-black"
         >
           {node.text}
         </mark>
@@ -31,7 +31,7 @@ function renderNodes(nodes: MarkupNode[], plainClass: string) {
     }
     if (node.kind === "underline") {
       return (
-        <span key={i} className="underline text-[12pt]">
+        <span key={i} className="underline text-[11pt]">
           {node.text}
         </span>
       );
@@ -55,10 +55,10 @@ function nodesToHtml(nodes: MarkupNode[], plainSizePt: number): string {
     .map((node) => {
       const text = escapeHtml(node.text);
       if (node.kind === "highlight") {
-        return `<b><u><span style="font-size:12pt;background:#00ffff">${text}</span></u></b>`;
+        return `<b><u><span style="font-size:11pt;background:#00ffff">${text}</span></u></b>`;
       }
       if (node.kind === "underline") {
-        return `<u><span style="font-size:12pt">${text}</span></u>`;
+        return `<u><span style="font-size:11pt">${text}</span></u>`;
       }
       return `<span style="font-size:${plainSizePt}pt">${text}</span>`;
     })
@@ -73,17 +73,21 @@ function cardToHtml(card: Card): string {
     })
     .join("");
 
+  // Body paragraphs: 2pt before / 0 after, so the card pastes in tight. Emphasis
+  // is 11pt; kept-but-unread context stays 8pt.
   const bodyHtml = card.body
     .split(/\n+/)
     .filter((p) => p.trim().length > 0)
-    .map((p) => `<p style="margin:0 0 8pt 0">${nodesToHtml(parseCardMarkup(p), 8)}</p>`)
+    .map((p) => `<p style="margin:2pt 0 0 0">${nodesToHtml(parseCardMarkup(p), 8)}</p>`)
     .join("");
 
   return (
     `<div style="font-family:Calibri, 'Segoe UI', sans-serif">` +
-    `<p style="margin:0 0 6pt 0"><b><span style="font-size:13pt">${tagHtml}</span></b></p>` +
-    `<p style="margin:0 0 8pt 0"><b><span style="font-size:12pt">${escapeHtml(card.cite)}</span></b> ` +
-    `<span style="font-size:8pt">[${escapeHtml(card.citeDetails)}]</span></p>` +
+    // Tag as Heading 3 so it lands in the Google Docs outline; inline overrides
+    // keep it black Calibri 13pt with 1.07 line spacing (2pt before / 0 after).
+    `<h3 style="font-family:Calibri, 'Segoe UI', sans-serif; font-size:13pt; font-weight:bold; color:#000000; line-height:1.07; margin:2pt 0 0 0">${tagHtml}</h3>` +
+    `<p style="margin:2pt 0 0 0"><b><span style="font-size:11pt">${escapeHtml(card.cite)}</span></b> ` +
+    `<span style="font-size:11pt">[${escapeHtml(card.citeDetails)}]</span></p>` +
     bodyHtml +
     `</div>`
   );
@@ -160,8 +164,8 @@ export default function CardView({ card, sourceUrl, sourceName }: CardViewProps)
 
       {/* Cite: bold 12pt short cite + 8pt bracketed details */}
       <p className="mt-3 leading-snug text-black">
-        <span className="text-[12pt] font-bold">{card.cite}</span>{" "}
-        <span className="text-[8pt] text-neutral-500">[{stripDelimiters(card.citeDetails)}]</span>
+        <span className="text-[11pt] font-bold">{card.cite}</span>{" "}
+        <span className="text-[11pt] text-neutral-500">[{stripDelimiters(card.citeDetails)}]</span>
       </p>
 
       {/* Body: 12pt underlined/highlighted, 8pt shrunk context */}
