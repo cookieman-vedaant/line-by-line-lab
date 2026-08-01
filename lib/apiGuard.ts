@@ -80,6 +80,11 @@ export interface GuardOptions {
   /** Override the per-IP per-minute rate limit (default from API_RATE_PER_MIN).
    *  Raise it for frequent lightweight pings (e.g. presence heartbeats). */
   perMinute?: number;
+  /** Override the per-IP per-DAY cap (default from API_RATE_PER_DAY). Must be
+   *  raised for frequent heartbeats — a 15s presence ping is ~5,760/day, which
+   *  would otherwise blow the default 120/day cap in half an hour and 429 the
+   *  live count for the rest of the day. Not for AI tools (keep their daily cap). */
+  perDay?: number;
   /**
    * Require a signed-in Supabase session (401 if none). Defense in depth on top
    * of the page middleware: the app's tools are only meant for logged-in users,
@@ -132,7 +137,7 @@ export async function guardApi(req: Request, opts: GuardOptions): Promise<NextRe
     return block(429, "You're going a bit fast — wait a few seconds and try again.");
   }
 
-  const perDay = await rateLimitShared(`d:${opts.name}:${ip}`, PER_IP_PER_DAY, 86_400);
+  const perDay = await rateLimitShared(`d:${opts.name}:${ip}`, opts.perDay ?? PER_IP_PER_DAY, 86_400);
   if (!perDay.allowed) {
     return block(429, "You've hit today's usage limit for this tool. Try again tomorrow.");
   }

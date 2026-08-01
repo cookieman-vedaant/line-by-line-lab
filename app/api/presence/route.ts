@@ -25,6 +25,10 @@ export async function POST(req: Request) {
   const blocked = await guardApi(req, {
     name: "presence",
     perMinute: 120,
+    // A 15s heartbeat is ~5,760 pings/day (more with several tabs). The default
+    // 120/day cap would 429 the live count after ~30 min of use, so give the
+    // heartbeat a generous daily ceiling that still bounds abuse.
+    perDay: 20000,
     countGlobal: false,
     requireHuman: false,
   });
