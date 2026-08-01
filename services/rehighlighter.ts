@@ -12,7 +12,7 @@ import { normalizeForComparison } from "@/lib/verbatim";
 import { appendSourceUrl } from "@/services/cardCutter";
 import {
   ArticleUnreadableError,
-  extractArticleFromUrl,
+  extractArticleCached,
   type ExtractedArticle,
 } from "@/services/articleExtract";
 import type {
@@ -191,14 +191,14 @@ async function resolveSource(
   const s = req.source;
 
   if (s.url) {
-    return { article: await extractArticleFromUrl(s.url), sourceUrl: s.url };
+    return { article: await extractArticleCached(s.url), sourceUrl: s.url };
   }
 
   if (s.card?.trim()) {
     const url = parseUrlFromCard(s.card);
     if (url) {
       try {
-        return { article: await extractArticleFromUrl(url), sourceUrl: url };
+        return { article: await extractArticleCached(url), sourceUrl: url };
       } catch (err) {
         if (!(err instanceof ArticleUnreadableError)) throw err;
         // Fetch failed (paywall/blocked) — fall through to reading the card body.

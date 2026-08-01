@@ -2,6 +2,8 @@ import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 import {
   cleanAuthor,
+  extractArticleCached,
+  type ExtractedArticle,
   extractPageMetadata,
   findBylineInText,
   normalizeDate,
@@ -121,5 +123,47 @@ describe("findBylineInText", () => {
   });
   it("returns empty when there's no byline", () => {
     expect(findBylineInText("This article has no byline anywhere in it.")).toBe("");
+  });
+});
+
+describe("extractArticleCached", () => {
+  const sample: ExtractedArticle = {
+    title: "T",
+    author: "A",
+    publication: "P",
+    date: "2026-01-01",
+    text: "the article body",
+  };
+  // Unique URL per test so the module-level cache can't leak state between them.
+  const freshUrl = () => `https://example.com/a-${Math.random().toString(36).slice(2)}`;
+
+  it("reuses a recent extraction instead of fetching the same URL twice", async () => {
+    let calls = 0;
+    const extractor = async () => {
+      calls += 1;
+      return sample;
+    };
+    const url = freshUrl();
+    // The Article Finder verifies (short timeout); the follow-up cut uses the
+    // longer default. The second call must be a cache HIT — no second download.
+    const first = await extractArticleCached(url, 6500, extractor);
+    const second = await extractArticleCached(url, 15000, extractor);
+    expect(calls).toBe(1);
+    expect(second).toEqual(first);
+  });
+
+  it("does not cache a failed extraction — a later attempt still runs", async () => {
+    let calls = 0;
+    const flaky = async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("boom"); // e.g. a transient timeout on verify
+      return sample;
+    };
+    const url = freshUrl();
+    await expect(extractArticleCached(url, 6500, flaky)).rejects.toThrow("boom");
+    // The rejection was NOT cached, so the cut's longer-timeout retry recomputes.
+    const ok = await extractArticleCached(url, 15000, flaky);
+    expect(calls).toBe(2);
+    expect(ok).toEqual(sample);
   });
 });
