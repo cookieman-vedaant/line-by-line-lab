@@ -31,6 +31,10 @@ const requestSchema = z.object({
       profile: z.string().max(2000).optional(),
       // Compact local round-log summary (record + recent rounds) for specifics.
       record: z.string().max(6000).optional(),
+      // Compact list of the debater's current Article Finder results (+ URLs).
+      foundArticles: z.string().max(8000).optional(),
+      // Compact view of the debater's most recent cut card (tag/cite/excerpt).
+      lastCard: z.string().max(4000).optional(),
     })
     .optional(),
 });

@@ -254,6 +254,18 @@ export function buildSystem(context?: AssistantContext): string {
     );
   }
 
+  if (context.foundArticles && context.foundArticles.trim().length > 0) {
+    sections.push(
+      `ARTICLES THE DEBATER FOUND IN THE ARTICLE FINDER — real sources they just pulled up, each with a URL. When they refer to "the article(s) I found" or ask you to cut or discuss them, use THESE: you can cut from one of these URLs directly with cut_card — do NOT run a new find_articles search unless they explicitly want different evidence. Reference them by title so they know which you mean:\n${context.foundArticles.trim()}`,
+    );
+  }
+
+  if (context.lastCard && context.lastCard.trim().length > 0) {
+    sections.push(
+      `A CARD THE DEBATER ALREADY CUT IN THE APP — their most recent cut (tag, cite, and a verbatim body excerpt). Treat it as THEIR work to strengthen: judge whether the tag matches what the evidence proves, whether the warrant actually supports the claim, and whether they should recut it longer/shorter or find a better card. Do NOT treat its body as a source to quote for a different claim, and never rewrite or paraphrase the card's wording:\n${context.lastCard.trim()}`,
+    );
+  }
+
   if (context.document && context.document.trim().length > 0) {
     const full = context.document.trim();
     const doc = full.slice(0, MAX_DOCUMENT_CHARS);

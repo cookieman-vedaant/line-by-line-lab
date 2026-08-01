@@ -8,7 +8,8 @@ import CoachPanel from "@/components/CoachPanel";
 import RoundLogPanel from "@/components/RoundLogPanel";
 import SearchForm from "@/components/SearchForm";
 import { requestCut, requestSearch } from "@/lib/apiClient";
-import type { Article, Card, CardLength, SearchParams } from "@/types";
+import { articlesToContext, cardToContext } from "@/lib/coachContext";
+import type { Article, AssistantContext, Card, CardLength, SearchParams } from "@/types";
 
 type SearchState =
   | { status: "idle" }
@@ -27,6 +28,12 @@ export default function EvidenceWorkbench() {
   const [cuttingUrl, setCuttingUrl] = useState<string | null>(null);
   const [cutError, setCutError] = useState<string | null>(null);
   const [result, setResult] = useState<{ card: Card; article: Article } | null>(null);
+  // The most recent card cut ANYWHERE (Finder or Cut-a-Card), so the Coach can
+  // pick it up as context. Seed the Coach's input on a "Discuss in Coach" jump.
+  const [lastCut, setLastCut] = useState<{ card: Card; source: string } | null>(null);
+  const [coachSeed, setCoachSeed] = useState<{ prompt: string; nonce: number } | undefined>(
+    undefined,
+  );
 
   async function handleSearch(params: SearchParams) {
     setSearch({ status: "searching" });
@@ -72,6 +79,34 @@ export default function EvidenceWorkbench() {
       return;
     }
     setResult({ card: outcome.card, article });
+    setLastCut({ card: outcome.card, source: `${article.title} (${article.url})` });
+  }
+
+  // Everything the Coach should know from the other tabs: the current claim, the
+  // Article Finder results, and the last card cut. Profile + rounds are merged in
+  // by the Coach itself from local storage.
+  const foundArticles = search.status === "results" ? search.articles : null;
+  const coachContext: AssistantContext | undefined = (() => {
+    const ctx: AssistantContext = {};
+    if (lastParams) {
+      ctx.claim = lastParams.claim;
+      ctx.evidenceType = lastParams.evidenceType;
+    }
+    if (foundArticles && foundArticles.length > 0) {
+      ctx.foundArticles = articlesToContext(foundArticles);
+    }
+    if (lastCut) ctx.lastCard = cardToContext(lastCut.card, lastCut.source);
+    return Object.keys(ctx).length > 0 ? ctx : undefined;
+  })();
+
+  function discussInCoach(article?: Article) {
+    if (article) {
+      setCoachSeed({
+        prompt: `I found this in the Article Finder — help me use it: "${article.title}" (${article.url})`,
+        nonce: Date.now(),
+      });
+    }
+    setTab("coach");
   }
 
   const tabButton = (value: Tab, label: string) => (
@@ -104,13 +139,7 @@ export default function EvidenceWorkbench() {
 
       <div className={tab === "coach" ? "" : "hidden"}>
         <div className="tab-panel">
-          <CoachPanel
-            context={
-              lastParams
-                ? { claim: lastParams.claim, evidenceType: lastParams.evidenceType }
-                : undefined
-            }
-          />
+          <CoachPanel context={coachContext} seed={coachSeed} />
         </div>
       </div>
 
@@ -119,7 +148,10 @@ export default function EvidenceWorkbench() {
           animation each time it's shown. */}
       <div className={tab === "cut" ? "" : "hidden"}>
         <div className="tab-panel">
-          <CardCutterPanel initialClaim={lastParams?.claim} />
+          <CardCutterPanel
+            initialClaim={lastParams?.claim}
+            onCardCut={(card, source) => setLastCut({ card, source })}
+          />
         </div>
       </div>
 
@@ -154,6 +186,7 @@ export default function EvidenceWorkbench() {
                 onCutLengthChange={setCutLength}
                 onCut={handleCut}
                 cuttingUrl={cuttingUrl}
+                onDiscuss={discussInCoach}
               />
             </div>
           )}

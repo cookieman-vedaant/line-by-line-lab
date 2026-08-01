@@ -9,6 +9,8 @@ interface ArticleResultsProps {
   onCut: (article: Article) => void;
   /** URL of the article currently being cut, if any. */
   cuttingUrl: string | null;
+  /** Hand off to the Coach — a specific article, or (no arg) the whole result set. */
+  onDiscuss?: (article?: Article) => void;
 }
 
 function credibilityLabel(score: number): string {
@@ -32,6 +34,7 @@ export default function ArticleResults({
   onCutLengthChange,
   onCut,
   cuttingUrl,
+  onDiscuss,
 }: ArticleResultsProps) {
   const busy = cuttingUrl !== null;
 
@@ -42,21 +45,34 @@ export default function ArticleResults({
           {articles.length} article{articles.length === 1 ? "" : "s"}{" "}
           <span className="text-accent">found</span>
         </h2>
-        <label className="label-mono flex items-center gap-2 text-xs">
-          Card length
-          <select
-            value={cutLength}
-            onChange={(e) => onCutLengthChange(e.target.value as CardLength)}
-            className="frame bg-paper-2 px-2 py-1 font-mono text-xs font-medium
-              text-ink focus:border-accent focus:outline-none"
-          >
-            {CARD_LENGTHS.map((length) => (
-              <option key={length} value={length}>
-                {length}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="flex flex-wrap items-center gap-3">
+          {onDiscuss && (
+            <button
+              type="button"
+              onClick={() => onDiscuss()}
+              title="Take these results to the Coach to iterate on them"
+              className="btn-press frame bg-paper-2 px-3 py-1.5 font-display text-xs
+                font-bold uppercase tracking-wide text-ink hover:text-accent"
+            >
+              🎓 Discuss in Coach
+            </button>
+          )}
+          <label className="label-mono flex items-center gap-2 text-xs">
+            Card length
+            <select
+              value={cutLength}
+              onChange={(e) => onCutLengthChange(e.target.value as CardLength)}
+              className="frame bg-paper-2 px-2 py-1 font-mono text-xs font-medium
+                text-ink focus:border-accent focus:outline-none"
+            >
+              {CARD_LENGTHS.map((length) => (
+                <option key={length} value={length}>
+                  {length}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
 
       <ol className="flex flex-col gap-5">
@@ -106,15 +122,28 @@ export default function ArticleResults({
                 {article.explanation}
               </p>
 
-              <button
-                type="button"
-                onClick={() => onCut(article)}
-                disabled={busy}
-                className={`btn-press frame mt-4 px-4 py-2 font-display text-xs
-                  font-bold uppercase tracking-wide text-paper ${isCutting ? "bg-accent" : "bg-ink"}`}
-              >
-                {isCutting ? `Cutting ${cutLength.toLowerCase()} card…` : "✂ Cut Card"}
-              </button>
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onCut(article)}
+                  disabled={busy}
+                  className={`btn-press frame px-4 py-2 font-display text-xs
+                    font-bold uppercase tracking-wide text-paper ${isCutting ? "bg-accent" : "bg-ink"}`}
+                >
+                  {isCutting ? `Cutting ${cutLength.toLowerCase()} card…` : "✂ Cut Card"}
+                </button>
+                {onDiscuss && (
+                  <button
+                    type="button"
+                    onClick={() => onDiscuss(article)}
+                    title="Bring this article into the Coach"
+                    className="btn-press frame px-3 py-2 font-display text-xs
+                      font-bold uppercase tracking-wide text-ink hover:text-accent"
+                  >
+                    🎓 Ask Coach
+                  </button>
+                )}
+              </div>
             </li>
           );
         })}

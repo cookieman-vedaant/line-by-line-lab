@@ -149,6 +149,18 @@ export interface AssistantContext {
    * help in specific rounds. Personal + per-device — same isolation as `profile`.
    */
   record?: string;
+  /**
+   * The articles the debater just found in the Article Finder (numbered, with
+   * URLs). Lets the Coach pick up the same results and cut/iterate on them
+   * without re-searching. Built client-side from the current search results.
+   */
+  foundArticles?: string;
+  /**
+   * The most recent card the debater cut anywhere in the app (tag + cite + a
+   * verbatim body excerpt), so the Coach can help strengthen or recut it.
+   * Built client-side; treated as the debater's own work, never a new source.
+   */
+  lastCard?: string;
 }
 
 /** What `/api/assistant` accepts: the running conversation + optional context. */

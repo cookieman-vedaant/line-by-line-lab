@@ -34,8 +34,10 @@ interface Turn {
 }
 
 interface CoachPanelProps {
-  /** Optional hint about what the debater is working on (from the last search). */
+  /** Everything the Coach should know from the other tabs (search, found articles, last card). */
   context?: AssistantContext;
+  /** A "Discuss in Coach" handoff: seed the input box when the nonce changes. */
+  seed?: { prompt: string; nonce: number };
 }
 
 const STARTERS = [
@@ -45,7 +47,7 @@ const STARTERS = [
 ];
 
 /** The Coach: a conversational debate-prep agent that finds articles and cuts cards. */
-export default function CoachPanel({ context }: CoachPanelProps) {
+export default function CoachPanel({ context, seed }: CoachPanelProps) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -63,6 +65,17 @@ export default function CoachPanel({ context }: CoachPanelProps) {
   );
   // The debater's actual logged rounds, so the Coach can ground help in specifics.
   const rounds = useSyncExternalStore(subscribeRounds, getRoundsSnapshot, getRoundsServerSnapshot);
+
+  // "Discuss in Coach" handoff: when a new seed arrives (nonce changes), drop its
+  // text into the input so the debater lands mid-thought with the article ready.
+  const [seedNonce, setSeedNonce] = useState(seed?.nonce ?? 0);
+  if (seed && seed.nonce !== seedNonce) {
+    setSeedNonce(seed.nonce);
+    setInput(seed.prompt);
+  }
+
+  const hasFound = Boolean(context?.foundArticles?.trim());
+  const hasCard = Boolean(context?.lastCard?.trim());
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -149,6 +162,20 @@ export default function CoachPanel({ context }: CoachPanelProps) {
 
   return (
     <div className="flex flex-col gap-5">
+      {(hasFound || hasCard) && (
+        <div className="flex flex-wrap gap-2" aria-label="What the Coach can see">
+          {hasFound && (
+            <span className="label-mono frame bg-paper-2 px-2.5 py-1 text-[10px] text-ink/70">
+              📚 Your Article Finder results are in context
+            </span>
+          )}
+          {hasCard && (
+            <span className="label-mono frame bg-paper-2 px-2.5 py-1 text-[10px] text-ink/70">
+              ✂ Your last cut card is in context
+            </span>
+          )}
+        </div>
+      )}
       <div className="flex flex-col gap-4">
         {turns.length === 0 && (
           <div className="frame bg-paper-2 p-5">

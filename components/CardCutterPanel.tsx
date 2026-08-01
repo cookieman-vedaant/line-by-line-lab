@@ -14,10 +14,12 @@ const labelClasses = "label-mono mb-2 block text-xs text-ink";
 interface CardCutterPanelProps {
   /** Prefill the claim from the last search, if any. */
   initialClaim?: string;
+  /** Report a freshly cut card up so the Coach can pick it up as context. */
+  onCardCut?: (card: Card, sourceLabel: string) => void;
 }
 
 /** The standalone Card Cutter: bring your own article (URL or pasted text). */
-export default function CardCutterPanel({ initialClaim }: CardCutterPanelProps) {
+export default function CardCutterPanel({ initialClaim, onCardCut }: CardCutterPanelProps) {
   const [mode, setMode] = useState<"url" | "text">("url");
   const [url, setUrl] = useState("");
   const [text, setText] = useState("");
@@ -83,6 +85,9 @@ export default function CardCutterPanel({ initialClaim }: CardCutterPanelProps) 
     }
     setCutFromUrl(mode === "url" ? url.trim() : undefined);
     setCard(outcome.card);
+    const sourceLabel =
+      mode === "url" ? url.trim() : title.trim() || publication.trim() || "pasted article";
+    onCardCut?.(outcome.card, sourceLabel);
   }
 
   const modeButton = (value: "url" | "text", label: string) => (

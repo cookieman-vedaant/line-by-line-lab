@@ -13,17 +13,27 @@ interface CardViewProps {
 
 /**
  * Debate-card typography (per user spec):
- * Calibri throughout; underlined/highlighted text 12pt; shrunk unread text 8pt.
+ * Calibri throughout; underlined/highlighted text 11pt; shrunk unread text 8pt.
  */
 const CARD_FONT = { fontFamily: "Calibri, 'Segoe UI', sans-serif" };
 
-function renderNodes(nodes: MarkupNode[], plainClass: string) {
+/** Highlighter colors a debater can pick per card (cyan is the default). */
+export type HighlightColor = "cyan" | "yellow" | "green";
+const HIGHLIGHT_HEX: Record<HighlightColor, string> = {
+  cyan: "#00ffff",
+  yellow: "#ffff00",
+  green: "#00ff00",
+};
+const HIGHLIGHT_ORDER: HighlightColor[] = ["cyan", "yellow", "green"];
+
+function renderNodes(nodes: MarkupNode[], plainClass: string, highlightHex: string) {
   return nodes.map((node, i) => {
     if (node.kind === "highlight") {
       return (
         <mark
           key={i}
-          className="bg-cyan-300 font-bold underline decoration-2 text-[11pt] text-black"
+          style={{ backgroundColor: highlightHex }}
+          className="font-bold underline decoration-2 text-[11pt] text-black"
         >
           {node.text}
         </mark>
@@ -50,12 +60,12 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function nodesToHtml(nodes: MarkupNode[], plainSizePt: number): string {
+function nodesToHtml(nodes: MarkupNode[], plainSizePt: number, highlightHex: string): string {
   return nodes
     .map((node) => {
       const text = escapeHtml(node.text);
       if (node.kind === "highlight") {
-        return `<b><u><span style="font-size:11pt;background:#00ffff">${text}</span></u></b>`;
+        return `<b><u><span style="font-size:11pt;background:${highlightHex}">${text}</span></u></b>`;
       }
       if (node.kind === "underline") {
         return `<u><span style="font-size:11pt">${text}</span></u>`;
@@ -65,7 +75,7 @@ function nodesToHtml(nodes: MarkupNode[], plainSizePt: number): string {
     .join("");
 }
 
-function cardToHtml(card: Card): string {
+function cardToHtml(card: Card, highlightHex: string): string {
   const tagHtml = parseCardMarkup(card.tag)
     .map((n) => {
       const text = escapeHtml(n.text);
@@ -78,7 +88,7 @@ function cardToHtml(card: Card): string {
   const bodyHtml = card.body
     .split(/\n+/)
     .filter((p) => p.trim().length > 0)
-    .map((p) => `<p style="margin:2pt 0 0 0">${nodesToHtml(parseCardMarkup(p), 8)}</p>`)
+    .map((p) => `<p style="margin:2pt 0 0 0">${nodesToHtml(parseCardMarkup(p), 8, highlightHex)}</p>`)
     .join("");
 
   return (
@@ -97,8 +107,8 @@ function cardToPlainText(card: Card): string {
   return `${stripDelimiters(card.tag)}\n${card.cite} [${stripDelimiters(card.citeDetails)}]\n\n${stripDelimiters(card.body)}`;
 }
 
-async function copyCard(card: Card): Promise<void> {
-  const html = cardToHtml(card);
+async function copyCard(card: Card, highlightHex: string): Promise<void> {
+  const html = cardToHtml(card, highlightHex);
   const text = cardToPlainText(card);
   try {
     await navigator.clipboard.write([
@@ -117,9 +127,17 @@ async function copyCard(card: Card): Promise<void> {
 
 export default function CardView({ card, sourceUrl, sourceName }: CardViewProps) {
   const [copied, setCopied] = useState(false);
+  const [highlightColor, setHighlightColor] = useState<HighlightColor>("cyan");
+  // A freshly cut card is a new object — reset the highlighter back to default.
+  const [prevCard, setPrevCard] = useState(card);
+  if (card !== prevCard) {
+    setPrevCard(card);
+    setHighlightColor("cyan");
+  }
+  const highlightHex = HIGHLIGHT_HEX[highlightColor];
 
   async function handleCopy() {
-    await copyCard(card);
+    await copyCard(card, highlightHex);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
@@ -139,14 +157,36 @@ export default function CardView({ card, sourceUrl, sourceName }: CardViewProps)
         <span className="label-mono border-[3px] border-black bg-black px-2 py-1 text-[10px] text-white">
           ✂ Cut Card
         </span>
-        <button
-          type="button"
-          onClick={handleCopy}
-          className={`btn-press shrink-0 border-[3px] border-black px-3 py-1.5 font-display text-xs
-            font-bold uppercase tracking-wide ${copied ? "bg-black text-white" : "bg-accent text-paper"}`}
-        >
-          {copied ? "Copied ✓" : "Copy card"}
-        </button>
+        <div className="flex items-center gap-3">
+          {/* Highlighter color — recolors every highlight in this card, in both
+              the preview and the copied Google-Docs HTML. */}
+          <div className="flex items-center gap-1.5" role="group" aria-label="Highlight color">
+            {HIGHLIGHT_ORDER.map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => setHighlightColor(c)}
+                aria-label={`${c} highlights`}
+                aria-pressed={highlightColor === c}
+                title={`${c[0].toUpperCase() + c.slice(1)} highlights`}
+                style={{ backgroundColor: HIGHLIGHT_HEX[c] }}
+                className={`h-5 w-5 rounded-full transition ${
+                  highlightColor === c
+                    ? "border-[3px] border-black ring-2 ring-black ring-offset-1"
+                    : "border-2 border-black/40 hover:border-black"
+                }`}
+              />
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={handleCopy}
+            className={`btn-press shrink-0 border-[3px] border-black px-3 py-1.5 font-display text-xs
+              font-bold uppercase tracking-wide ${copied ? "bg-black text-white" : "bg-accent text-paper"}`}
+          >
+            {copied ? "Copied ✓" : "Copy card"}
+          </button>
+        </div>
       </div>
 
       {/* Tag: bold 13pt, underlined key phrases */}
@@ -168,11 +208,11 @@ export default function CardView({ card, sourceUrl, sourceName }: CardViewProps)
         <span className="text-[11pt] text-neutral-500">[{stripDelimiters(card.citeDetails)}]</span>
       </p>
 
-      {/* Body: 12pt underlined/highlighted, 8pt shrunk context */}
+      {/* Body: 11pt underlined/highlighted, 8pt shrunk context */}
       <div className="mt-4 flex flex-col gap-3 leading-relaxed text-black">
         {paragraphs.map((paragraph, i) => (
           <p key={i}>
-            {renderNodes(parseCardMarkup(paragraph), "text-[8pt] text-neutral-500")}
+            {renderNodes(parseCardMarkup(paragraph), "text-[8pt] text-neutral-500", highlightHex)}
           </p>
         ))}
       </div>
