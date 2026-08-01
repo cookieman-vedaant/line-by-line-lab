@@ -98,12 +98,20 @@ export async function extractArticleFromUrl(
 
   const text = htmlToParagraphText(parsed.content ?? "", parsed.textContent);
 
+  const publication =
+    meta.publication || parsed.siteName || new URL(url).hostname.replace(/^www\./, "");
+  // Prefer structured metadata over Readability's byline (often null); fall back
+  // to a visible byline in the article text. Then drop a "byline" that is really
+  // the site/publisher name, so the cite never prints the website as the author.
+  const author = cleanAuthor(
+    meta.author || parsed.byline || findBylineInText(text) || "",
+    publication,
+  );
+
   return {
     title: meta.title || parsed.title || "",
-    // Prefer structured metadata over Readability's byline (often null);
-    // fall back to a visible byline in the article text.
-    author: meta.author || parsed.byline || findBylineInText(text) || "",
-    publication: meta.publication || parsed.siteName || new URL(url).hostname.replace(/^www\./, ""),
+    author,
+    publication,
     date: meta.date || parsed.publishedTime?.slice(0, 10) || "",
     text,
   };
@@ -189,7 +197,11 @@ export function extractPageMetadata(doc: Document): PageMetadata {
   return meta;
 }
 
-/** Author name(s) from a JSON-LD node's `author` field (Person or Organization). */
+/**
+ * Human author name(s) from a JSON-LD node's `author` field. Skips authors
+ * explicitly typed as an Organization (sites that name THEMSELVES as author), so
+ * the cite gets the person who wrote the piece — not the publisher.
+ */
 function jsonLdAuthor(node: Record<string, unknown>): string {
   const author = node.author;
   if (!author) return "";
@@ -197,13 +209,31 @@ function jsonLdAuthor(node: Record<string, unknown>): string {
     .map((a) => {
       if (typeof a === "string") return a;
       if (a && typeof a === "object" && "name" in a) {
-        const name = (a as Record<string, unknown>).name;
-        return typeof name === "string" ? name : "";
+        const obj = a as Record<string, unknown>;
+        const type = obj["@type"];
+        // A person (or untyped) byline is what we want; drop Organization.
+        if (typeof type === "string" && /organization/i.test(type)) return "";
+        return typeof obj.name === "string" ? obj.name : "";
       }
       return "";
     })
     .filter(Boolean);
   return names.join(", ");
+}
+
+/**
+ * Drop an "author" that is really the website/publisher rather than a person, so
+ * the cite falls back to a real byline or the publication instead of printing the
+ * site name as the author (e.g. author "Reuters" on a Reuters page). Blanks the
+ * author when it equals, or clearly contains, the publication name.
+ */
+export function cleanAuthor(author: string, publication: string): string {
+  const a = author.trim();
+  if (!a) return "";
+  const pub = publication.trim().toLowerCase();
+  const low = a.toLowerCase();
+  if (pub && (low === pub || (pub.length >= 4 && low.includes(pub)))) return "";
+  return a;
 }
 
 function jsonLdPublisher(node: Record<string, unknown>): string {

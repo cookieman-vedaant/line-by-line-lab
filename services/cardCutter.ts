@@ -20,8 +20,11 @@ export class NoWarrantFoundError extends Error {
   }
 }
 
-// Keeps prompts inside free-tier token budgets; plenty for almost any article.
-const MAX_ARTICLE_CHARS = 60000;
+// Upper bound on the article text the selector analyzes. Big enough that the
+// WHOLE of a long piece is considered (~20k words) so the strongest warrant is
+// never truncated away; still well within Gemini Flash's context and the
+// free-tier token budgets.
+const MAX_ARTICLE_CHARS = 120000;
 
 /**
  * HOW CUTTING WORKS (verbatim by construction — the AI never writes body text):
@@ -80,6 +83,19 @@ export function fitRangeToBudget(
     e--;
   }
   return [s, e];
+}
+
+/**
+ * Append the real source URL to the bracketed cite, deterministically. The AI is
+ * never given the URL, so this is the ONLY place a link enters the cite — it can
+ * never be hallucinated. No-ops when there's no URL or it's already present.
+ */
+export function appendSourceUrl(citeDetails: string, url?: string): string {
+  const cite = citeDetails.trim();
+  if (!url) return cite;
+  if (cite.includes(url)) return cite;
+  const sep = /[.,;]$/.test(cite) ? " " : ", ";
+  return `${cite}${sep}${url}`;
 }
 
 const selectorSchema = z.union([
@@ -142,13 +158,13 @@ Worked example (match this style exactly):
 
 - Prioritize by the claim AND its warrants: highlight the phrases that most directly state WHY or HOW the claim is true — the load-bearing reasoning, mechanisms, and consequences — not only phrases that echo the claim's keywords. Because you are now underlining the full reasoning chain, spread highlights across that reasoning (the warrant and implication sentences too), not just the sentences that restate the claim.
 - tag: a punchy 1-2 sentence statement of what the evidence proves, phrased from the user's claim (this is YOUR wording). Mark 1-3 key phrases with __underline__ markers.
-- cite: AuthorLastName YY, no apostrophe (e.g. "Rodrigues 16"). Multiple authors: "FirstAuthor et al. YY". No known author: publication name + YY.
-- citeDetails: full cite content WITHOUT brackets: author (+ qualifications if known), "Article Title." Publication, date, URL if known.
+- cite: the HUMAN author's last name + 2-digit year, no apostrophe (e.g. "Rodrigues 16"). Multiple authors: "FirstAuthorLastName et al. YY". Only when NO human author is stated anywhere: publication name + YY. See "Finding the author".
+- citeDetails: full cite content WITHOUT brackets: author (+ qualifications if known), "Article Title." Publication, date. Do NOT include a URL — the app appends the real link itself.
 
-Finding the author:
-- Use the provided metadata author if present.
-- If the metadata author is "unknown", look for the author's name stated in the CITE CONTEXT block (bylines like "By Jane Smith" or "Article written by: Jane Smith", often at the very top or bottom of an article), and use that.
-- NEVER invent, guess, or infer an author name from the topic. If no author is genuinely stated anywhere, cite by the publication instead (e.g. "Reuters 25").
+Finding the author (name the PERSON who wrote it, never the website):
+- Use the provided metadata author when it is a person's name.
+- Treat the metadata author as NOT a real byline if it is an organization or matches/contains the publication (e.g. author "Reuters" with publication "Reuters", or "BBC News"). In that case ignore it and search the CITE CONTEXT block for a human byline ("By Jane Smith", "Article written by: Jane Smith", usually at the very top or bottom) and use that name.
+- NEVER invent, guess, or infer an author from the topic. Only if NO human author is stated anywhere (metadata or cite context) may you cite by the publication (e.g. "Reuters 25").
 - Same rule for dates and credentials: use only what the metadata or cite context actually states.
 
 Strings that don't match the passage exactly get silently dropped, so copy underlines/highlights with care — including punctuation and capitalization.`;
@@ -156,8 +172,8 @@ Strings that don't match the passage exactly get silently dropped, so copy under
 function buildMarkerPrompt(claim: string, article: ExtractedArticle, passage: string): string {
   // Bylines usually live at the very top or bottom of the article, which the
   // selected passage may exclude — give the model the head + tail for the cite.
-  const head = article.text.slice(0, 500);
-  const tail = article.text.length > 1000 ? article.text.slice(-500) : "";
+  const head = article.text.slice(0, 800);
+  const tail = article.text.length > 1300 ? article.text.slice(-500) : "";
   const citeContext = [head, tail].filter(Boolean).join("\n…\n");
 
   return [
@@ -346,7 +362,8 @@ async function runCut(req: CutRequest): Promise<Card> {
     // convert it to internal delimiters. The body already carries them.
     tag: tagMarkupToDelimiters(marker.data.tag),
     cite: marker.data.cite,
-    citeDetails: marker.data.citeDetails,
+    // Add the real link ourselves — never from the AI, so it can't be invented.
+    citeDetails: appendSourceUrl(marker.data.citeDetails, req.source.url),
     body,
   };
 }

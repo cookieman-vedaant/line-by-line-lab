@@ -1,6 +1,7 @@
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 import {
+  cleanAuthor,
   extractPageMetadata,
   findBylineInText,
   normalizeDate,
@@ -44,6 +45,27 @@ describe("extractPageMetadata", () => {
     expect(extractPageMetadata(doc).author).toBe("A. One, B. Two");
   });
 
+  it("skips a JSON-LD author typed as an Organization (the site as 'author')", () => {
+    const doc = docFrom(`
+      <script type="application/ld+json">
+        {"@type":"NewsArticle","author":{"@type":"Organization","name":"Reuters"},
+         "publisher":{"name":"Reuters"}}
+      </script>
+    `);
+    // No human byline → author stays empty (cite then falls back to publication).
+    expect(extractPageMetadata(doc).author).toBe("");
+  });
+
+  it("keeps the human author when both a person and an org are listed", () => {
+    const doc = docFrom(`
+      <script type="application/ld+json">
+        {"@type":"NewsArticle","author":[{"@type":"Person","name":"Jane Smith"},
+         {"@type":"Organization","name":"CNN"}]}
+      </script>
+    `);
+    expect(extractPageMetadata(doc).author).toBe("Jane Smith");
+  });
+
   it("prefers meta author over JSON-LD, and never throws on malformed JSON-LD", () => {
     const doc = docFrom(`
       <meta name="author" content="Primary Author">
@@ -55,6 +77,23 @@ describe("extractPageMetadata", () => {
   it("returns empty fields when nothing is present", () => {
     const meta = extractPageMetadata(docFrom(""));
     expect(meta).toEqual({ title: "", author: "", publication: "", date: "" });
+  });
+});
+
+describe("cleanAuthor", () => {
+  it("keeps a real human author", () => {
+    expect(cleanAuthor("Jane Smith", "Reuters")).toBe("Jane Smith");
+  });
+  it("blanks an author that equals the publication", () => {
+    expect(cleanAuthor("Reuters", "Reuters")).toBe("");
+    expect(cleanAuthor("bbc news", "BBC News")).toBe("");
+  });
+  it("blanks an author that contains the publication name", () => {
+    expect(cleanAuthor("BBC News Staff", "BBC News")).toBe("");
+  });
+  it("does not over-match a short/empty publication", () => {
+    expect(cleanAuthor("Ed Wong", "")).toBe("Ed Wong");
+    expect(cleanAuthor("Al Gore", "AP")).toBe("Al Gore"); // pub too short to match loosely
   });
 });
 

@@ -1,9 +1,32 @@
 import { describe, expect, it } from "vitest";
-import { fitRangeToBudget, splitParagraphs } from "./cardCutter";
+import { appendSourceUrl, fitRangeToBudget, splitParagraphs } from "./cardCutter";
 
 describe("splitParagraphs", () => {
   it("splits on newlines and drops empties", () => {
     expect(splitParagraphs("one\n\ntwo\n \nthree")).toEqual(["one", "two", "three"]);
+  });
+});
+
+describe("appendSourceUrl", () => {
+  const url = "https://example.com/article";
+
+  it("appends the URL to the cite", () => {
+    expect(appendSourceUrl('Jane Smith, "Title." Foreign Policy, 2026', url)).toBe(
+      'Jane Smith, "Title." Foreign Policy, 2026, ' + url,
+    );
+  });
+
+  it("uses a space (not a comma) when the cite already ends with punctuation", () => {
+    expect(appendSourceUrl("Reuters, 2025.", url)).toBe("Reuters, 2025. " + url);
+  });
+
+  it("does not duplicate a URL already present in the cite", () => {
+    const cite = `Reuters, 2025, ${url}`;
+    expect(appendSourceUrl(cite, url)).toBe(cite);
+  });
+
+  it("is a no-op (trimmed) when there is no URL — e.g. pasted text", () => {
+    expect(appendSourceUrl("  Reuters, 2025  ", undefined)).toBe("Reuters, 2025");
   });
 });
 
