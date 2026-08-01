@@ -1,7 +1,10 @@
 "use client";
 
+import { Turnstile } from "@marsidev/react-turnstile";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { verifyHuman } from "@/lib/apiClient";
+import { turnstileSiteKey } from "@/lib/humanGate";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 const inputClasses =
@@ -27,6 +30,34 @@ export default function AuthForm({ next }: { next?: string }) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  // Turnstile anti-brute-force gate (no-op when no site key is configured). A
+  // fresh, single-use token is required for each sign-in / sign-up / reset
+  // attempt, so the endpoints can't be scripted or brute-forced.
+  const siteKey = turnstileSiteKey();
+  const [token, setToken] = useState<string | null>(null);
+  const [captchaNonce, setCaptchaNonce] = useState(0);
+
+  function resetCaptcha() {
+    setToken(null);
+    setCaptchaNonce((n) => n + 1); // remount the widget → new token for the next try
+  }
+
+  /** Require a solved + server-verified Turnstile token before any auth call. */
+  async function ensureHuman(): Promise<boolean> {
+    if (!siteKey) return true;
+    if (!token) {
+      setError("Please complete the human check below.");
+      return false;
+    }
+    const v = await verifyHuman(token);
+    if (!v.ok) {
+      setError(v.error);
+      resetCaptcha();
+      return false;
+    }
+    return true;
+  }
+
   function switchMode(m: Mode) {
     setMode(m);
     setError(null);
@@ -37,61 +68,68 @@ export default function AuthForm({ next }: { next?: string }) {
     e.preventDefault();
     setError(null);
     setNotice(null);
-    const supabase = createSupabaseBrowserClient();
 
-    // Forgot password: email a recovery link, no password needed.
+    // Validate fields first, so a user fixes inputs before spending a token.
     if (mode === "reset") {
       if (!email.trim()) {
         setError("Enter your email to get a reset link.");
         return;
       }
-      setBusy(true);
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-        // Land the recovery link DIRECTLY on the reset page (a client page). The
-        // recovery token comes back in the URL #hash, which the server route
-        // handler /auth/callback can't read — so routing through it bounced the
-        // user back to login. The client page reads the token itself (hash OR a
-        // PKCE ?code) and requires a new password before letting them proceed.
-        redirectTo: `${window.location.origin}/reset-password`,
-      });
-      setBusy(false);
-      if (error) return setError(error.message);
-      // Generic message either way — never reveal whether an account exists.
-      setNotice("If an account exists for that email, a reset link is on its way. Check your inbox.");
-      return;
-    }
-
-    if (!email.trim() || password.length < 6) {
+    } else if (!email.trim() || password.length < 6) {
       setError("Enter your email and a password of at least 6 characters.");
       return;
     }
-    setBusy(true);
-    const dest = next && next.startsWith("/") ? next : "/lab";
 
-    if (mode === "signup") {
-      const { data, error } = await supabase.auth.signUp({
-        email: email.trim(),
-        password,
-        // Send the confirmation link back to THIS origin's callback (prod when
-        // signing up on prod). Requires the origin to be in Supabase's allowed
-        // Redirect URLs; otherwise Supabase falls back to the Site URL.
-        options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=%2Flab` },
-      });
+    setBusy(true);
+    if (!(await ensureHuman())) {
       setBusy(false);
-      if (error) return setError(error.message);
-      if (!data.session) {
-        setNotice("Account created — check your email to confirm, then sign in.");
-        setMode("signin");
+      return;
+    }
+
+    const supabase = createSupabaseBrowserClient();
+    const dest = next && next.startsWith("/") ? next : "/lab";
+    try {
+      if (mode === "reset") {
+        const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+          // Land the recovery link DIRECTLY on the reset page (a client page). The
+          // recovery token comes back in the URL #hash, which the server route
+          // handler /auth/callback can't read — so routing through it bounced the
+          // user back to login. The client page reads the token itself (hash OR a
+          // PKCE ?code) and requires a new password before letting them proceed.
+          redirectTo: `${window.location.origin}/reset-password`,
+        });
+        if (error) return setError(error.message);
+        // Generic message either way — never reveal whether an account exists.
+        setNotice("If an account exists for that email, a reset link is on its way. Check your inbox.");
         return;
       }
-      router.push(dest);
-      router.refresh();
-    } else {
-      const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+
+      if (mode === "signup") {
+        const { data, error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          // Send the confirmation link back to THIS origin's callback (prod when
+          // signing up on prod). Requires the origin to be in Supabase's allowed
+          // Redirect URLs; otherwise Supabase falls back to the Site URL.
+          options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=%2Flab` },
+        });
+        if (error) return setError(error.message);
+        if (!data.session) {
+          setNotice("Account created — check your email to confirm, then sign in.");
+          setMode("signin");
+          return;
+        }
+        router.push(dest);
+        router.refresh();
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+        if (error) return setError(error.message);
+        router.push(dest);
+        router.refresh();
+      }
+    } finally {
       setBusy(false);
-      if (error) return setError(error.message);
-      router.push(dest);
-      router.refresh();
+      resetCaptcha(); // token is single-use — a retry needs a fresh solve
     }
   }
 
@@ -179,9 +217,25 @@ export default function AuthForm({ next }: { next?: string }) {
           </p>
         )}
 
+        {siteKey && (
+          <div className="flex justify-center">
+            <Turnstile
+              key={captchaNonce}
+              siteKey={siteKey}
+              onSuccess={setToken}
+              onError={() => {
+                setToken(null);
+                setError("The check couldn't load. Refresh and try again.");
+              }}
+              onExpire={() => setToken(null)}
+              options={{ theme: "auto" }}
+            />
+          </div>
+        )}
+
         <button
           type="submit"
-          disabled={busy}
+          disabled={busy || (!!siteKey && !token)}
           className="btn-press frame bg-accent px-6 py-3 font-display text-base font-bold
             uppercase tracking-wide text-paper disabled:opacity-60"
         >

@@ -53,14 +53,19 @@ export async function POST(req: Request) {
     console.warn("presence: admin client unavailable; using RLS client, count=1", err);
   }
 
-  // 1) Stamp THIS user active (their own row only). Best-effort — a hiccup here
-  //    must not break the live count.
+  // 1) Stamp THIS user active. UPSERT (not UPDATE) so a user with no `profiles`
+  //    row yet is created and counted: the signup->profiles trigger is
+  //    unreliable (we saw more auth users than profiles rows), and a plain UPDATE
+  //    on a missing row stamps ZERO rows, making that user invisible to the count
+  //    — the "live count doesn't move when a new person logs in" bug. `tier` and
+  //    `created_at` fill from their column defaults; the id FK is satisfied
+  //    because auth.user.id is a verified, existing auth user. Best-effort — a
+  //    hiccup here must not break the count.
   const stamp = await (admin ?? auth.supabase)
     .from("profiles")
-    .update({ last_seen: new Date().toISOString() })
-    .eq("id", auth.user.id);
+    .upsert({ id: auth.user.id, last_seen: new Date().toISOString() }, { onConflict: "id" });
   if (stamp.error) {
-    console.warn("presence last_seen update failed", stamp.error.message);
+    console.warn("presence last_seen upsert failed", stamp.error.message);
   }
 
   // 2) Count everyone active in the window. Only the NUMBER leaves the server,
