@@ -1,6 +1,7 @@
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 import { hasPaywallPhrase, hasStructuredPaywallSignal } from "@/lib/paywall";
+import { createSharedCache } from "@/lib/sharedCache";
 import { BlockedUrlError, safeFetch } from "@/lib/ssrfGuard";
 
 /** Honest failure — the article couldn't be fetched or parsed. */
@@ -137,18 +138,54 @@ export async function extractArticleFromUrl(
 }
 
 /**
+ * Extracted-article cache. An article's readable text is public and stable, so a
+ * recent extraction is reused across the whole app instead of downloading and
+ * re-parsing the same URL. This is what removes the "double fetch": the Article
+ * Finder's accessibility check (verifyAccessible) WARMS this cache, so the
+ * follow-up Cut / Re-Highlight of that result skips the fetch + parse entirely
+ * and goes straight to the AI step. Shared across users + instances when Redis is
+ * configured, in-memory otherwise.
+ *
+ * Only SUCCESSFUL extractions are cached: createSharedCache.wrap never stores a
+ * rejection, so a paywalled/timed-out URL is not negatively cached and a later
+ * attempt (with the longer cut timeout) still runs. The cache key is the URL
+ * only — a hit returns the same text regardless of the caller's timeout, because
+ * a completed extraction is identical whichever timeout allowed the fetch.
+ */
+const articleCache = createSharedCache<ExtractedArticle>({
+  ttlMs: 30 * 60 * 1000, // 30 min — matches the search-result cache window
+  namespace: "article",
+});
+
+/**
+ * Cache-backed article extraction — same result as extractArticleFromUrl, but a
+ * repeat request for the same URL within the TTL reuses the earlier extraction
+ * instead of fetching + parsing again. Use this everywhere an article is fetched
+ * for user-facing work (verify / cut / re-highlight). The `timeoutMs` applies
+ * only on a cache MISS. `extractor` is an injection seam for tests; production
+ * callers never pass it.
+ */
+export async function extractArticleCached(
+  url: string,
+  timeoutMs: number = FETCH_TIMEOUT_MS,
+  extractor: (u: string, t: number) => Promise<ExtractedArticle> = extractArticleFromUrl,
+): Promise<ExtractedArticle> {
+  return articleCache.wrap(url.trim(), () => extractor(url, timeoutMs));
+}
+
+/**
  * Quick, quiet check that a URL is actually readable full text a debater could
  * cut from — used by the Article Finder to only show accessible sources. Uses a
  * shorter timeout than a real cut and never throws (a failure just means "not
- * accessible"). Returns enough info to reuse the fetched text without a second
- * download when the caller wants it.
+ * accessible"). Goes through the shared cache so the extraction it pays for is
+ * reused by a follow-up cut of the same result (no second download).
  */
 export async function verifyAccessible(
   url: string,
   timeoutMs = 6500,
 ): Promise<{ ok: boolean; chars: number }> {
   try {
-    const article = await extractArticleFromUrl(url, timeoutMs);
+    const article = await extractArticleCached(url, timeoutMs);
     const chars = article.text.trim().length;
     // "Accessible" means genuinely cuttable full text — not just an abstract.
     // extractArticleFromUrl already rejected paywalled/teaser pages by throwing.

@@ -5,7 +5,7 @@ import { GEMINI_MARKER_MODEL, GEMINI_MODEL, RateLimitedError, generateJson } fro
 import { createSharedCache } from "@/lib/sharedCache";
 import {
   ArticleUnreadableError,
-  extractArticleFromUrl,
+  extractArticleCached,
   type ExtractedArticle,
 } from "@/services/articleExtract";
 import type { Card, CardLength, CutRequest } from "@/types";
@@ -202,7 +202,7 @@ async function resolveSource(req: CutRequest): Promise<ExtractedArticle> {
 
   if (req.source.url) {
     try {
-      const extracted = await extractArticleFromUrl(req.source.url);
+      const extracted = await extractArticleCached(req.source.url);
       // User/search-supplied metadata wins over what the page scraper guessed.
       return {
         ...extracted,
