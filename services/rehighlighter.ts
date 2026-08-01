@@ -1,5 +1,14 @@
+import { tagMarkupToDelimiters } from "@/lib/cardMarkup";
+import { applyEmphasis } from "@/lib/emphasis";
 import { normalizeForComparison } from "@/lib/verbatim";
-import type { RehighlightSource } from "@/types";
+import { appendSourceUrl } from "@/services/cardCutter";
+import type { ExtractedArticle } from "@/services/articleExtract";
+import type {
+  Contradiction,
+  ContradictionKind,
+  RehighlightResult,
+  RehighlightSource,
+} from "@/types";
 
 /**
  * Pull the first http(s) URL out of a pasted opponent card. Our cites now end
@@ -39,4 +48,55 @@ export function isVerbatimQuote(quote: string, sourceText: string): boolean {
   const q = normalizeForComparison(quote);
   if (q.length < 8) return false;
   return normalizeForComparison(sourceText).includes(q);
+}
+
+/** The AI's raw analysis (validated by the route/service Zod schema). */
+export interface RehighlightAnalysis {
+  tag: string;
+  cite: string;
+  citeDetails: string;
+  underlines: string[];
+  highlights: string[];
+  contradictions: Array<{
+    quote: string;
+    kind: ContradictionKind;
+    explanation: string;
+    howToUse: string;
+  }>;
+}
+
+/**
+ * Assemble the final result from the real article + the AI analysis.
+ * No-fabrication happens HERE and is verifiable:
+ *   • body = REAL article text with emphasis applied on top (applyEmphasis
+ *     locates each underline/highlight substring and drops non-matches);
+ *   • every contradiction whose quote is not verbatim in the article is dropped.
+ * The AI never supplies body text — only substrings we locate — so the body is
+ * verbatim by construction.
+ */
+export function buildRehighlightResult(
+  article: ExtractedArticle,
+  analysis: RehighlightAnalysis,
+  sourceUrl?: string,
+  notice?: string,
+): RehighlightResult {
+  const { body } = applyEmphasis(article.text, analysis.underlines, analysis.highlights);
+
+  const contradictions: Contradiction[] = analysis.contradictions.filter((c) =>
+    isVerbatimQuote(c.quote, article.text),
+  );
+
+  return {
+    card: {
+      tag: tagMarkupToDelimiters(analysis.tag),
+      cite: analysis.cite,
+      // The real link is appended here (never by the AI), so it can't be invented.
+      citeDetails: appendSourceUrl(analysis.citeDetails, sourceUrl),
+      body,
+    },
+    contradictions,
+    articleTitle: article.title,
+    sourceUrl,
+    notice,
+  };
 }
