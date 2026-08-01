@@ -45,9 +45,16 @@ export async function POST(req: Request) {
 
   // 2) Count everyone active in the window. Service-role so it sees all rows;
   //    only the number leaves the server, never who. We stamped first, so the
-  //    caller is always included — fall back to 1 (at least this user) if the
-  //    count query hiccups.
-  const count = (await countOnline(createSupabaseAdminClient())) ?? 1;
+  //    caller is always included. If the admin client is unavailable (e.g. the
+  //    SUPABASE_SERVICE_ROLE_KEY isn't set in this environment) or the query
+  //    hiccups, fall back to 1 rather than 500-ing — the chip should still show
+  //    the user themselves instead of disappearing.
+  let count = 1;
+  try {
+    count = (await countOnline(createSupabaseAdminClient())) ?? 1;
+  } catch (err) {
+    console.warn("presence count unavailable; showing 1", err);
+  }
 
   return NextResponse.json({ count });
 }
