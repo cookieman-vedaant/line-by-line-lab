@@ -53,7 +53,9 @@ export default function Reveal({
         transform: shown ? "none" : "translateY(20px)",
         filter: shown ? "none" : "blur(7px)",
         transition: `opacity .7s ${ease} ${delay}ms, transform .7s ${ease} ${delay}ms, filter .7s ${ease} ${delay}ms`,
-        willChange: "opacity, transform, filter",
+        // Promote to its own layer only while the entrance is pending; release it
+        // afterward so idle sections don't hold compositor memory.
+        willChange: shown ? "auto" : "opacity, transform, filter",
       }}
     >
       {children}

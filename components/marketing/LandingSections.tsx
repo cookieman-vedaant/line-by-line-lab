@@ -119,10 +119,10 @@ export function Versatility() {
           </p>
         </Reveal>
 
-        <Reveal delay={120}>
-          <ol className="mt-12 flex flex-wrap items-center gap-x-1 gap-y-3">
-            {loop.map((step, i) => (
-              <li key={step} className="flex items-center gap-1">
+        <ol className="mt-12 flex flex-wrap items-center gap-x-1 gap-y-3">
+          {loop.map((step, i) => (
+            <li key={step}>
+              <Reveal delay={i * 90} className="flex items-center gap-1">
                 <span className="frame shadow-hard bg-paper px-4 py-2.5 font-display text-sm font-bold uppercase tracking-wide">
                   {step}
                 </span>
@@ -131,9 +131,11 @@ export function Versatility() {
                     →
                   </span>
                 )}
-              </li>
-            ))}
-          </ol>
+              </Reveal>
+            </li>
+          ))}
+        </ol>
+        <Reveal delay={loop.length * 90}>
           <p className="mt-6 max-w-2xl text-sm font-medium leading-relaxed text-ink/60">
             Your citations and cards carry through every step, so nothing gets lost as you move
             between tools.
@@ -161,7 +163,7 @@ function PointList({ points, twoCol }: { points: string[]; twoCol?: boolean }) {
 /** Full-width tool block for Find Articles and Coach. */
 function FeaturedTool({ tool }: { tool: (typeof TOOLS)[number] }) {
   return (
-    <article className="frame shadow-hard-lg flex h-full flex-col bg-paper-2 p-6 sm:p-9">
+    <article className="frame shadow-hard-lg flex h-full flex-col bg-paper-2 p-6 motion-safe:transition-transform motion-safe:duration-200 motion-safe:hover:-translate-y-1 sm:p-9">
       <div className="flex items-baseline gap-4">
         <span className="font-display text-4xl font-extrabold leading-none text-accent sm:text-5xl">
           {tool.index}
@@ -184,7 +186,7 @@ function FeaturedTool({ tool }: { tool: (typeof TOOLS)[number] }) {
 /** Standard tool card. Same weight and structure as the featured ones, one column. */
 function GridTool({ tool }: { tool: (typeof TOOLS)[number] }) {
   return (
-    <article className="frame shadow-hard flex h-full flex-col bg-paper-2 p-6">
+    <article className="frame shadow-hard flex h-full flex-col bg-paper-2 p-6 motion-safe:transition-transform motion-safe:duration-200 motion-safe:hover:-translate-y-1">
       <div className="flex items-baseline gap-3">
         <span className="font-display text-3xl font-extrabold leading-none text-accent">
           {tool.index}
@@ -248,7 +250,7 @@ export function Pricing() {
         {PRICING.map((tier, i) => (
           <Reveal key={tier.name} delay={i * 90}>
             <div
-              className={`frame relative flex h-full flex-col bg-paper-2 p-6 sm:p-8 ${
+              className={`frame relative flex h-full flex-col bg-paper-2 p-6 motion-safe:transition-transform motion-safe:duration-200 motion-safe:hover:-translate-y-1 sm:p-8 ${
                 tier.featured ? "shadow-hard-lg border-accent" : "shadow-hard"
               }`}
             >
