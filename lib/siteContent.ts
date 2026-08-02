@@ -51,7 +51,7 @@ export const CAPABILITY_STATS: Stat[] = [
   { value: "250M+", label: "scholarly sources searchable" },
   { value: "100%", label: "verbatim-verified cards" },
   { value: "6", label: "tools, one workspace" },
-  { value: "$0", label: "to start — no card" },
+  { value: "$0", label: "to start, no card" },
 ];
 
 /**
@@ -81,79 +81,79 @@ export const TOOLS: Tool[] = [
   {
     index: "01",
     name: "Find Articles",
-    tagline: "The evidence that wins the round, in seconds.",
+    tagline: "Reputable, readable evidence for any claim.",
     blurb:
-      "Describe the claim you need to prove — not just keywords. Debate-aware search reads 250M+ scholarly works plus the open web, understands what a Link, Impact, or Solvency card actually needs, and ranks results by how useful they are in-round. It even fetch-checks each source so you never open a dead paywall.",
+      "Describe the claim you need to prove. The search reads 250M scholarly works plus reputable news, think tanks, and government reports, then ranks them by how well they support that claim and evidence type. It fetch-checks every result, so each one opens to real full text you can cut.",
     points: [
-      "OpenAlex + Semantic Scholar + reputable web — not a random Google dump",
-      "Ranked by real debate usefulness for your claim and evidence type",
-      "Every hit verified as readable full text, not a paywalled abstract",
-      "One click from a result straight into the Card Cutter",
+      "Searches OpenAlex, Semantic Scholar, and the reputable open web",
+      "Ranks results by debate usefulness for your claim and evidence type",
+      "Verifies every result as readable full text before showing it",
+      "Sends any result into the Card Cutter in one click",
     ],
     featured: true,
   },
   {
     index: "02",
     name: "Cut a Card",
-    tagline: "A debate-ready card in one click.",
+    tagline: "A formatted, verbatim card in one click.",
     blurb:
-      "Turn any article — a search result, a URL, or pasted text — into a formatted card. The body is the author's real words, with the tag, cite, underlines, and highlights done for you.",
+      "Paste a URL, drop in text, or cut a search result. The Lab pulls the article, writes the tag and cite, and applies the underlines and highlights. Every word in the body comes from the author.",
     points: [
-      "Body is 100% verbatim — programmatically verified against the source",
-      "Three-layer emphasis: tag, read-aloud underline, stressed highlight",
-      "Short, Medium, Long, or Entire Article — emphasis spread across the whole card",
+      "Keeps the body 100% verbatim and verifies it against the source",
+      "Writes the tag and cite and marks the read-aloud underline and highlight",
+      "Cuts to Short, Medium, Long, or the entire article",
     ],
   },
   {
     index: "03",
     name: "Re-Highlight",
-    tagline: "Turn their card against them.",
+    tagline: "Find the author's words that undercut their card.",
     blurb:
-      "Paste an opponent's card or its source link. The Lab pulls the full original article and surfaces the author's own verbatim words that undercut how the card was highlighted — with a contradiction report.",
+      "Paste an opponent's card or its source link. The Lab pulls the full original article and surfaces the author's own verbatim lines that weaken how the card was highlighted, then hands you a contradiction report you can read in-round.",
     points: [
-      "Finds the author's wording the other team left out",
-      "Verbatim-verified — never paraphrased or invented",
-      "Honest 'this card holds up' when there's nothing to find",
+      "Surfaces the wording the other team left out",
+      "Quotes the author verbatim and verifies it against the source",
+      "Says the card holds up when nothing contradicts it",
     ],
   },
   {
     index: "04",
     name: "Coach",
-    tagline: "One coach for your whole case — and it does almost everything.",
+    tagline: "One coach for research, cards, blocks, and drills.",
     blurb:
-      "The most versatile tool in the Lab, and the reason debaters stay. Drop in an opponent's case as a PDF and build a block of real cut cards against it. Workshop a brand-new argument from scratch and iterate it line by line. Sharpen a card or hunt a stronger source without leaving the chat. It runs live web + scholarly search, cuts verbatim evidence, and reads your Record to coach the weaknesses that keep costing you rounds — all in one conversation.",
+      "Upload an opponent's case as a PDF and build a block of responses backed by real cut cards. Draft a new argument and iterate it line by line. Improve a card or find a stronger source inside the same chat. The Coach runs live web and scholarly search, cuts verbatim evidence, and reads your Record to target the weaknesses that keep costing you rounds.",
     points: [
-      "Upload an opponent's case (PDF) → a block of responses backed by real cut cards",
-      "Build arguments from scratch and iterate them with you — guided, never ghost-written",
-      "Refine a cut card or find a better article mid-conversation",
-      "Live web + 250M-source scholarly search built in",
+      "Turns an opponent's case PDF into a block of cut-card responses",
+      "Builds arguments with you and iterates them line by line",
+      "Refines a cut card or finds a better source mid-conversation",
+      "Runs live web and 250M-source scholarly search",
       "Reads your Record to target your recurring weaknesses",
-      "Fluent in LD, PF & Policy: links, impacts, framework, Ks, theory, CPs, DAs",
+      "Coaches LD, PF, and Policy: links, impacts, framework, Ks, theory, CPs, DAs",
     ],
     featured: true,
   },
   {
     index: "05",
     name: "Record",
-    tagline: "Your rounds, remembered.",
+    tagline: "Every round, logged and working for you.",
     blurb:
-      "Log every tournament, side, result, and note in one place. The Lab turns it into an honest read of your game, so the Coach's advice gets sharper and more personal the more you debate.",
+      "Log each tournament, side, result, and note. The Lab turns your history into a debater profile the Coach reads, so its advice gets sharper the more you compete.",
     points: [
-      "A private Round Log that syncs across your devices",
-      "Becomes a personal debater profile the Coach actually uses",
+      "Keeps a private Round Log that syncs across your devices",
+      "Builds a debater profile the Coach reads",
       "Makes every piece of coaching specific to you",
     ],
   },
   {
     index: "06",
     name: "Theme Studio",
-    tagline: "Make the Lab yours.",
+    tagline: "Style the whole app from one prompt.",
     blurb:
-      "Tell the built-in theme agent a vibe — \"newsprint noir\", \"sunrise terminal\", \"varsity blue\" — and it generates a complete color-and-type theme on the spot. The whole app re-skins instantly. Prep you actually enjoy opening is prep you keep doing.",
+      "Tell the theme agent a vibe like \"newsprint noir\" or \"varsity blue\" and it generates a full color and type theme. The app reskins instantly, and the agent checks contrast so your text stays readable.",
     points: [
-      "AI-generated themes from a one-line prompt",
-      "Contrast-checked, so your text always stays readable",
-      "Reskins colors, fonts, mood, and background together",
+      "Generates complete themes from a one-line prompt",
+      "Checks contrast so your text stays readable",
+      "Reskins color, fonts, mood, and background together",
     ],
   },
 ];
@@ -163,7 +163,7 @@ export const PRICING: PricingTier[] = [
     name: "Free",
     price: "$0",
     cadence: "forever, to start",
-    blurb: "Everything you need to prep a real round — no account payment, no credit card.",
+    blurb: "Everything you need to prep a real round. No account payment, no credit card.",
     features: [
       "Debate-aware article search",
       "Cut verbatim, formatted cards",
@@ -180,8 +180,8 @@ export const PRICING: PricingTier[] = [
       "For debaters who live in the Lab all season. Everything in Free, uncapped and prioritized.",
     features: [
       "No daily limits on search, cuts, or Coach",
-      "Priority AI — skip the busy-hour waits",
-      "Longer cards + batch cutting for whole case files",
+      "Priority AI during busy hours",
+      "Longer cards and batch cutting for whole case files",
       "Deeper Coach memory across your season",
       "First access to every new tool",
     ],

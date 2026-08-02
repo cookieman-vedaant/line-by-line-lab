@@ -88,8 +88,8 @@ export function Mission() {
         </blockquote>
         <p className="mt-8 max-w-2xl text-base font-medium leading-relaxed text-ink/70">
           The biggest programs have coaches pulling evidence around the clock. The Lab hands every
-          debater that same edge — reputable research, verbatim cards, and a coach that never sleeps
-          — free to start, on any device.
+          debater the same edge: reputable research, verbatim cards, and a coach on call, free to
+          start, on any device.
         </p>
       </Reveal>
     </section>
@@ -113,9 +113,9 @@ export function Versatility() {
             One Lab for the <span className="text-accent">whole round.</span>
           </h2>
           <p className="mt-5 max-w-2xl text-lg font-medium leading-snug text-ink/70">
-            Other tools give you a search engine. Or a card cutter. Or an empty doc. The Lab is all
-            of it, wired together — evidence flows from search, to card, to block, to coach, without
-            ever leaving the page.
+            The Lab runs every stage of prep in one workspace. Evidence flows from a search into a
+            card, a card into a block, and a block into the Coach, and your results feed the coaching
+            you get next.
           </p>
         </Reveal>
 
@@ -135,8 +135,8 @@ export function Versatility() {
             ))}
           </ol>
           <p className="mt-6 max-w-2xl text-sm font-medium leading-relaxed text-ink/60">
-            No exporting, no copy-paste between five apps, no lost citations. That connective tissue
-            is the whole point — and it&apos;s why one workspace beats a shelf of single-trick tools.
+            Your citations and cards carry through every step, so nothing gets lost as you move
+            between tools.
           </p>
         </Reveal>
       </div>
@@ -144,67 +144,62 @@ export function Versatility() {
   );
 }
 
-/** A large, featured tool block (Find Articles, Coach) with a capability grid. */
-function FeaturedTool({ tool }: { tool: (typeof TOOLS)[number] }) {
-  const isCoach = tool.name === "Coach";
+/** Capability list shared by every tool card. */
+function PointList({ points, twoCol }: { points: string[]; twoCol?: boolean }) {
   return (
-    <article className="frame shadow-hard-lg bg-paper-2 p-6 sm:p-9">
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <div className="flex items-baseline gap-4">
-          <span className="font-display text-4xl font-extrabold leading-none text-accent sm:text-5xl">
-            {tool.index}
-          </span>
-          <h3 className="font-display text-3xl font-extrabold tracking-tight sm:text-4xl">
-            {tool.name}
-          </h3>
-        </div>
-        {isCoach && (
-          <span className="frame label-mono bg-accent px-2 py-1 text-[10px] font-bold text-paper">
-            most versatile
-          </span>
-        )}
-      </div>
+    <ul className={`mt-6 grid gap-x-8 gap-y-3 ${twoCol ? "sm:grid-cols-2" : ""}`}>
+      {points.map((p) => (
+        <li key={p} className="flex items-start gap-2.5 text-sm font-medium leading-snug">
+          <span aria-hidden className="mt-1.5 h-1.5 w-1.5 shrink-0 rotate-45 bg-accent" />
+          <span>{p}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
+/** Full-width tool block for Find Articles and Coach. */
+function FeaturedTool({ tool }: { tool: (typeof TOOLS)[number] }) {
+  return (
+    <article className="frame shadow-hard-lg flex h-full flex-col bg-paper-2 p-6 sm:p-9">
+      <div className="flex items-baseline gap-4">
+        <span className="font-display text-4xl font-extrabold leading-none text-accent sm:text-5xl">
+          {tool.index}
+        </span>
+        <h3 className="font-display text-3xl font-extrabold tracking-tight sm:text-4xl">
+          {tool.name}
+        </h3>
+      </div>
       <p className="mt-4 max-w-3xl font-display text-xl font-bold leading-snug text-ink sm:text-2xl">
         {tool.tagline}
       </p>
-      <p className="mt-4 max-w-3xl text-sm font-medium leading-relaxed text-ink/70 sm:text-base">
+      <p className="mt-4 max-w-3xl text-sm font-medium leading-relaxed text-ink/75 sm:text-base">
         {tool.blurb}
       </p>
-
-      <ul className="mt-7 grid gap-x-8 gap-y-3 sm:grid-cols-2">
-        {tool.points.map((p) => (
-          <li key={p} className="flex items-start gap-2.5 text-sm font-medium leading-snug">
-            <span aria-hidden className="mt-1 h-1.5 w-1.5 shrink-0 rotate-45 bg-accent" />
-            <span>{p}</span>
-          </li>
-        ))}
-      </ul>
+      <PointList points={tool.points} twoCol />
     </article>
   );
 }
 
-/** A compact tool row for the supporting tools. */
-function CompactTool({ tool }: { tool: (typeof TOOLS)[number] }) {
+/** Standard tool card. Same weight and structure as the featured ones, one column. */
+function GridTool({ tool }: { tool: (typeof TOOLS)[number] }) {
   return (
-    <article className="frame shadow-hard grid gap-4 bg-paper-2 p-6 sm:grid-cols-[auto_1fr] sm:gap-6">
-      <span className="font-display text-4xl font-extrabold leading-none text-ink/25">
-        {tool.index}
-      </span>
-      <div>
-        <div className="flex flex-wrap items-baseline gap-x-3">
-          <h3 className="font-display text-xl font-bold tracking-tight">{tool.name}</h3>
-          <p className="font-display text-sm font-semibold text-accent">{tool.tagline}</p>
-        </div>
-        <p className="mt-2 max-w-2xl text-sm font-medium leading-relaxed text-ink/70">
-          {tool.blurb}
-        </p>
+    <article className="frame shadow-hard flex h-full flex-col bg-paper-2 p-6">
+      <div className="flex items-baseline gap-3">
+        <span className="font-display text-3xl font-extrabold leading-none text-accent">
+          {tool.index}
+        </span>
+        <h3 className="font-display text-2xl font-bold tracking-tight">{tool.name}</h3>
       </div>
+      <p className="mt-3 font-display text-base font-bold leading-snug text-ink">{tool.tagline}</p>
+      <p className="mt-3 text-sm font-medium leading-relaxed text-ink/75">{tool.blurb}</p>
+      <div className="flex-1" />
+      <PointList points={tool.points} />
     </article>
   );
 }
 
-/** The detailed feature showcase — featured tools loom large, supports stay tight. */
+/** The feature showcase. Find and Coach span full width; the rest pair up. */
 export function Toolkit() {
   return (
     <section aria-labelledby="toolkit-heading" id="tools" className="mx-auto w-full max-w-5xl px-5 py-20">
@@ -216,15 +211,19 @@ export function Toolkit() {
           Six tools. <span className="text-accent">One workflow.</span>
         </h2>
         <p className="mt-5 max-w-xl text-lg font-medium text-ink/70">
-          Everything a round demands — research, cards, opponent prep, coaching, and your own record
-          — in a single workspace.
+          Everything a round demands: research, cards, opponent prep, coaching, and your own record,
+          in one workspace.
         </p>
       </Reveal>
 
-      <div className="mt-12 flex flex-col gap-5">
+      <div className="mt-12 grid gap-5 sm:grid-cols-2">
         {TOOLS.map((t, i) => (
-          <Reveal key={t.name} delay={Math.min(i, 3) * 60}>
-            {t.featured ? <FeaturedTool tool={t} /> : <CompactTool tool={t} />}
+          <Reveal
+            key={t.name}
+            delay={Math.min(i, 4) * 50}
+            className={t.featured ? "sm:col-span-2" : undefined}
+          >
+            {t.featured ? <FeaturedTool tool={t} /> : <GridTool tool={t} />}
           </Reveal>
         ))}
       </div>
@@ -286,7 +285,7 @@ export function Pricing() {
                   </Link>
                 ) : (
                   <p className="frame block bg-paper px-5 py-3 text-center text-[11px] font-semibold uppercase tracking-wide text-ink/50">
-                    In the works — free covers you today
+                    In the works. Free covers you today.
                   </p>
                 )}
               </div>

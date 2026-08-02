@@ -14,7 +14,7 @@ import {
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = {
-  title: "Line by Line Lab — prep like the biggest program in the room",
+  title: "Line by Line Lab: prep like the biggest program in the room",
   description:
     "Find reputable evidence, cut verbatim debate-ready cards, re-highlight opponents, and get a real AI coach. Free to start. Built to close the prep gap for every LD, PF, and Policy debater.",
 };
@@ -64,7 +64,7 @@ export default async function Landing({
               Find reputable evidence, cut verbatim debate-ready cards, re-highlight your
               opponents, and get a real coach.{" "}
               <span className="bg-yellow box-decoration-clone px-1 font-semibold text-black">
-                In minutes, not hours.
+                In minutes.
               </span>
             </p>
 
@@ -103,7 +103,7 @@ export default async function Landing({
             ) : (
               <div className="flex w-full max-w-sm flex-col gap-3">
                 <p className="label-mono text-center text-[11px] text-ink/60 lg:text-right">
-                  Start free — no credit card
+                  Start free. No credit card.
                 </p>
                 {error && (
                   <p

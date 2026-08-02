@@ -116,7 +116,7 @@ export default function AuthForm({ next }: { next?: string }) {
         });
         if (error) return setError(error.message);
         if (!data.session) {
-          setNotice("Account created — check your email to confirm, then sign in.");
+          setNotice("Account created. Check your email to confirm, then sign in.");
           setMode("signin");
           return;
         }

@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { SITE } from "@/lib/siteContent";
 
 export const metadata: Metadata = {
-  title: "Privacy Policy — Line by Line Lab",
+  title: "Privacy Policy · Line by Line Lab",
   description:
     "How Line by Line Lab collects, uses, shares, and protects your information, and your rights under the Texas Data Privacy and Security Act.",
 };
@@ -104,7 +104,7 @@ export default function PrivacyPolicy() {
 
       <P>
         This Privacy Policy explains what information {SITE.name} (&quot;we&quot;, &quot;us&quot;)
-        collects, why, who we share it with, and the rights you have — including your rights under
+        collects, why, who we share it with, and the rights you have, including your rights under
         the <strong>Texas Data Privacy and Security Act (TDPSA)</strong>. We built this tool to help
         debaters, most of whom are students, so we collect as little as we can and never sell your
         data.
@@ -123,7 +123,7 @@ export default function PrivacyPolicy() {
             </>,
             <>
               Content you submit is processed by <strong>Google&apos;s Gemini AI</strong> to generate
-              results — so don&apos;t paste anything confidential.
+              results, so don&apos;t paste anything confidential.
             </>,
             <>
               You can <strong>access, correct, or delete</strong> your data at any time.
@@ -181,26 +181,26 @@ export default function PrivacyPolicy() {
       <Bullets
         items={[
           <>
-            <strong>Account information</strong> — your email address and a password. Your password
+            <strong>Account information:</strong> your email address and a password. Your password
             is stored hashed by our auth provider; we never see it.
           </>,
           <>
-            <strong>Content you submit</strong> — the claims and search queries you enter, article
+            <strong>Content you submit:</strong> the claims and search queries you enter, article
             URLs, article text you paste, case files (PDFs) you upload to the Coach, messages you
             send the Coach, and your Round Log entries (tournament, side, result, opponent name, and
             your notes).
           </>,
           <>
-            <strong>Data we derive</strong> — an AI-generated &quot;debater profile&quot; summarizing
+            <strong>Data we derive:</strong> an AI-generated &quot;debater profile&quot; summarizing
             your logged rounds, used only to make coaching specific to you.
           </>,
           <>
-            <strong>Technical data</strong> — your IP address, timestamps (including a
+            <strong>Technical data:</strong> your IP address, timestamps (including a
             &quot;last active&quot; time used for the live online count), and standard request/device
             logs.
           </>,
           <>
-            <strong>Cookies</strong> — a single essential cookie that keeps you signed in. We do{" "}
+            <strong>Cookies:</strong> a single essential cookie that keeps you signed in. We do{" "}
             <strong>not</strong> use advertising or cross-site tracking cookies.
           </>,
           <>
@@ -215,10 +215,10 @@ export default function PrivacyPolicy() {
       </H2>
       <Bullets
         items={[
-          "To provide the tools — search, card cutting, re-highlighting, coaching, and your Round Log.",
+          "To provide the tools: search, card cutting, re-highlighting, coaching, and your Round Log.",
           "To keep you signed in and to secure your account.",
           "To prevent abuse (rate limiting and bot detection), which uses your IP address.",
-          "To show an aggregate 'online now' count — a number only, never who is online.",
+          "To show an aggregate 'online now' count: a number only, never who is online.",
           "To maintain and improve the reliability of the service.",
         ]}
       />
@@ -255,7 +255,7 @@ export default function PrivacyPolicy() {
       <P>
         The content you submit is processed by Google&apos;s Gemini API to generate results.
         Depending on our Gemini service tier, Google&apos;s terms govern whether submitted content
-        may be used to improve Google&apos;s services — and on free tiers it may be. For that
+        may be used to improve Google&apos;s services, and on free tiers it may be. For that
         reason, <strong>do not paste anything confidential</strong>, and only submit material you
         have the right to share. The app never fabricates evidence: cards are the author&apos;s real,
         verbatim words.
@@ -276,7 +276,7 @@ export default function PrivacyPolicy() {
       />
       <P>
         We do not sell data, serve targeted ads, or run such profiling, so those opt-outs do not
-        apply in practice — but you may still exercise the access, correction, deletion, and
+        apply in practice, but you may still exercise the access, correction, deletion, and
         portability rights above. You can delete Round Log entries yourself at any time in the app.
       </P>
       <P>
