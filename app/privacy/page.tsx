@@ -110,6 +110,70 @@ export default function PrivacyPolicy() {
         data.
       </P>
 
+      <section aria-label="At a glance" className="frame shadow-hard mt-8 bg-paper-2 p-6">
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-accent">The short version</p>
+        <ul className="mt-4 flex flex-col gap-2.5">
+          {[
+            <>
+              We collect your <strong>email</strong>, what you <strong>type into the tools</strong>,
+              and basic <strong>technical data</strong> (like your IP) to run the app.
+            </>,
+            <>
+              We <strong>never sell your data</strong>, run ads, or track you across the web.
+            </>,
+            <>
+              Content you submit is processed by <strong>Google&apos;s Gemini AI</strong> to generate
+              results — so don&apos;t paste anything confidential.
+            </>,
+            <>
+              You can <strong>access, correct, or delete</strong> your data at any time.
+            </>,
+            <>
+              Built for students, with <strong>extra protections for minors</strong>.
+            </>,
+          ].map((t, i) => (
+            <li
+              key={i}
+              className="flex items-start gap-2.5 text-sm font-medium leading-relaxed text-ink/80"
+            >
+              <span aria-hidden className="mt-1 h-1.5 w-1.5 shrink-0 rotate-45 bg-accent" />
+              <span>{t}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-4 text-[11px] font-medium text-ink/50">
+          This summary is a convenience, not a substitute for the full policy below.
+        </p>
+      </section>
+
+      <nav aria-label="Contents" className="mt-10">
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-ink/55">Contents</p>
+        <ol className="mt-3 grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
+          {(
+            [
+              ["collect", "Information we collect"],
+              ["use", "How we use it"],
+              ["share", "How we share it"],
+              ["ai", "AI processing"],
+              ["rights", "Your TDPSA rights"],
+              ["minors", "Minors"],
+              ["retention", "Data retention"],
+              ["security", "Security"],
+              ["location", "Where it's processed"],
+              ["changes", "Changes"],
+              ["contact", "Contact us"],
+            ] as const
+          ).map(([id, label], i) => (
+            <li key={id}>
+              <a href={`#${id}`} className="text-sm font-medium text-ink/70 hover:text-accent">
+                <span className="label-mono text-accent">{String(i + 1).padStart(2, "0")}</span>{" "}
+                {label}
+              </a>
+            </li>
+          ))}
+        </ol>
+      </nav>
+
       <H2 id="collect" n="01">
         Information we collect
       </H2>
@@ -138,6 +202,10 @@ export default function PrivacyPolicy() {
           <>
             <strong>Cookies</strong> — a single essential cookie that keeps you signed in. We do{" "}
             <strong>not</strong> use advertising or cross-site tracking cookies.
+          </>,
+          <>
+            <strong>What we don&apos;t collect:</strong> no payment information, no precise
+            geolocation, and no third-party advertising trackers.
           </>,
         ]}
       />

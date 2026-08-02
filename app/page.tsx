@@ -9,6 +9,7 @@ import {
   StatBar,
   Toolkit,
   ToolStrip,
+  Versatility,
 } from "@/components/marketing/LandingSections";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -125,6 +126,7 @@ export default async function Landing({
       </section>
 
       <Mission />
+      <Versatility />
       <Toolkit />
       <Pricing />
       <FinalCta />
