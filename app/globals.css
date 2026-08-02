@@ -357,6 +357,54 @@ body * {
   animation: tab-in 0.4s cubic-bezier(0.2, 0.9, 0.3, 1);
 }
 
+/* ---- Living newsprint + scroll (landing) -------------------------------- */
+
+/* A soft ink/accent wash drifts behind the hero. No motion = a plain surface. */
+.hero-atmos {
+  position: relative;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .hero-atmos::before {
+    content: "";
+    position: absolute;
+    inset: -20%;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(40% 50% at 24% 18%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%),
+      radial-gradient(44% 46% at 82% 30%, color-mix(in srgb, var(--red) 8%, transparent), transparent 70%);
+    animation: hero-drift 26s ease-in-out infinite alternate;
+  }
+}
+@keyframes hero-drift {
+  from {
+    transform: translate3d(-2%, -1%, 0);
+  }
+  to {
+    transform: translate3d(2%, 2%, 0);
+  }
+}
+
+/* Masthead rules draw themselves as they scroll into view. Static fallback. */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .masthead-rule {
+      transform-origin: left center;
+      animation: rule-draw linear both;
+      animation-timeline: view();
+      animation-range: entry 10% cover 12%;
+    }
+  }
+}
+@keyframes rule-draw {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .reveal,
   .tab-panel,

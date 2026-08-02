@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import AuthForm from "@/components/AuthForm";
+import CutDemo from "@/components/marketing/CutDemo";
 import {
   FinalCta,
   LandingFooter,
@@ -42,7 +43,7 @@ export default async function Landing({
   return (
     <main className="flex w-full flex-1 flex-col">
       {/* ---- HERO ---------------------------------------------------------- */}
-      <section className="mx-auto w-full max-w-6xl px-5 pb-10 pt-14 sm:pt-20">
+      <section className="hero-atmos mx-auto w-full max-w-6xl overflow-hidden px-5 pb-10 pt-14 sm:pt-20">
         <div className="grid items-center gap-10 lg:grid-cols-[1.1fr_0.9fr]">
           {/* Pitch */}
           <div>
@@ -125,6 +126,7 @@ export default async function Landing({
         </div>
       </section>
 
+      <CutDemo />
       <Mission />
       <Versatility />
       <Toolkit />
