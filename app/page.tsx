@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import AuthForm from "@/components/AuthForm";
-import CutDemo from "@/components/marketing/CutDemo";
+import HighlightDemo from "@/components/marketing/HighlightDemo";
 import {
   FinalCta,
   LandingFooter,
@@ -126,7 +126,7 @@ export default async function Landing({
         </div>
       </section>
 
-      <CutDemo />
+      <HighlightDemo />
       <Mission />
       <Versatility />
       <Toolkit />
