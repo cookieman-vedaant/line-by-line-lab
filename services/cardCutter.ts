@@ -26,6 +26,15 @@ export class NoWarrantFoundError extends Error {
 // free-tier token budgets.
 const MAX_ARTICLE_CHARS = 120000;
 
+// A single marker call under-marks a LONG passage: the model emphasizes the
+// opening and leaves the rest plain, so a big article yields a card with only a
+// few underlined/highlighted sentences (all that context, unused). We split a
+// long passage into contiguous sections and mark each one, so emphasis is dense
+// throughout. A passage at/under one section's budget stays a SINGLE call —
+// byte-for-byte the old behavior, so normal-length cards never change.
+const SECTION_TARGET_WORDS = 900; // ~a screen of prose — the model marks it densely
+const MAX_MARKER_SECTIONS = 8; // bound the AI calls (latency + free-tier budget) per cut
+
 /**
  * HOW CUTTING WORKS (verbatim by construction — the AI never writes body text):
  * 1. Extract the article (URL via Readability, or pasted text).
@@ -52,6 +61,44 @@ export function splitParagraphs(text: string): string[] {
 }
 
 const countWords = (s: string) => s.split(/\s+/).filter(Boolean).length;
+
+/**
+ * Split a passage's paragraphs into contiguous sections of ~targetWords each
+ * (never splitting a paragraph), capped at maxSections. Used to mark a long
+ * passage in pieces so emphasis is distributed across the WHOLE card, not just
+ * its opening. Every paragraph appears in exactly one section, in order, so the
+ * sections rejoin into the original passage. A passage at/under one section's
+ * budget returns a SINGLE section — the unchanged single-call path.
+ */
+export function splitIntoSections(
+  paragraphs: string[],
+  targetWords: number,
+  maxSections: number,
+): string[] {
+  if (paragraphs.length === 0) return [];
+  const counts = paragraphs.map(countWords);
+  const total = counts.reduce((a, b) => a + b, 0);
+  // Grow the per-section budget so the number of sections can't exceed the cap
+  // (a very long "Entire Article" passage gets fewer, larger sections).
+  const budget = Math.max(targetWords, Math.ceil(total / maxSections));
+
+  const sections: string[] = [];
+  let current: string[] = [];
+  let words = 0;
+  for (let i = 0; i < paragraphs.length; i++) {
+    current.push(paragraphs[i]);
+    words += counts[i];
+    // Close the section at the budget — but stop opening new sections once we're
+    // one short of the cap, so the final section absorbs any remaining paragraphs.
+    if (words >= budget && sections.length < maxSections - 1) {
+      sections.push(current.join("\n\n"));
+      current = [];
+      words = 0;
+    }
+  }
+  if (current.length > 0) sections.push(current.join("\n\n"));
+  return sections;
+}
 
 /**
  * Clamp a selected paragraph range [start, end] (inclusive) so its share of
@@ -190,6 +237,53 @@ function buildMarkerPrompt(claim: string, article: ExtractedArticle, passage: st
   ].join("\n");
 }
 
+type MarkerData = z.infer<typeof markerSchema>;
+
+/**
+ * One marker call over a passage (or one section of it): the quality-critical
+ * step. A stronger model picks coherent in-context warrant phrases instead of
+ * disconnected buzzwords. It fails FAST on the premium model (retries: 0) — that
+ * model gets "high demand" 503s — and drops straight to the reliable default
+ * model rather than burning ~15s retrying. maxOutputTokens is large because dense
+ * emphasis means many substrings (avoid truncation). Throws on total failure or
+ * unparseable output.
+ */
+async function markPassageSection(
+  claim: string,
+  article: ExtractedArticle,
+  section: string,
+): Promise<MarkerData> {
+  const prompt = buildMarkerPrompt(claim, article, section);
+  let raw: unknown;
+  try {
+    raw = await generateJson({
+      system: MARKER_SYSTEM,
+      prompt,
+      model: GEMINI_MARKER_MODEL,
+      maxOutputTokens: 40000,
+      retries: GEMINI_MARKER_MODEL !== GEMINI_MODEL ? 0 : undefined,
+    });
+  } catch (err) {
+    if (err instanceof RateLimitedError && GEMINI_MARKER_MODEL !== GEMINI_MODEL) {
+      console.warn("cardCutter: marker model busy; falling back to the default model");
+      raw = await generateJson({
+        system: MARKER_SYSTEM,
+        prompt,
+        model: GEMINI_MODEL,
+        maxOutputTokens: 40000,
+      });
+    } else {
+      throw err;
+    }
+  }
+  const parsed = markerSchema.safeParse(raw);
+  if (!parsed.success) {
+    console.error("cardCutter: unparseable marker output");
+    throw new Error("Card cutting finished but returned an unreadable result. Please try again.");
+  }
+  return parsed.data;
+}
+
 /** Resolve the cut source into clean article text + metadata. */
 async function resolveSource(req: CutRequest): Promise<ExtractedArticle> {
   const fromProvidedText = (): ExtractedArticle => ({
@@ -317,46 +411,52 @@ async function runCut(req: CutRequest): Promise<Card> {
   const paragraphs = splitParagraphs(article.text);
   const passage = await selectPassage(req.claim, req.cardLength, paragraphs);
 
-  const markerPrompt = buildMarkerPrompt(req.claim, article, passage);
-  // The quality-critical call: a stronger model picks coherent in-context
-  // warrant phrases instead of disconnected buzzwords. maxOutputTokens is large
-  // because dense emphasis on a long card means many substrings (avoid truncation).
-  let markerRaw: unknown;
-  try {
-    // Fail fast (retries: 0) on the premium model — it's the one that gets
-    // "high demand" 503s. Rather than burn ~15s retrying it, drop straight to
-    // the reliable default model, which retries normally.
-    markerRaw = await generateJson({
-      system: MARKER_SYSTEM,
-      prompt: markerPrompt,
-      model: GEMINI_MARKER_MODEL,
-      maxOutputTokens: 40000,
-      retries: GEMINI_MARKER_MODEL !== GEMINI_MODEL ? 0 : undefined,
-    });
-  } catch (err) {
-    if (err instanceof RateLimitedError && GEMINI_MARKER_MODEL !== GEMINI_MODEL) {
-      console.warn("cardCutter: marker model busy; falling back to the default model");
-      markerRaw = await generateJson({
-        system: MARKER_SYSTEM,
-        prompt: markerPrompt,
-        model: GEMINI_MODEL,
-        maxOutputTokens: 40000,
-      });
-    } else {
-      throw err;
+  // Mark the passage in sections so emphasis reaches the WHOLE card, not just its
+  // opening. A normal-length passage is a single section → one marker call,
+  // identical to before. A long passage (big article) is split so every part is
+  // marked densely — the fix for "huge article, only a couple highlighted lines".
+  const sections = splitIntoSections(
+    splitParagraphs(passage),
+    SECTION_TARGET_WORDS,
+    MAX_MARKER_SECTIONS,
+  );
+
+  let head: MarkerData;
+  const underlines: string[] = [];
+  const highlights: string[] = [];
+
+  if (sections.length <= 1) {
+    head = await markPassageSection(req.claim, article, sections[0] ?? passage);
+    underlines.push(...head.underlines);
+    highlights.push(...head.highlights);
+  } else {
+    // Section 0 owns the tag/cite (it holds the article's opening) and MUST
+    // succeed. The rest are best-effort in parallel: one busy/failed section
+    // shouldn't sink the whole card — it just contributes no marks (that region
+    // stays plain) instead of throwing. applyEmphasis dedupes highlights across
+    // sections and marks every underline occurrence, so merging is safe.
+    const marked = await Promise.all(
+      sections.map((sec, i) =>
+        markPassageSection(req.claim, article, sec).catch((err: unknown) => {
+          if (i === 0) throw err;
+          console.warn(`cardCutter: section ${i} marking failed; leaving it plain`, String(err));
+          return null;
+        }),
+      ),
+    );
+    const first = marked[0];
+    if (!first) {
+      throw new Error("Card cutting couldn't mark the opening section. Please try again.");
+    }
+    head = first;
+    for (const m of marked) {
+      if (!m) continue;
+      underlines.push(...m.underlines);
+      highlights.push(...m.highlights);
     }
   }
-  const marker = markerSchema.safeParse(markerRaw);
-  if (!marker.success) {
-    console.error("cardCutter: unparseable marker output");
-    throw new Error("Card cutting finished but returned an unreadable result. Please try again.");
-  }
 
-  const { body, missed, applied } = applyEmphasis(
-    passage,
-    marker.data.underlines,
-    marker.data.highlights,
-  );
+  const { body, missed, applied } = applyEmphasis(passage, underlines, highlights);
   if (missed > 0) {
     console.warn(`cardCutter: ${missed} emphasis substrings didn't match and were skipped (${applied} applied)`);
   }
@@ -364,10 +464,10 @@ async function runCut(req: CutRequest): Promise<Card> {
   return {
     // The tag is the one place the AI supplies markup (`__key phrase__`);
     // convert it to internal delimiters. The body already carries them.
-    tag: tagMarkupToDelimiters(marker.data.tag),
-    cite: marker.data.cite,
+    tag: tagMarkupToDelimiters(head.tag),
+    cite: head.cite,
     // Add the real link ourselves — never from the AI, so it can't be invented.
-    citeDetails: appendSourceUrl(marker.data.citeDetails, req.source.url),
+    citeDetails: appendSourceUrl(head.citeDetails, req.source.url),
     body,
   };
 }

@@ -1,9 +1,53 @@
 import { describe, expect, it } from "vitest";
-import { appendSourceUrl, fitRangeToBudget, splitParagraphs } from "./cardCutter";
+import {
+  appendSourceUrl,
+  fitRangeToBudget,
+  splitIntoSections,
+  splitParagraphs,
+} from "./cardCutter";
 
 describe("splitParagraphs", () => {
   it("splits on newlines and drops empties", () => {
     expect(splitParagraphs("one\n\ntwo\n \nthree")).toEqual(["one", "two", "three"]);
+  });
+});
+
+describe("splitIntoSections", () => {
+  // A paragraph of N words, so word budgets are easy to reason about.
+  const para = (n: number, label = "w") => Array(n).fill(label).join(" ");
+
+  it("returns a single section when the passage fits one budget (unchanged path)", () => {
+    const paras = [para(100), para(100), para(100)]; // 300 words < 900 budget
+    const sections = splitIntoSections(paras, 900, 8);
+    expect(sections).toHaveLength(1);
+    expect(sections[0]).toBe(paras.join("\n\n"));
+  });
+
+  it("splits a long passage into ~budget-sized sections on paragraph boundaries", () => {
+    const paras = Array.from({ length: 12 }, () => para(300)); // 3,600 words
+    const sections = splitIntoSections(paras, 900, 8);
+    // ~900 words per section → 3 paragraphs each → 4 sections.
+    expect(sections).toHaveLength(4);
+    for (const s of sections) {
+      expect(splitParagraphs(s)).toHaveLength(3);
+    }
+  });
+
+  it("never exceeds the section cap (huge 'Entire Article' passage)", () => {
+    const paras = Array.from({ length: 100 }, () => para(300)); // 30,000 words
+    const sections = splitIntoSections(paras, 900, 8);
+    expect(sections.length).toBeLessThanOrEqual(8);
+  });
+
+  it("preserves every paragraph in order (sections rejoin to the original passage)", () => {
+    const paras = Array.from({ length: 20 }, (_, i) => para(200, `p${i}`));
+    const sections = splitIntoSections(paras, 900, 8);
+    expect(sections.join("\n\n")).toBe(paras.join("\n\n"));
+    expect(sections.flatMap(splitParagraphs)).toEqual(paras);
+  });
+
+  it("handles an empty passage", () => {
+    expect(splitIntoSections([], 900, 8)).toEqual([]);
   });
 });
 
