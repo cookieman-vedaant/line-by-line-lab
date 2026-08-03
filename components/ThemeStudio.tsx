@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { requestTheme } from "@/lib/apiClient";
 import {
@@ -29,8 +29,34 @@ export default function ThemeStudio() {
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Flag the control as unexplored until it has been opened once. Done as an
+   * attribute from the ref rather than React state so it costs no render and
+   * cannot mismatch during hydration, since localStorage is unreadable on the
+   * server.
+   */
+  const HINT_KEY = "lbl-theme-seen";
+  const setTrigger = useCallback((el: HTMLButtonElement | null) => {
+    triggerRef.current = el;
+    if (!el) return;
+    try {
+      if (localStorage.getItem(HINT_KEY) !== "1") el.setAttribute("data-hint", "");
+    } catch {
+      /* storage disabled: just don't hint */
+    }
+  }, []);
+
+  function markSeen() {
+    triggerRef.current?.removeAttribute("data-hint");
+    try {
+      localStorage.setItem(HINT_KEY, "1");
+    } catch {
+      /* ignore */
+    }
+  }
 
   function openMenu() {
     const r = triggerRef.current?.getBoundingClientRect();
@@ -77,13 +103,30 @@ export default function ThemeStudio() {
   return (
     <>
       <button
-        ref={triggerRef}
+        ref={setTrigger}
         type="button"
-        onClick={() => (open ? setOpen(false) : openMenu())}
+        onClick={() => {
+          markSeen();
+          if (open) setOpen(false);
+          else openMenu();
+        }}
         aria-expanded={open}
-        className="label-mono frame btn-press bg-paper-2 px-3 py-1.5 text-[10px] font-bold text-ink hover:text-accent"
+        title="Theme Studio: restyle the whole app, or describe a look and let the agent build it"
+        className="theme-trigger label-mono frame btn-press relative flex items-center gap-1.5 bg-paper-2 px-2.5 py-1.5 text-[10px] font-bold text-ink hover:text-accent"
       >
-        ✨ {active}
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path
+            d="M12 3a9 9 0 1 0 0 18c1 0 1.6-.6 1.6-1.4 0-.5-.2-.8-.5-1.1-.3-.3-.4-.6-.4-1 0-.8.6-1.4 1.4-1.4H16a5 5 0 0 0 5-5c0-4.4-4-8.1-9-8.1Z"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinejoin="round"
+          />
+          <circle cx="7.5" cy="11.5" r="1.3" fill="currentColor" />
+          <circle cx="11" cy="7.5" r="1.3" fill="currentColor" />
+          <circle cx="15.5" cy="9" r="1.3" fill="currentColor" />
+        </svg>
+        <span>Theme</span>
+        <span className="hidden text-ink/45 md:inline">· {active}</span>
       </button>
 
       {open &&

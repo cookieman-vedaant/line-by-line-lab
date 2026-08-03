@@ -29,15 +29,12 @@ function interactive(): boolean {
   );
 }
 
-export function KineticHeading({
-  className,
+export function KineticInk({
   wrapperClassName,
   children,
 }: {
-  /** Typography only. Must carry no margin: the clone is inset-0 and margin
-      would shift it out of register with the real heading. */
-  className: string;
-  /** Layout for the pair (margins, entrance animation). */
+  /** Layout for the pair (margins, entrance animation). The clone is inset-0,
+      so any margin belongs out here or it shifts out of register. */
   wrapperClassName?: string;
   children: ReactNode;
 }) {
@@ -86,10 +83,11 @@ export function KineticHeading({
 
   return (
     <div ref={attach} className={`kinetic ${wrapperClassName ?? ""}`}>
-      <h1 className={className}>{children}</h1>
-      {/* Same classes, so the clone lays out identically and registers exactly
-          on top. Hidden from assistive tech: it is the same words twice. */}
-      <div aria-hidden className={`kinetic-glow ${className}`}>
+      {children}
+      {/* The same subtree again, so the clone lays out identically and registers
+          exactly on top of the real copy. Hidden from assistive tech and from
+          the pointer: it is the same words a second time. */}
+      <div aria-hidden className="kinetic-glow">
         {children}
       </div>
     </div>

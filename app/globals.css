@@ -497,35 +497,6 @@ body * {
   opacity: clamp(0, calc(var(--load) * 5 - 4), 1);
 }
 
-/* ---- Print: a card becomes a PDF through the browser's own pipeline ------ */
-/* lib/cardExport.ts marks the card [data-printing] and the document
-   [data-print-mode] for the duration of the dialog. Visibility rather than
-   display, so the card keeps the exact layout it had on screen. */
-@media print {
-  [data-print-mode] body * {
-    visibility: hidden;
-  }
-  [data-print-mode] [data-printing],
-  [data-print-mode] [data-printing] * {
-    visibility: visible;
-  }
-  [data-print-mode] [data-printing] {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    padding: 0 !important;
-    border: 0 !important;
-    box-shadow: none !important;
-  }
-  [data-print-mode] [data-print-hide] {
-    display: none !important;
-  }
-  @page {
-    margin: 0.6in;
-  }
-}
-
 /* ---- Kinetic hero (landing) --------------------------------------------- */
 /* An accent copy of the headline sits exactly over the ink one, masked to a soft
    circle that tracks the pointer, so the ink bleeds to accent under the cursor.
@@ -539,6 +510,10 @@ body * {
   position: relative;
 }
 
+/* The blot: four overlapping circles with a hard stop at their edge. Multiple
+   mask layers union by default, so the outline comes out irregular and wet
+   rather than a soft round spotlight, and the crisp edge is what makes it
+   legible as ink soaking through instead of a glow. */
 .kinetic-glow {
   position: absolute;
   inset: 0;
@@ -546,23 +521,58 @@ body * {
   pointer-events: none;
   color: var(--accent);
   opacity: 0;
-  transition: opacity 0.28s ease;
-  -webkit-mask-image: radial-gradient(
-    circle 150px at var(--mx, -999px) var(--my, -999px),
-    #000 0%,
-    rgba(0, 0, 0, 0.72) 40%,
-    transparent 68%
-  );
-  mask-image: radial-gradient(
-    circle 150px at var(--mx, -999px) var(--my, -999px),
-    #000 0%,
-    rgba(0, 0, 0, 0.72) 40%,
-    transparent 68%
-  );
+  transition: opacity 0.18s ease;
+  --blot: radial-gradient(circle 132px at var(--mx, -9999px) var(--my, -9999px), #000 99%, transparent 100%),
+    radial-gradient(
+      circle 92px at calc(var(--mx, -9999px) + 84px) calc(var(--my, -9999px) - 52px),
+      #000 99%,
+      transparent 100%
+    ),
+    radial-gradient(
+      circle 78px at calc(var(--mx, -9999px) - 88px) calc(var(--my, -9999px) + 46px),
+      #000 99%,
+      transparent 100%
+    ),
+    radial-gradient(
+      circle 58px at calc(var(--mx, -9999px) + 46px) calc(var(--my, -9999px) + 78px),
+      #000 99%,
+      transparent 100%
+    );
+  -webkit-mask-image: var(--blot);
+  mask-image: var(--blot);
 }
 
 .kinetic[data-live="1"] .kinetic-glow {
   opacity: 1;
+}
+
+/* Theme Studio trigger: a red dot until it has been opened once, so the feature
+   announces itself without taking any layout. */
+.theme-trigger[data-hint]::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  height: 9px;
+  width: 9px;
+  border-radius: 999px;
+  background: var(--red);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .theme-trigger[data-hint]::after {
+    animation: theme-ping 2.2s ease-out infinite;
+  }
+}
+@keyframes theme-ping {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.55);
+    opacity: 0.5;
+  }
 }
 
 /* ---- The Round (landing) ------------------------------------------------ */
