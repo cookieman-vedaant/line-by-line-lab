@@ -91,9 +91,14 @@ body {
   font-family: var(--app-display), ui-sans-serif, system-ui, sans-serif;
 }
 
-/* Per-theme background atmosphere (never a flat fill). */
+/* Per-theme background atmosphere (never a flat fill).
+   Scoped to Rostrum and to the no-attribute case only. This used to read
+   `:root body`, which matches every page including custom themes — and since
+   the custom-theme rules below override only `background-image`, the 22px tile
+   survived and chopped a gradient background into a grid of blocks. Each
+   [data-bg] style now owns the body background outright. */
 [data-theme="rostrum"] body,
-:root body {
+:root:not([data-theme]) body {
   background-image: radial-gradient(var(--dot) 1.4px, transparent 1.4px);
   background-size: 22px 22px;
   background-position: -11px -11px;
@@ -274,8 +279,29 @@ body * {
     linear-gradient(90deg, color-mix(in srgb, var(--ink) 7%, transparent) 1px, transparent 1px);
   background-size: 46px 46px, 46px 46px;
 }
+/* A gradient theme is ONE cohesive field across the whole viewport, running
+   through both of the theme's colors. It lives on a fixed full-viewport layer
+   rather than the body's background-image so it can never tile, never restart,
+   and never depend on how tall the document happens to be.
+
+   The two stops are precomputed in lib/themeTokens.ts (--grad-1 / --grad-2),
+   tinted as far toward the accents as the theme's own text contrast allows. */
 [data-theme="custom"][data-bg="gradient"] body {
-  background-image: linear-gradient(160deg, color-mix(in srgb, var(--accent) 16%, var(--paper)), var(--paper) 62%);
+  background-image: none;
+}
+[data-theme="custom"][data-bg="gradient"] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  /* Fallbacks cover themes saved to localStorage before --grad-* existed. */
+  background: linear-gradient(
+    155deg,
+    var(--grad-1, color-mix(in srgb, var(--accent) 20%, var(--paper))) 0%,
+    var(--grad-2, color-mix(in srgb, var(--accent-2) 20%, var(--paper))) 54%,
+    color-mix(in srgb, var(--grad-2, var(--accent-2)) 30%, var(--paper)) 100%
+  );
 }
 [data-theme="custom"][data-bg="solid"] body {
   background-image: none;

@@ -82,6 +82,34 @@ function nudge(hex: string, toward: "black" | "white", pct: number): string {
   });
 }
 
+/** Linear blend of two hex colors. t=0 returns `a`, t=1 returns `b`. */
+function mix(a: string, b: string, t: number): string {
+  const A = hexToRgb(a);
+  const B = hexToRgb(b);
+  return rgbToHex({
+    r: A.r + (B.r - A.r) * t,
+    g: A.g + (B.g - A.g) * t,
+    b: A.b + (B.b - A.b) * t,
+  });
+}
+
+/**
+ * One stop of a `gradient` background: the accent blended into the page color as
+ * strongly as it can be while body text still clears AA on top of it.
+ *
+ * A gradient covers the whole page, so every stop is a text background. The AI
+ * picks accents freely, and a saturated one can drop --ink well under 4.5:1 over
+ * the part of the page it covers. Walking the blend down keeps the gradient as
+ * visible as the theme's own colors allow without ever going unreadable.
+ */
+export function gradientStop(accent: string, paper: string, ink: string): string {
+  for (let amount = 0.34; amount > 0.01; amount -= 0.04) {
+    const stop = mix(paper, accent, amount);
+    if (contrastRatio(ink, stop) >= 4.5) return stop;
+  }
+  return paper;
+}
+
 /** Push `color` away from `bg` until it clears `min` contrast (or we run out). */
 function pushForContrast(color: string, bg: string, min: number): string {
   let out = color;
@@ -128,7 +156,8 @@ const SLEEK_SHADOWS = {
 /** The exact custom properties themeToCssVars sets (used to clear them on reset). */
 export const CSS_VAR_KEYS = [
   "--paper", "--paper-2", "--ink", "--stroke", "--accent", "--accent-2",
-  "--red", "--yellow", "--bw", "--radius", "--shadow", "--shadow-lg", "--shadow-btn",
+  "--red", "--yellow", "--grad-1", "--grad-2",
+  "--bw", "--radius", "--shadow", "--shadow-lg", "--shadow-btn",
 ] as const;
 
 export function themeToCssVars(spec: ThemeSpec): Record<string, string> {
@@ -141,6 +170,10 @@ export function themeToCssVars(spec: ThemeSpec): Record<string, string> {
     "--accent-2": spec.accent2,
     "--red": spec.warn,
     "--yellow": spec.highlight,
+    // Both ends of a `gradient` background, precomputed so the CSS never has to
+    // guess how far it can tint the page before text stops being readable.
+    "--grad-1": gradientStop(spec.accent, spec.paper, spec.ink),
+    "--grad-2": gradientStop(spec.accent2, spec.paper, spec.ink),
     "--bw": `${spec.borderWidth}px`,
     "--radius": `${spec.radius}px`,
     ...(spec.mood === "sleek" ? SLEEK_SHADOWS : BOLD_SHADOWS),
