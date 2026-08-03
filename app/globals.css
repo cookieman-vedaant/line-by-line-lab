@@ -497,6 +497,45 @@ body * {
   opacity: clamp(0, calc(var(--load) * 5 - 4), 1);
 }
 
+/* ---- Kinetic hero (landing) --------------------------------------------- */
+/* An accent copy of the headline sits exactly over the ink one, masked to a soft
+   circle that tracks the pointer, so the ink bleeds to accent under the cursor.
+   Only the mask position moves per frame.
+
+   Inert by default in every sense that matters: the overlay is transparent until
+   the listener sets data-live, and components/marketing/Kinetic.tsx only attaches
+   that listener for a fine pointer with motion allowed. Touch and reduced-motion
+   visitors get the plain heading. */
+.kinetic {
+  position: relative;
+}
+
+.kinetic-glow {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  color: var(--accent);
+  opacity: 0;
+  transition: opacity 0.28s ease;
+  -webkit-mask-image: radial-gradient(
+    circle 150px at var(--mx, -999px) var(--my, -999px),
+    #000 0%,
+    rgba(0, 0, 0, 0.72) 40%,
+    transparent 68%
+  );
+  mask-image: radial-gradient(
+    circle 150px at var(--mx, -999px) var(--my, -999px),
+    #000 0%,
+    rgba(0, 0, 0, 0.72) 40%,
+    transparent 68%
+  );
+}
+
+.kinetic[data-live="1"] .kinetic-glow {
+  opacity: 1;
+}
+
 /* ---- The Round (landing) ------------------------------------------------ */
 /* Five stages of prep, scrubbed by scroll position.
    The DEFAULT here is a plain vertical list that reads correctly with no motion

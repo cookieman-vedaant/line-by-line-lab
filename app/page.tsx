@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import AuthForm from "@/components/AuthForm";
+import { KineticHeading, MagneticLink } from "@/components/marketing/Kinetic";
 import Scales from "@/components/marketing/Scales";
 import SourceField from "@/components/marketing/SourceField";
 import TheRound from "@/components/marketing/TheRound";
@@ -116,14 +117,17 @@ export default function Landing({ searchParams }: { searchParams: SearchParams }
               line by line lab · free to start
             </p>
 
-            <h1 className="reveal reveal-2 mt-5 font-display text-5xl font-extrabold leading-[0.9] tracking-tight sm:text-7xl">
+            <KineticHeading
+              wrapperClassName="reveal reveal-2 mt-5"
+              className="font-display text-5xl font-extrabold leading-[0.9] tracking-tight sm:text-7xl"
+            >
               Prep like the
               <br />
               biggest program{" "}
               <span className="lab-mark frame shadow-hard inline-block -rotate-1 bg-accent px-3 pb-1 text-paper">
                 in the room.
               </span>
-            </h1>
+            </KineticHeading>
 
             <p className="reveal reveal-3 mt-7 max-w-xl text-lg font-medium leading-snug sm:text-xl">
               Find reputable evidence, cut verbatim debate-ready cards, re-highlight your
@@ -144,12 +148,12 @@ export default function Landing({ searchParams }: { searchParams: SearchParams }
               >
                 Start free <span aria-hidden>→</span>
               </Link>
-              <Link
+              <MagneticLink
                 href="#tools"
                 className="btn-press frame inline-flex items-center gap-2 bg-paper-2 px-6 py-3.5 font-display text-base font-bold uppercase tracking-wide text-ink"
               >
                 See the tools <span aria-hidden>→</span>
-              </Link>
+              </MagneticLink>
             </div>
           </div>
 
