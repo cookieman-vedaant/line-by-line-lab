@@ -230,17 +230,23 @@ export function docToHtmlFile(doc: CardDoc, font: string, title: string): string
   );
 }
 
-/** The card as first cut, before any editing — used to seed the editable DOM. */
-export function initialCardHtml(card: Card, highlightHex: string): {
-  tag: string;
-  cite: string;
-  details: string;
-  body: string[];
-} {
-  return {
-    tag: tagHtml(card.tag),
-    cite: citeHtml(card.cite),
-    details: detailsHtml(card.citeDetails),
-    body: bodyParagraphs(card.body).map((p) => bodyParagraphHtml(p, highlightHex)),
-  };
+/**
+ * The whole card as one block of HTML, used to seed a SINGLE editable host.
+ *
+ * One host, not one per field. Separate contentEditable elements cannot be
+ * selected across, and execCommand acts on the focused host, so splitting the
+ * card into four made it impossible to drag a selection over the tag and the
+ * body together or to format anything reliably.
+ */
+export function sheetHtml(card: Card, highlightHex: string): string {
+  const paras = bodyParagraphs(card.body)
+    .map((p) => `<p style="margin:0 0 0.7rem 0;line-height:1.5">${bodyParagraphHtml(p, highlightHex)}</p>`)
+    .join("");
+  return (
+    `<h2 data-field="tag" style="margin:0 0 0.55rem 0;line-height:1.25">${tagHtml(card.tag)}</h2>` +
+    `<p data-field="citeline" style="margin:0 0 0.9rem 0;line-height:1.3">` +
+    `<span data-field="cite">${citeHtml(card.cite)}</span> ` +
+    `<span data-field="details">${detailsHtml(card.citeDetails)}</span></p>` +
+    `<div data-field-group="body">${paras}</div>`
+  );
 }

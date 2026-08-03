@@ -7,9 +7,12 @@ import { CARD_FONTS, FONT_SIZES, type CardFont } from "@/lib/cardRich";
  * The card's formatting bar. Reads like a word processor's, because the card
  * below it is an editable document.
  *
- * Every control preventDefaults its mousedown: without that the browser drops
- * the text selection the instant the control takes focus, and the command
- * arrives with nothing to act on.
+ * Buttons preventDefault their mousedown so the browser doesn't drop the text
+ * selection the instant the control takes focus.
+ *
+ * The <select> controls deliberately do NOT: preventing mousedown on a select
+ * stops its dropdown from ever opening. They lose the selection instead, and
+ * CardView restores it from a saved Range before running the command.
  */
 
 export type HighlightColor = "cyan" | "yellow" | "green";
@@ -133,7 +136,7 @@ export default function CardToolbar(p: Props) {
 
       <label className="flex items-center gap-1.5">
         <span className="sr-only">Text size</span>
-        <select onMouseDown={hold} defaultValue=""
+        <select defaultValue=""
           onChange={(e) => { if (e.target.value) { p.onSize(Number(e.target.value)); e.target.value = ""; } }}
           className="frame h-8 bg-paper-2 px-1.5 text-xs font-semibold text-ink">
           <option value="" disabled>size</option>
@@ -143,7 +146,7 @@ export default function CardToolbar(p: Props) {
 
       <label className="flex items-center gap-1.5">
         <span className="sr-only">Typeface</span>
-        <select value={p.font} onMouseDown={hold} onChange={(e) => p.onFont(e.target.value as CardFont)}
+        <select value={p.font} onChange={(e) => p.onFont(e.target.value as CardFont)}
           className="frame h-8 bg-paper-2 px-1.5 text-xs font-semibold text-ink">
           {CARD_FONTS.map((f) => <option key={f} value={f}>{f}</option>)}
         </select>

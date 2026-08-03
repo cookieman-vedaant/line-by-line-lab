@@ -131,10 +131,14 @@ body {
   }
 }
 
-/* Smooth every color/shadow change — this is what makes a theme switch (and
-   general interaction) feel fluid instead of stiff. Buttons keep their own
-   snappier transition via higher specificity below. */
-body * {
+/* Smooth the theme switch itself, and ONLY that.
+   This used to be an unconditional `body *`, which put a transition on every
+   element in the document: the browser then tracks transitionable properties
+   for the whole tree on every style change, which is a permanent tax paid to
+   make one rare interaction look good. lib/theme.ts now flags the document
+   while a theme is being applied, so the cost lands during the switch and
+   nowhere else. */
+[data-theming] body * {
   transition:
     background-color 0.3s ease,
     border-color 0.3s ease,
@@ -495,55 +499,6 @@ body * {
    payoff rather than as a line that was there the whole time. */
 .scales-level {
   opacity: clamp(0, calc(var(--load) * 5 - 4), 1);
-}
-
-/* ---- Kinetic hero (landing) --------------------------------------------- */
-/* An accent copy of the headline sits exactly over the ink one, masked to a soft
-   circle that tracks the pointer, so the ink bleeds to accent under the cursor.
-   Only the mask position moves per frame.
-
-   Inert by default in every sense that matters: the overlay is transparent until
-   the listener sets data-live, and components/marketing/Kinetic.tsx only attaches
-   that listener for a fine pointer with motion allowed. Touch and reduced-motion
-   visitors get the plain heading. */
-.kinetic {
-  position: relative;
-}
-
-/* The blot: four overlapping circles with a hard stop at their edge. Multiple
-   mask layers union by default, so the outline comes out irregular and wet
-   rather than a soft round spotlight, and the crisp edge is what makes it
-   legible as ink soaking through instead of a glow. */
-.kinetic-glow {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  pointer-events: none;
-  color: var(--accent);
-  opacity: 0;
-  transition: opacity 0.18s ease;
-  --blot: radial-gradient(circle 132px at var(--mx, -9999px) var(--my, -9999px), #000 99%, transparent 100%),
-    radial-gradient(
-      circle 92px at calc(var(--mx, -9999px) + 84px) calc(var(--my, -9999px) - 52px),
-      #000 99%,
-      transparent 100%
-    ),
-    radial-gradient(
-      circle 78px at calc(var(--mx, -9999px) - 88px) calc(var(--my, -9999px) + 46px),
-      #000 99%,
-      transparent 100%
-    ),
-    radial-gradient(
-      circle 58px at calc(var(--mx, -9999px) + 46px) calc(var(--my, -9999px) + 78px),
-      #000 99%,
-      transparent 100%
-    );
-  -webkit-mask-image: var(--blot);
-  mask-image: var(--blot);
-}
-
-.kinetic[data-live="1"] .kinetic-glow {
-  opacity: 1;
 }
 
 /* Theme Studio trigger: a red dot until it has been opened once, so the feature

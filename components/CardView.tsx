@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import CardToolbar, { HIGHLIGHT_HEX, type HighlightColor } from "@/components/CardToolbar";
 import {
+  enableCssStyling,
   queryActive,
   setFontFamily,
   setHighlight,
@@ -10,10 +11,9 @@ import {
   toggleBold,
   toggleItalic,
   toggleUnderline,
-  enableCssStyling,
 } from "@/lib/cardEdit";
 import { downloadDocx, downloadHtml } from "@/lib/cardExport";
-import { type CardFont, docToHtml, docToText, initialCardHtml, readCard } from "@/lib/cardRich";
+import { type CardFont, docToHtml, docToText, readCard, sheetHtml } from "@/lib/cardRich";
 import type { Card } from "@/types";
 
 interface CardViewProps {
@@ -26,13 +26,18 @@ interface CardViewProps {
 /**
  * A cut card you can edit and format like a document.
  *
- * The rendered card IS the model: it starts as the cut output and from then on
- * the debater edits it directly, so React seeds each field once and never
- * re-renders into it (a re-render would wipe whatever they had typed). A new
- * card arrives as a new object, which remounts the surface through `key`.
+ * Two rules keep this working, both learned the hard way:
  *
- * Every field is editable and formattable, tag and cite included. Copy and both
- * downloads read the same live DOM, so what leaves the app is what is on screen.
+ * 1. ONE editable host for the whole card. A selection cannot span separate
+ *    contentEditable elements and execCommand only acts on the focused one, so
+ *    splitting the card per field made dragging across it and formatting it
+ *    impossible.
+ *
+ * 2. React never renders into that host. Its content is written once,
+ *    imperatively, and remounted via `key` when a new card arrives. Any
+ *    re-render that reconciled this subtree would discard whatever had been
+ *    typed, so state that changes while editing (selection flags) must never
+ *    produce a new object unless the value actually changed.
  */
 export default function CardView({ card, sourceUrl, sourceName, kicker = "✂ Cut Card" }: CardViewProps) {
   const [font, setFont] = useState<CardFont>("Calibri");
@@ -41,46 +46,89 @@ export default function CardView({ card, sourceUrl, sourceName, kicker = "✂ Cu
   const [busy, setBusy] = useState(false);
   const [active, setActive] = useState({ bold: false, italic: false, underline: false });
   const [edited, setEdited] = useState(false);
-  const sheetRef = useRef<HTMLDivElement>(null);
 
-  // Seeded once per card. Deliberately not reactive to the highlighter colour:
-  // that picks the colour for the NEXT highlight, it does not restyle the card.
-  const initial = useMemo(() => initialCardHtml(card, HIGHLIGHT_HEX.cyan), [card]);
+  const sheetRef = useRef<HTMLDivElement | null>(null);
+  /** The last selection made inside the card, so a toolbar control can restore
+      it. Opening a <select> moves focus and collapses the selection; without
+      this, every command would arrive with nothing to act on. */
+  const savedRange = useRef<Range | null>(null);
+  const editedOnce = useRef(false);
+
+  const cardKey = `${card.cite}|${card.tag}`;
+
+  const attachSheet = useCallback(
+    (el: HTMLDivElement | null) => {
+      sheetRef.current = el;
+      if (!el) return;
+      // Written once. React owns no children here.
+      el.innerHTML = sheetHtml(card, HIGHLIGHT_HEX.cyan);
+      enableCssStyling();
+
+      const onInput = () => {
+        if (editedOnce.current) return; // one state change, not one per keystroke
+        editedOnce.current = true;
+        setEdited(true);
+      };
+      el.addEventListener("input", onInput);
+      return () => el.removeEventListener("input", onInput);
+    },
+    [card],
+  );
 
   useEffect(() => {
-    enableCssStyling();
-    const sync = () => {
-      const el = sheetRef.current;
-      if (!el || !el.contains(document.getSelection()?.anchorNode ?? null)) return;
-      setActive({
+    const onSelectionChange = () => {
+      const sheet = sheetRef.current;
+      const sel = document.getSelection();
+      if (!sheet || !sel || sel.rangeCount === 0) return;
+      const range = sel.getRangeAt(0);
+      if (!sheet.contains(range.commonAncestorContainer)) return;
+
+      savedRange.current = range.cloneRange();
+      const next = {
         bold: queryActive("bold"),
         italic: queryActive("italic"),
         underline: queryActive("underline"),
-      });
+      };
+      // Bail out when nothing changed, or every selection tick re-renders the
+      // card and typing loses its place.
+      setActive((prev) =>
+        prev.bold === next.bold && prev.italic === next.italic && prev.underline === next.underline
+          ? prev
+          : next,
+      );
     };
-    document.addEventListener("selectionchange", sync);
-    return () => document.removeEventListener("selectionchange", sync);
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => document.removeEventListener("selectionchange", onSelectionChange);
   }, []);
 
-  const readDoc = useCallback(() => {
-    const el = sheetRef.current;
-    return el ? readCard(el) : null;
+  /** Put focus and the saved selection back, then run a command against it. */
+  const cmd = useCallback((fn: () => void) => {
+    const sheet = sheetRef.current;
+    if (!sheet) return;
+    sheet.focus({ preventScroll: true });
+    const range = savedRange.current;
+    if (range) {
+      const sel = document.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    }
+    fn();
   }, []);
+
+  const readDoc = useCallback(() => (sheetRef.current ? readCard(sheetRef.current) : null), []);
 
   async function handleCopy() {
     const doc = readDoc();
     if (!doc) return;
-    const html = docToHtml(doc, font);
-    const text = docToText(doc);
     try {
       await navigator.clipboard.write([
         new ClipboardItem({
-          "text/html": new Blob([html], { type: "text/html" }),
-          "text/plain": new Blob([text], { type: "text/plain" }),
+          "text/html": new Blob([docToHtml(doc, font)], { type: "text/html" }),
+          "text/plain": new Blob([docToText(doc)], { type: "text/plain" }),
         }),
       ]);
     } catch {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(docToText(doc));
     }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -97,36 +145,35 @@ export default function CardView({ card, sourceUrl, sourceName, kicker = "✂ Cu
     }
   }
 
-  function handleHtml() {
-    const doc = readDoc();
-    if (doc) downloadHtml(doc, font, card.cite);
-  }
-
-  const field =
-    "outline-none focus:bg-accent/5 focus-visible:outline-2 focus-visible:outline-accent";
-
   return (
-    <div key={`${card.cite}|${card.tag}`}>
+    <div>
       <CardToolbar
         active={active}
         highlightColor={highlightColor}
         font={font}
         copied={copied}
         busy={busy}
-        onBold={toggleBold}
-        onItalic={toggleItalic}
-        onUnderline={toggleUnderline}
-        onHighlight={() => setHighlight(HIGHLIGHT_HEX[highlightColor])}
-        onClearHighlight={() => setHighlight(null)}
-        onHighlightColor={setHighlightColor}
-        onSize={setSizePt}
+        onBold={() => cmd(toggleBold)}
+        onItalic={() => cmd(toggleItalic)}
+        onUnderline={() => cmd(toggleUnderline)}
+        onHighlight={() => cmd(() => setHighlight(HIGHLIGHT_HEX[highlightColor]))}
+        onClearHighlight={() => cmd(() => setHighlight(null))}
+        onHighlightColor={(c) => {
+          setHighlightColor(c);
+          // Recolour what's selected now, rather than only arming the next one.
+          cmd(() => setHighlight(HIGHLIGHT_HEX[c]));
+        }}
+        onSize={(pt) => cmd(() => setSizePt(pt))}
         onFont={(f) => {
           setFont(f);
-          setFontFamily(f); // styles the selection too, if there is one
+          cmd(() => setFontFamily(f));
         }}
         onCopy={handleCopy}
         onDocx={handleDocx}
-        onHtml={handleHtml}
+        onHtml={() => {
+          const doc = readDoc();
+          if (doc) downloadHtml(doc, font, card.cite);
+        }}
       />
 
       <section
@@ -139,62 +186,21 @@ export default function CardView({ card, sourceUrl, sourceName, kicker = "✂ Cu
             {kicker}
           </span>
           <span className="label-mono text-[10px] normal-case text-neutral-500">
-            {edited ? "Edited by you" : "Click any text to edit"}
+            {edited ? "Edited by you" : "Click any text to edit it"}
           </span>
         </div>
 
         <div
-          ref={sheetRef}
-          onInput={() => setEdited(true)}
-          className="text-black"
+          key={cardKey}
+          ref={attachSheet}
+          contentEditable
           suppressContentEditableWarning
-        >
-          <h2 className="leading-snug">
-            <span
-              data-field="tag"
-              contentEditable
-              suppressContentEditableWarning
-              role="textbox"
-              aria-label="Card tag"
-              className={`block ${field}`}
-              dangerouslySetInnerHTML={{ __html: initial.tag }}
-            />
-          </h2>
-
-          <p className="mt-3 leading-snug">
-            <span
-              data-field="cite"
-              contentEditable
-              suppressContentEditableWarning
-              role="textbox"
-              aria-label="Citation"
-              className={field}
-              dangerouslySetInnerHTML={{ __html: initial.cite }}
-            />{" "}
-            <span
-              data-field="details"
-              contentEditable
-              suppressContentEditableWarning
-              role="textbox"
-              aria-label="Citation details"
-              className={field}
-              dangerouslySetInnerHTML={{ __html: initial.details }}
-            />
-          </p>
-
-          <div
-            data-field-group="body"
-            contentEditable
-            suppressContentEditableWarning
-            role="textbox"
-            aria-multiline="true"
-            aria-label="Card body"
-            className={`mt-4 leading-relaxed ${field}`}
-            dangerouslySetInnerHTML={{
-              __html: initial.body.map((p) => `<p style="margin:0 0 0.65rem 0">${p}</p>`).join(""),
-            }}
-          />
-        </div>
+          role="textbox"
+          aria-multiline="true"
+          aria-label="Card content"
+          spellCheck={false}
+          className="text-black outline-none focus-visible:outline-2 focus-visible:outline-accent"
+        />
 
         <p className="label-mono mt-5 border-t-[3px] border-black pt-3 text-[10px] normal-case text-neutral-500">
           {sourceUrl ? (

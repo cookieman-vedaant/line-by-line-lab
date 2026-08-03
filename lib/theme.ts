@@ -18,6 +18,20 @@ export interface ThemeRoot {
 const THEME_KEY = "lbl-theme";
 const CUSTOM_KEY = "lbl-custom-theme";
 
+/**
+ * Flag the document while a theme is being applied. globals.css scopes its
+ * cross-fade to this attribute, so the whole-tree transition it needs exists
+ * for the length of the switch instead of permanently.
+ */
+let themingTimer: ReturnType<typeof setTimeout> | undefined;
+function flagTheming(): void {
+  if (typeof document === "undefined") return;
+  const root = document.documentElement;
+  root.setAttribute("data-theming", "");
+  clearTimeout(themingTimer);
+  themingTimer = setTimeout(() => root.removeAttribute("data-theming"), 420);
+}
+
 function docRoot(): ThemeRoot {
   return document.documentElement as unknown as ThemeRoot;
 }
@@ -31,6 +45,7 @@ export function applyPayload(payload: AppliedTheme, root: ThemeRoot = docRoot())
 }
 
 export function applyTheme(spec: ThemeSpec): void {
+  flagTheming();
   const payload = themeToPayload(spec);
   applyPayload(payload);
   try {
@@ -43,6 +58,7 @@ export function applyTheme(spec: ThemeSpec): void {
 }
 
 export function applyBuiltin(id: "rostrum" | "cut"): void {
+  flagTheming();
   const root = docRoot();
   for (const a of ["data-bg", "data-mood", "data-font"]) root.removeAttribute(a);
   for (const k of CSS_VAR_KEYS) root.style.removeProperty(k);
