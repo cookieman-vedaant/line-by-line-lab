@@ -5,15 +5,15 @@ import { SITE } from "@/lib/siteContent";
 export const metadata: Metadata = {
   title: "Privacy Policy · Line by Line Lab",
   description:
-    "How Line by Line Lab collects, uses, shares, and protects your information, and your rights under the Texas Data Privacy and Security Act.",
+    "How Line by Line Lab collects, uses, shares, and protects your information, and your rights under the GDPR, the EU Data Act, and the Texas Data Privacy and Security Act.",
 };
 
 /*
  * TDPSA-structured privacy notice. The disclosures below describe the app's ACTUAL
  * data practices (read from the codebase), so the representations are accurate.
- * TODO(before launch): (1) set SITE.contactEmail to a monitored inbox; (2) have
- * counsel review, especially the Minors section — your users are high-schoolers,
- * which implicates COPPA + the Texas SCOPE Act (HB 18) beyond the TDPSA.
+ * TODO(before launch): have counsel review, especially the Minors section — your
+ * users are high-schoolers, which implicates COPPA + the Texas SCOPE Act (HB 18)
+ * beyond the TDPSA.
  */
 
 const PROCESSORS: { name: string; purpose: string; data: string }[] = [
@@ -104,8 +104,9 @@ export default function PrivacyPolicy() {
 
       <P>
         This Privacy Policy explains what information {SITE.name} (&quot;we&quot;, &quot;us&quot;)
-        collects, why, who we share it with, and the rights you have, including your rights under
-        the <strong>Texas Data Privacy and Security Act (TDPSA)</strong>. We built this tool to help
+        collects, why, who we share it with, and the rights you have — including your rights under
+        the <strong>Texas Data Privacy and Security Act (TDPSA)</strong> and, if you are in Europe,
+        the <strong>GDPR</strong> and <strong>EU Data Act</strong>. We built this tool to help
         debaters, most of whom are students, so we collect as little as we can and never sell your
         data.
       </P>
@@ -153,13 +154,15 @@ export default function PrivacyPolicy() {
             [
               ["collect", "Information we collect"],
               ["use", "How we use it"],
+              ["lawful-basis", "Lawful basis (EU/UK)"],
               ["share", "How we share it"],
               ["ai", "AI processing"],
-              ["rights", "Your TDPSA rights"],
+              ["rights", "Your rights"],
+              ["eu-rights", "EU & UK rights (GDPR)"],
               ["minors", "Minors"],
               ["retention", "Data retention"],
               ["security", "Security"],
-              ["location", "Where it's processed"],
+              ["location", "International transfers"],
               ["changes", "Changes"],
               ["contact", "Contact us"],
             ] as const
@@ -227,7 +230,41 @@ export default function PrivacyPolicy() {
         it to profile you for decisions that produce legal or similarly significant effects.
       </P>
 
-      <H2 id="share" n="03">
+      <H2 id="lawful-basis" n="03">
+        Lawful basis for processing (EU/UK)
+      </H2>
+      <P>
+        If you are in the European Economic Area or the UK, the GDPR requires us to name a lawful
+        basis for each purpose. Ours are:
+      </P>
+      <Bullets
+        items={[
+          <>
+            <strong>Contract (Art. 6(1)(b)):</strong> running your account and delivering the tools
+            you asked for — search, card cutting, re-highlighting, the Coach, and your Round Log.
+          </>,
+          <>
+            <strong>Legitimate interests (Art. 6(1)(f)):</strong> keeping the service secure and
+            available — rate limiting, bot detection, and a short-lived security log containing IP
+            addresses. We balanced this against your rights and limited it to what abuse prevention
+            actually needs, with fixed deletion windows (see Data retention).
+          </>,
+          <>
+            <strong>Legal obligation (Art. 6(1)(c)):</strong> responding to lawful requests and
+            keeping records where the law requires it.
+          </>,
+          <>
+            <strong>Consent (Art. 6(1)(a)):</strong> only where we ask for it explicitly. You can
+            withdraw consent at any time without affecting processing already carried out.
+          </>,
+        ]}
+      />
+      <P>
+        We do <strong>not</strong> use your data for automated decision-making that produces legal or
+        similarly significant effects about you (Art. 22).
+      </P>
+
+      <H2 id="share" n="04">
         How we share your information
       </H2>
       <P>
@@ -249,7 +286,7 @@ export default function PrivacyPolicy() {
         behavioral advertising.
       </P>
 
-      <H2 id="ai" n="04">
+      <H2 id="ai" n="05">
         AI processing (please read)
       </H2>
       <P>
@@ -261,7 +298,7 @@ export default function PrivacyPolicy() {
         verbatim words.
       </P>
 
-      <H2 id="rights" n="05">
+      <H2 id="rights" n="06">
         Your rights under the TDPSA
       </H2>
       <P>If you are a Texas resident, you have the right to:</P>
@@ -289,7 +326,61 @@ export default function PrivacyPolicy() {
         remain unsatisfied, you may contact the Texas Attorney General&apos;s office.
       </P>
 
-      <H2 id="minors" n="06">
+      <H2 id="eu-rights" n="07">
+        Your rights in the EU and UK (GDPR)
+      </H2>
+      <P>
+        If you are in the European Economic Area, the UK, or Switzerland, the GDPR gives you the
+        following rights over your personal data. They apply in addition to anything above:
+      </P>
+      <Bullets
+        items={[
+          <>
+            <strong>Access (Art. 15):</strong> a copy of the personal data we hold about you. You can
+            get this instantly yourself — <strong>Record → Download my data</strong> exports your
+            account, Round Log, debater profile, and any feedback you sent, as JSON.
+          </>,
+          <>
+            <strong>Rectification (Art. 16):</strong> correct anything inaccurate. Round Log entries
+            are editable and deletable in the app; email us for anything else.
+          </>,
+          <>
+            <strong>Erasure (Art. 17):</strong> delete your data. Do it yourself at any time via{" "}
+            <strong>Record → Delete my account</strong>, which removes your account, rounds, and
+            profile.
+          </>,
+          <>
+            <strong>Portability (Art. 20):</strong> receive your data in a structured,
+            machine-readable format — that is exactly what the JSON export gives you, and you may
+            transmit it to another service.
+          </>,
+          <>
+            <strong>Restriction (Art. 18) and objection (Art. 21):</strong> object to processing based
+            on legitimate interests, including our security logging, or ask us to restrict it.
+          </>,
+          <>
+            <strong>Withdraw consent (Art. 7(3)):</strong> where processing relies on consent, you can
+            withdraw it at any time without affecting processing already carried out.
+          </>,
+          <>
+            <strong>Complain to a supervisory authority (Art. 77):</strong> you may lodge a complaint
+            with your national data protection authority, or the UK ICO, at any time. We would rather
+            you contact us first so we can put it right.
+          </>,
+        ]}
+      />
+      <P>
+        We respond to GDPR requests within <strong>one month</strong> (extendable by two further
+        months for complex requests, with notice), and we do not charge for them. We may ask you to
+        confirm your identity before acting, so that nobody else can request your data.
+      </P>
+      <P>
+        <strong>EU Data Act.</strong> If you use this service from the EU, you may also request that
+        the data you provided be exported so you can move to another provider. The JSON export
+        satisfies this; contact us if you need it in a different format.
+      </P>
+
+      <H2 id="minors" n="08">
         Minors
       </H2>
       <P>
@@ -313,19 +404,54 @@ export default function PrivacyPolicy() {
             <strong>Parental rights:</strong> a parent or guardian may contact us to review, correct,
             or delete their child&apos;s data, or to delete the account.
           </>,
+          <>
+            <strong>EU/UK (GDPR Art. 8):</strong> where we rely on consent, a child can only consent
+            from age 16 (or the lower age their country sets, down to 13); below that, consent must
+            come from a parent or guardian. If you are under that age in your country, please ask a
+            parent or guardian before creating an account.
+          </>,
         ]}
       />
 
-      <H2 id="retention" n="07">
+      <H2 id="retention" n="09">
         Data retention
       </H2>
       <P>
-        We keep your account and content while your account is active. When you delete your account
-        or ask us to, we delete or de-identify your personal data, except where we must retain it for
-        security or legal reasons.
+        We keep your account and content while your account is active. When you delete your account,
+        your rounds and debater profile are deleted with it. Bug reports you sent are kept but
+        <strong> anonymized</strong> (detached from your account and stripped of your contact email),
+        so a reported problem doesn&apos;t disappear before it&apos;s fixed.
+      </P>
+      <P>
+        Security data has fixed, automatically enforced deletion windows — a scheduled job deletes it,
+        rather than us promising to:
+      </P>
+      <Bullets
+        items={[
+          <>
+            <strong>Security audit log</strong> (including IP address): deleted after{" "}
+            <strong>90 days</strong>.
+          </>,
+          <>
+            <strong>Abuse blocks:</strong> expire on their own, and the record is deleted{" "}
+            <strong>30 days</strong> after expiry.
+          </>,
+          <>
+            <strong>Rate-limiting counters:</strong> hold a one-way hash of your email, never the
+            address itself, and expire within <strong>24 hours</strong>.
+          </>,
+          <>
+            <strong>Host request logs:</strong> retained briefly by our hosting provider under their
+            own policy.
+          </>,
+        ]}
+      />
+      <P>
+        This is what the GDPR calls storage limitation (Art. 5(1)(e)): we do not keep personal data
+        indefinitely just because it might one day be useful.
       </P>
 
-      <H2 id="security" n="08">
+      <H2 id="security" n="10">
         Security
       </H2>
       <P>
@@ -335,15 +461,24 @@ export default function PrivacyPolicy() {
         information.
       </P>
 
-      <H2 id="location" n="09">
+      <H2 id="location" n="11">
         Where your data is processed
       </H2>
       <P>
-        Your data is processed on U.S.-based cloud infrastructure operated by the providers listed
-        above.
+        Your account database is hosted in <strong>Canada</strong>, which the European Commission
+        recognizes as providing adequate protection for personal data. Other providers listed above
+        (including our host and the AI provider) process data in the{" "}
+        <strong>United States</strong>.
+      </P>
+      <P>
+        Where personal data is transferred out of the EEA or UK to a country without an adequacy
+        decision, that transfer relies on the European Commission&apos;s{" "}
+        <strong>Standard Contractual Clauses</strong> (and the UK Addendum where applicable), which
+        form part of our agreements with those providers. You can ask us for more detail about the
+        safeguards for any specific transfer.
       </P>
 
-      <H2 id="changes" n="10">
+      <H2 id="changes" n="12">
         Changes to this policy
       </H2>
       <P>
@@ -351,7 +486,7 @@ export default function PrivacyPolicy() {
         reflects the current version, and we will surface material changes in the app.
       </P>
 
-      <H2 id="contact" n="11">
+      <H2 id="contact" n="13">
         Contact us
       </H2>
       <P>

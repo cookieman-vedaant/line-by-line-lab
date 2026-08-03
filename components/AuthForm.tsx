@@ -4,7 +4,7 @@ import { Turnstile } from "@marsidev/react-turnstile";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { verifyHuman } from "@/lib/apiClient";
+import { checkAuthAttempt } from "@/lib/apiClient";
 import { turnstileSiteKey } from "@/lib/humanGate";
 import { safeNext } from "@/lib/safeNext";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -15,6 +15,14 @@ const inputClasses =
 const labelClasses = "label-mono mb-2 block text-xs text-ink";
 
 type Mode = "signin" | "signup" | "reset";
+
+/**
+ * Must stay >= Supabase's `password_min_length` (set to 8 in the project's auth
+ * config). If the client allows a shorter password than the server accepts, the
+ * user gets a rejection from Supabase for a rule our own form told them they'd
+ * satisfied — so these two numbers have to move together.
+ */
+const MIN_PASSWORD = 8;
 
 /**
  * Email + password sign-in / sign-up, plus a "forgot password" flow. Uses the
@@ -53,17 +61,31 @@ export default function AuthForm({ next }: { next?: string }) {
     setCaptchaNonce((n) => n + 1); // remount the widget → new token for the next try
   }
 
-  /** Require a solved + server-verified Turnstile token before any auth call. */
-  async function ensureHuman(): Promise<boolean> {
+  /**
+   * The Turnstile token is handed to SUPABASE, not to our own /api/verify-human.
+   *
+   * This is the key detail: a Turnstile token is SINGLE-USE. We previously spent
+   * it verifying against Cloudflare ourselves to mint the `lbl-human` cookie,
+   * which meant the token was already redeemed by the time Supabase saw it — so
+   * turning on Supabase's own CAPTCHA protection would have rejected every
+   * single auth attempt.
+   *
+   * Supabase CAPTCHA is the defense that actually matters here, because
+   * signUp/signIn/resend go BROWSER → SUPABASE directly and never touch our
+   * server; it's the only layer an attacker using the public anon key can't
+   * skip. So the token goes there. The `lbl-human` cookie that guards our AI
+   * endpoints is still minted by <HumanGate> on /lab, which runs its own
+   * challenge — no coverage is lost.
+   */
+  function captchaOptions(): { captchaToken?: string } {
+    return siteKey && token ? { captchaToken: token } : {};
+  }
+
+  /** Block the attempt early if the gate is on but unsolved. */
+  function ensureSolved(): boolean {
     if (!siteKey) return true;
     if (!token) {
       setError("Please complete the human check below.");
-      return false;
-    }
-    const v = await verifyHuman(token);
-    if (!v.ok) {
-      setError(v.error);
-      resetCaptcha();
       return false;
     }
     return true;
@@ -88,14 +110,33 @@ export default function AuthForm({ next }: { next?: string }) {
       setError("Enter your email first, then resend.");
       return;
     }
+    // Resend also goes browser → Supabase, so with CAPTCHA on it needs its own
+    // unspent token, exactly like the main form.
+    if (!ensureSolved()) return;
+
     setResending(true);
+
+    // Ask our own limiter first. The resend below goes straight from this
+    // browser to Supabase, so this preflight is the only place we can cap how
+    // many confirmation emails one address (or one network) can trigger.
+    const allowed = await checkAuthAttempt("resend", email.trim());
+    if (!allowed.ok) {
+      setResending(false);
+      return setError(allowed.error);
+    }
+
     const supabase = createSupabaseBrowserClient();
     const { error } = await supabase.auth.resend({
       type: "signup",
       email: email.trim(),
-      options: { emailRedirectTo: `${window.location.origin}/auth/confirm?next=%2Flab` },
+      options: {
+        emailRedirectTo: `${window.location.origin}/auth/confirm?next=%2Flab`,
+        ...captchaOptions(),
+      },
     });
     setResending(false);
+    // The token is spent either way — force a fresh solve before the next try.
+    resetCaptcha();
     if (error) return setError(error.message);
     setNotice("New confirmation link sent. Open it on this device if you can.");
   }
@@ -111,15 +152,27 @@ export default function AuthForm({ next }: { next?: string }) {
         setError("Enter your email to get a reset link.");
         return;
       }
-    } else if (!email.trim() || password.length < 6) {
-      setError("Enter your email and a password of at least 6 characters.");
+    } else if (!email.trim() || password.length < MIN_PASSWORD) {
+      setError(`Enter your email and a password of at least ${MIN_PASSWORD} characters.`);
       return;
     }
 
     setBusy(true);
-    if (!(await ensureHuman())) {
+    if (!ensureSolved()) {
       setBusy(false);
       return;
+    }
+
+    // Rate-limit the two modes that make Supabase SEND AN EMAIL. Sign-in is
+    // excluded on purpose: it sends nothing, and throttling it per-email would
+    // hand an attacker a way to lock a known victim out of their own account.
+    if (mode === "signup" || mode === "reset") {
+      const allowed = await checkAuthAttempt(mode, email.trim());
+      if (!allowed.ok) {
+        setBusy(false);
+        resetCaptcha();
+        return setError(allowed.error);
+      }
     }
 
     const supabase = createSupabaseBrowserClient();
@@ -133,6 +186,7 @@ export default function AuthForm({ next }: { next?: string }) {
           // user back to login. The client page reads the token itself (hash OR a
           // PKCE ?code) and requires a new password before letting them proceed.
           redirectTo: `${window.location.origin}/reset-password`,
+          ...captchaOptions(),
         });
         if (error) return setError(error.message);
         // Generic message either way — never reveal whether an account exists.
@@ -148,7 +202,10 @@ export default function AuthForm({ next }: { next?: string }) {
           // shapes Supabase sends the credential in lives in the URL fragment,
           // which a route handler can never see. Requires this origin to be in
           // Supabase's Redirect URLs, or it falls back to the Site URL.
-          options: { emailRedirectTo: `${window.location.origin}/auth/confirm?next=%2Flab` },
+          options: {
+            emailRedirectTo: `${window.location.origin}/auth/confirm?next=%2Flab`,
+            ...captchaOptions(),
+          },
         });
         if (error) return setError(error.message);
 
@@ -178,7 +235,11 @@ export default function AuthForm({ next }: { next?: string }) {
         router.push(dest);
         router.refresh();
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+        const { error } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+          options: captchaOptions(),
+        });
         if (error) {
           // An unconfirmed account is a fixable state, not a bad password. Say so
           // and offer the fix, rather than leaving the user to guess.
@@ -254,7 +315,7 @@ export default function AuthForm({ next }: { next?: string }) {
               autoComplete={mode === "signup" ? "new-password" : "current-password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="at least 6 characters"
+              placeholder={`at least ${MIN_PASSWORD} characters`}
               className={inputClasses}
             />
           </div>

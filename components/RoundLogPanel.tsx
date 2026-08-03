@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
+import DeleteAccountButton from "@/components/DeleteAccountButton";
 import { requestProfile } from "@/lib/apiClient";
 import {
   clearLocalRoundData,
@@ -451,6 +452,31 @@ export default function RoundLogPanel() {
           </ul>
         </section>
       )}
+
+      {/* Your-data controls live at the bottom of the Record tab, where the
+          personal data actually is. Deliberately quiet styling: it must be
+          findable (the privacy policy promises it) without inviting a stray
+          click. */}
+      <section aria-label="Your data" className="divide-t mt-10 pt-6">
+        <p className="label-mono text-[10px] text-ink/50">Your data</p>
+        <p className="mt-2 max-w-prose text-xs font-medium leading-relaxed text-ink/60">
+          Your rounds and profile are private to your account and sync across your
+          devices. You can remove everything at any time.
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-4">
+          {/* Plain link, not a fetch: the route sets Content-Disposition, so the
+              browser downloads it directly and we avoid buffering a potentially
+              large export into memory just to re-save it. */}
+          <a
+            href="/api/account"
+            download
+            className="label-mono text-[11px] text-ink/60 underline hover:text-accent"
+          >
+            Download my data
+          </a>
+          <DeleteAccountButton />
+        </div>
+      </section>
     </div>
   );
 }

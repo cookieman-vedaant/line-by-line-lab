@@ -155,6 +155,21 @@ export async function extractArticleFromUrl(
 const articleCache = createSharedCache<ExtractedArticle>({
   ttlMs: 30 * 60 * 1000, // 30 min — matches the search-result cache window
   namespace: "article",
+  /*
+   * LOCAL ONLY — never written to Redis. This is by far the largest value the
+   * app caches: full article body text, routinely 100-300 KB serialized. Upstash
+   * charges per request AND per byte, and this payload was the main driver of
+   * hitting the free-tier limit.
+   *
+   * The trade is small: an article's cache key is one exact URL, so a cross-user
+   * hit needs two people to open the SAME source inside 30 minutes — rare. The
+   * case that actually matters (search → cut → re-highlight the same article, by
+   * the same user, within one session) is served entirely by the in-process
+   * cache, which is free and faster than a network round trip.
+   */
+  shareAcrossInstances: false,
+  // A little more local headroom, since this is now the only tier it has.
+  maxLocal: 40,
 });
 
 /**

@@ -4,6 +4,8 @@ import { guardApi } from "@/lib/apiGuard";
 import { botBlock } from "@/lib/botCheck";
 import { MissingApiKeyError, RateLimitedError } from "@/lib/gemini";
 import { clientKeyFromRequest } from "@/lib/requestClient";
+import { requireUser } from "@/lib/supabase/user";
+import { getTier } from "@/lib/tier";
 import { runAssistant } from "@/services/assistant";
 import { EVIDENCE_TYPES } from "@/types";
 
@@ -63,8 +65,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "The latest message must be from the user." }, { status: 400 });
   }
 
+  // Tier decides which model answers this turn. Resolved from the verified
+  // session (never the request body) and defaulting to "free" on any doubt, so
+  // a spoofed payload can't buy itself the expensive model.
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+  const tier = await getTier(auth.supabase, auth.user.id);
+
   try {
-    const result = await runAssistant(parsed.data, { clientKey: clientKeyFromRequest(req) });
+    const result = await runAssistant(parsed.data, {
+      clientKey: clientKeyFromRequest(req),
+      tier,
+    });
     return NextResponse.json(result);
   } catch (err) {
     if (err instanceof RateLimitedError) {

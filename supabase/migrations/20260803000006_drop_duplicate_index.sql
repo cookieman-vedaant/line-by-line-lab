@@ -1,0 +1,18 @@
+-- Remove a duplicate index.
+--
+-- The hardening migration created `rounds_user_created_idx` on
+-- (user_id, created_at DESC) without checking whether an equivalent index
+-- already existed — and one did: `rounds_user_created`, byte-for-byte the same
+-- definition, created earlier from the dashboard. `create index if not exists`
+-- only guards against a duplicate NAME, never a duplicate DEFINITION, which is
+-- exactly how redundant indexes accumulate unnoticed.
+--
+-- Two identical indexes cost real throughput: every INSERT, UPDATE, and DELETE
+-- on `rounds` maintains both B-trees, and both occupy cache and disk, while the
+-- planner can only ever use one. The Round Log is write-heavy per user (a round
+-- logged after every debate), so this is on the hot path.
+--
+-- Dropping the one THIS project introduced, keeping the pre-existing name.
+-- CONCURRENTLY is not used because Supabase runs migrations inside a
+-- transaction, which forbids it; this table is small and the lock is brief.
+drop index if exists public.rounds_user_created_idx;

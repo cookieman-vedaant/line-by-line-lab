@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Lint, type-check, test, audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      # Coverage thresholds live in vitest.config.ts and act as a ratchet: the
+      # build fails if coverage regresses below where it is today.
+      - name: Unit tests + coverage thresholds
+        run: npm run test:coverage
+
+      - name: Production build
+        run: npm run build
+        env:
+          # Build-time only. The app reads real secrets at runtime from Vercel;
+          # these placeholders just let the build resolve its env references.
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
+
+      - name: Dependency audit (high/critical only)
+        run: npm audit --audit-level=high

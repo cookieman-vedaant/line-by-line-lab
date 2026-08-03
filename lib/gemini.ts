@@ -4,9 +4,16 @@ import {
   type GenerateContentResponse,
   type ToolListUnion,
 } from "@google/genai";
+import { CircuitOpenError, withBreaker } from "@/lib/circuitBreaker";
 import { throttleGemini } from "@/lib/geminiThrottle";
 import { extractJson } from "@/lib/json";
 
+// NOTE: per-task, per-tier model selection now lives in lib/models.ts
+// (`modelFor(task, tier)`). The two constants below remain the DEFAULTS used
+// when a caller doesn't pass an explicit model, and are still honored as
+// `GEMINI_MODEL` / `GEMINI_MARKER_MODEL` env overrides so existing deployments
+// keep working unchanged.
+//
 // Free-tier friendly default; override with GEMINI_MODEL in .env.local.
 // A *flash-lite* model has the most generous free limits and uses fewer tokens
 // per call than full flash — the biggest single lever against the "quota hit
@@ -73,6 +80,21 @@ async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /**
+ * Run a Gemini call behind the circuit breaker. When Gemini is genuinely down,
+ * the retry ladder below would otherwise make every single request wait its full
+ * ~10s of backoff before failing — slow for the user and needless load on a
+ * provider that's already struggling. The breaker short-circuits that after a
+ * run of failures and probes periodically to notice recovery.
+ *
+ * Only TRANSIENT errors count against it: a 400 from a malformed prompt is our
+ * bug, not an outage, and letting it open the circuit would take the AI offline
+ * for every user over one bad request.
+ */
+function withGeminiBreaker<T>(fn: () => Promise<T>): Promise<T> {
+  return withBreaker("gemini", fn, isTransient);
+}
+
+/**
  * Transient model errors worth retrying: rate limits (429), and — critically —
  * server-side overload (503 "high demand"/UNAVAILABLE) and gateway blips
  * (500/502/504) plus flaky network. These are temporary; a short wait clears
@@ -123,8 +145,13 @@ interface GenerateJsonOptions {
   system: string;
   prompt: string;
   maxOutputTokens?: number;
-  /** Override the model for this call (defaults to GEMINI_MODEL). */
+  /** Override the model for this call (defaults to GEMINI_MODEL).
+   *  Prefer `modelFor(task, tier)` from lib/models.ts over a literal. */
   model?: string;
+  /** Thinking budget. Defaults to 0 (disabled) — correct for JSON, since a
+   *  thinking model with a small output cap spends the budget reasoning and
+   *  truncates the JSON. Only raise it for free-text output. */
+  thinkingBudget?: number;
   /** Max retry attempts on transient errors (default = RETRY_DELAYS_MS.length).
    *  Pass 0 to fail fast when the caller has its own fallback. */
   retries?: number;
@@ -143,25 +170,31 @@ export async function generateJson(opts: GenerateJsonOptions): Promise<unknown> 
   for (let attempt = 0; ; attempt++) {
     try {
       await throttleGemini();
-      const response = await withSlot(() =>
-        ai.models.generateContent({
-          model: opts.model ?? GEMINI_MODEL,
-          contents: opts.prompt,
-          config: {
-            systemInstruction: opts.system,
-            responseMimeType: "application/json",
-            temperature: 0.2,
-            maxOutputTokens: opts.maxOutputTokens ?? 8192,
-            // Our calls are structured extraction/selection, not open reasoning.
-            // Disabling thinking keeps the whole token budget for the JSON answer
-            // (2.5 models otherwise spend it thinking and truncate output), and
-            // uses fewer tokens per call — easing free-tier rate limits.
-            thinkingConfig: { thinkingBudget: 0 },
-          },
-        }),
+      const response = await withGeminiBreaker(() =>
+        withSlot(() =>
+          ai.models.generateContent({
+            model: opts.model ?? GEMINI_MODEL,
+            contents: opts.prompt,
+            config: {
+              systemInstruction: opts.system,
+              responseMimeType: "application/json",
+              temperature: 0.2,
+              maxOutputTokens: opts.maxOutputTokens ?? 8192,
+              // Default 0: these calls are structured extraction/selection, not
+              // open reasoning, and a thinking model with a small output cap
+              // spends the budget reasoning and truncates the JSON (this is what
+              // silently broke the card-length selector once). Callers doing real
+              // reasoning can opt in.
+              thinkingConfig: { thinkingBudget: opts.thinkingBudget ?? 0 },
+            },
+          }),
+        ),
       );
       return extractJson(response.text ?? "");
     } catch (err) {
+      // An open circuit means Gemini is already known-down; retrying here would
+      // just re-throw instantly in a loop. Surface the friendly message now.
+      if (err instanceof CircuitOpenError) throw new RateLimitedError();
       if (!isTransient(err)) throw err;
       if (attempt >= maxRetries) throw new RateLimitedError();
       await sleep(withJitter(RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)]));
@@ -178,6 +211,10 @@ interface GenerateContentRawOptions {
   model?: string;
   temperature?: number;
   maxOutputTokens?: number;
+  /** Thinking budget. Unlike generateJson, raising this is often RIGHT here —
+   *  the assistant's output is prose with no fragile structure to truncate, and
+   *  reasoning is the actual product. */
+  thinkingBudget?: number;
   retries?: number;
 }
 
@@ -195,20 +232,23 @@ export async function generateContentRaw(
   for (let attempt = 0; ; attempt++) {
     try {
       await throttleGemini();
-      return await withSlot(() =>
-        ai.models.generateContent({
-          model: opts.model ?? GEMINI_MODEL,
-          contents: opts.contents,
-          config: {
-            systemInstruction: opts.system,
-            temperature: opts.temperature ?? 0.3,
-            maxOutputTokens: opts.maxOutputTokens ?? 4096,
-            thinkingConfig: { thinkingBudget: 0 },
-            ...(opts.tools ? { tools: opts.tools } : {}),
-          },
-        }),
+      return await withGeminiBreaker(() =>
+        withSlot(() =>
+          ai.models.generateContent({
+            model: opts.model ?? GEMINI_MODEL,
+            contents: opts.contents,
+            config: {
+              systemInstruction: opts.system,
+              temperature: opts.temperature ?? 0.3,
+              maxOutputTokens: opts.maxOutputTokens ?? 4096,
+              thinkingConfig: { thinkingBudget: opts.thinkingBudget ?? 0 },
+              ...(opts.tools ? { tools: opts.tools } : {}),
+            },
+          }),
+        ),
       );
     } catch (err) {
+      if (err instanceof CircuitOpenError) throw new RateLimitedError();
       if (!isTransient(err)) throw err;
       if (attempt >= maxRetries) throw new RateLimitedError();
       await sleep(withJitter(RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)]));

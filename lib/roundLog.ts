@@ -73,13 +73,35 @@ export async function loadRounds(force = false): Promise<void> {
   if (loaded && !force) return;
   loading = (async () => {
     try {
-      const res = await fetch("/api/rounds", { headers: { Accept: "application/json" } });
-      if (res.ok) {
-        const data = (await res.json()) as { rounds?: Round[] };
-        cache = Array.isArray(data.rounds) ? data.rounds : EMPTY;
+      /*
+       * The server pages results (cursor on created_at) so a single query can
+       * never load an unbounded number of rows. We still need the COMPLETE set
+       * here, because the Record tab derives career stats and the debater
+       * profile from every round — a partial list would silently produce wrong
+       * win rates. So: follow the cursor until exhausted.
+       *
+       * MAX_PAGES bounds the loop. Without it, a bug that kept returning a
+       * cursor would spin forever in the browser.
+       */
+      const MAX_PAGES = 50;
+      const all: Round[] = [];
+      let cursor: string | null = null;
+
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const qs = cursor ? `?limit=200&before=${encodeURIComponent(cursor)}` : "?limit=200";
+        const res: Response = await fetch(`/api/rounds${qs}`, {
+          headers: { Accept: "application/json" },
+        });
+        // A non-OK response (e.g. 401 before sign-in) leaves the cache as-is; a
+        // later loadRounds(true) after sign-in will populate it.
+        if (!res.ok) return;
+
+        const data = (await res.json()) as { rounds?: Round[]; nextCursor?: string | null };
+        if (Array.isArray(data.rounds)) all.push(...data.rounds);
+        cursor = data.nextCursor ?? null;
+        if (!cursor) break;
       }
-      // A non-OK response (e.g. 401 before sign-in) leaves the cache empty; a
-      // later loadRounds(true) after sign-in will populate it.
+      cache = all.length > 0 ? all : EMPTY;
     } catch {
       /* offline — keep whatever we have */
     } finally {

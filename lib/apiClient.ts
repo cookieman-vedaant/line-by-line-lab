@@ -234,3 +234,73 @@ export async function requestRehighlight(req: RehighlightRequest): Promise<Rehig
     return { ok: false, error: "Could not reach the server. Is it running?" };
   }
 }
+
+export interface FeedbackInput {
+  kind: "bug" | "idea" | "other";
+  message: string;
+  page?: string;
+  contactEmail?: string;
+}
+
+export type FeedbackOutcome = { ok: true } | { ok: false; error: string };
+
+/** Send an in-app bug report / idea. */
+export async function submitFeedback(input: FeedbackInput): Promise<FeedbackOutcome> {
+  try {
+    const res = await fetch("/api/feedback", {
+      method: "POST",
+      headers: apiHeaders(),
+      body: JSON.stringify(input),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { ok: false, error: data.error ?? "Couldn't send that. Please try again." };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Could not reach the server. Check your connection and try again." };
+  }
+}
+
+/**
+ * Preflight before a browser auth call (sign-up / resend / reset). Those calls go
+ * straight from the browser to Supabase, so this is our only chance to apply
+ * per-email and per-IP limits and to record the attempt.
+ *
+ * Fails OPEN on a network error: if our own limiter is unreachable, that must not
+ * stop a legitimate person from signing in. Supabase's own rate limits and
+ * CAPTCHA still apply on the call itself.
+ */
+export async function checkAuthAttempt(
+  kind: "signup" | "resend" | "reset",
+  email: string,
+): Promise<FeedbackOutcome> {
+  try {
+    const res = await fetch("/api/auth-attempt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind, email }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      return { ok: false, error: data.error ?? "Too many attempts. Please try again later." };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: true };
+  }
+}
+
+/** Permanently delete the signed-in account and all data attached to it. */
+export async function deleteAccount(): Promise<FeedbackOutcome> {
+  try {
+    const res = await fetch("/api/account", { method: "DELETE", headers: apiHeaders() });
+    const data = await res.json();
+    if (!res.ok) {
+      return { ok: false, error: data.error ?? "Couldn't delete the account. Please try again." };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Could not reach the server. Check your connection and try again." };
+  }
+}

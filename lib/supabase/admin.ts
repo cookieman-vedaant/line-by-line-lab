@@ -1,13 +1,19 @@
+// Poison pill: importing this module from a Client Component is now a BUILD
+// ERROR, not a silent leak. Without it, "never import this in client code" was
+// only a comment — one `"use client"` file importing this would have bundled a
+// master key into JavaScript served to every visitor. This is the guard that
+// makes the rule mechanical.
+import "server-only";
 import { type SupabaseClient, createClient } from "@supabase/supabase-js";
 
 /**
  * Server-only Supabase client using the **service_role** key. It BYPASSES
  * Row-Level Security, so it can read across every user's rows.
  *
- * Use it ONLY for aggregate, privacy-preserving reads where the *number* matters
- * but *who* must never leave the server — e.g. counting how many people are
- * online. NEVER return its rows to the browser, and NEVER import it into client
- * code (the service_role key is a master key).
+ * Use it ONLY for work that genuinely needs to cross the RLS boundary and whose
+ * result is safe to expose — e.g. counting how many people are online (the
+ * NUMBER leaves the server, never who), or deleting an auth user on request.
+ * NEVER return its rows to the browser wholesale.
  */
 let cached: SupabaseClient | null = null;
 

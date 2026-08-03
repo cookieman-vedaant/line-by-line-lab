@@ -9,6 +9,15 @@ import { initBotId } from "botid/client/core";
  *
  * These are exactly our expensive, AI-backed POST endpoints — the ones a bot
  * would target to burn the free quota.
+ *
+ * DELIBERATELY ABSENT:
+ *  - /api/auth-attempt — it runs BEFORE sign-in, on the most fragile flow in the
+ *    app. That form already requires a Turnstile solve, which is a stronger and
+ *    more visible check than an invisible challenge; stacking a second one on
+ *    the signup path risks locking out legitimate first-time users, and a false
+ *    positive there costs a customer rather than a few tokens.
+ *  - /api/feedback — auth-gated, tightly rate-limited, and not AI-backed. Making
+ *    it harder to report a bug is a bad trade.
  */
 initBotId({
   protect: [

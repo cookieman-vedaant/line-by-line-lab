@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { rateLimitShared } from "@/lib/apiRateLimit";
+import { audit } from "@/lib/audit";
+import { isIpBanned } from "@/lib/ipBan";
 import { requireUser } from "@/lib/supabase/user";
 import { requestIsVerifiedHuman } from "@/lib/turnstile";
 
@@ -110,6 +112,17 @@ export async function guardApi(req: Request, opts: GuardOptions): Promise<NextRe
     return block(403, "This request looks cross-site. Refresh the page and try again.");
   }
 
+  // Ban list, checked before any real work. Cached in Redis so this costs ~0 on
+  // the overwhelmingly common not-banned path, and fails OPEN if unreachable —
+  // an unavailable ban list must not take the app down.
+  const bannedIp = clientIp(req);
+  if (await isIpBanned(bannedIp)) {
+    void audit({ action: "ip.ban_blocked_request", ip: bannedIp, detail: { route: opts.name } });
+    // Deliberately generic: telling an abuser exactly why they're blocked just
+    // tells them what to change.
+    return block(403, "This request was blocked. If you think that's a mistake, contact support.");
+  }
+
   // Human gate (Turnstile). No-op when the gate is off; when on, a valid signed
   // cookie is required — bots can't get one, so they're blocked here cheaply.
   if (opts.requireHuman !== false && !requestIsVerifiedHuman(req)) {
@@ -130,7 +143,7 @@ export async function guardApi(req: Request, opts: GuardOptions): Promise<NextRe
     return block(413, "That upload is too large.");
   }
 
-  const ip = clientIp(req);
+  const ip = bannedIp; // same value; resolved once above for the ban lookup.
 
   const perMin = await rateLimitShared(`m:${opts.name}:${ip}`, opts.perMinute ?? PER_IP_PER_MIN, 60);
   if (!perMin.allowed) {

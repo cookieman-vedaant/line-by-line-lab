@@ -42,6 +42,7 @@ yarn-error.log*
 .mcp.json
 .claude/
 .agents/
+.codex/
 skills-lock.json
 
 # local-only agent / dev-process docs (kept on disk, never published to GitHub)

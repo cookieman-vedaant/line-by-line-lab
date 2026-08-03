@@ -8,6 +8,8 @@ import {
 } from "@google/genai";
 import { stripDelimiters } from "@/lib/cardMarkup";
 import { generateContentRaw } from "@/lib/gemini";
+import { modelFor } from "@/lib/models";
+import type { Tier } from "@/lib/tier";
 import { NoSourcesFoundError, findArticles } from "@/services/articleFinder";
 import {
   ArticleUnreadableError,
@@ -299,9 +301,14 @@ ${doc}
  */
 export async function runAssistant(
   req: AssistantRequest,
-  opts: { clientKey?: string } = {},
+  opts: { clientKey?: string; tier?: Tier } = {},
 ): Promise<AssistantResult> {
   const system = buildSystem(req.context);
+  // The Coach is the most reasoning-heavy task in the app and the headline Pro
+  // feature, yet it ran on the CHEAPEST model with thinking disabled — the
+  // single largest quality gap in the product. Pro now gets the strong model
+  // plus a thinking budget (safe here: the output is prose, not fragile JSON).
+  const { model, thinkingBudget } = modelFor("coach", opts.tier ?? "free");
   const contents: Content[] = req.messages
     .slice(-MAX_HISTORY)
     .map((m) => ({
@@ -317,6 +324,8 @@ export async function runAssistant(
       system,
       contents,
       tools: [{ functionDeclarations: TOOLS }],
+      model,
+      thinkingBudget,
       temperature: 0.4,
       maxOutputTokens: 2048,
     });
@@ -350,6 +359,8 @@ export async function runAssistant(
   const final = await generateContentRaw({
     system,
     contents,
+    model,
+    thinkingBudget,
     temperature: 0.4,
     maxOutputTokens: 2048,
   });

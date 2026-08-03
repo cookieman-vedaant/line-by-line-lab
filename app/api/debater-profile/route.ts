@@ -16,6 +16,10 @@ import { SKILL_TIERS, type DebaterProfile } from "@/types";
  *
  * Distinct from `/api/profile`, which is the STATELESS analyzer that turns rounds
  * into a fresh profile via Gemini. This route only persists the result.
+ *
+ * Like /api/rounds, isolation is enforced twice: RLS in Postgres AND an explicit
+ * `user_id` filter on every query, always taken from the verified session rather
+ * than the request body.
  */
 
 const profileSchema = z.object({
@@ -45,9 +49,14 @@ export async function GET(req: Request) {
   const auth = await requireUser();
   if (!auth.ok) return auth.response;
 
+  // Explicit owner filter, not just RLS. Without it this `maybeSingle()` would
+  // return an ARBITRARY user's profile the moment the policy was missing — the
+  // worst failure mode on this route, since nothing in the response would look
+  // wrong.
   const { data, error } = await auth.supabase
     .from("debater_profile")
     .select("profile,signature,generated_at")
+    .eq("user_id", auth.user.id)
     .maybeSingle();
   if (error) {
     console.error("debater-profile GET failed", error);

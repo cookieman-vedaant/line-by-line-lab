@@ -32,10 +32,10 @@ export interface PricingTier {
 
 export const SITE = {
   name: "Line by Line Lab",
-  // TODO(before launch): point this at a monitored inbox on your own domain
-  // (or your email). It's the TDPSA privacy-request contact shown in the policy.
+  // Monitored inbox: TDPSA privacy requests (privacy page) and in-app feedback
+  // (the "Report a problem" link in the Lab header) both point here.
   contactEmail: "thelinebylinelab@gmail.com",
-  privacyUpdated: "August 2, 2026",
+  privacyUpdated: "August 3, 2026",
   // TODO(annually): bump this each January. Held as a constant rather than
   // read from the clock because reading the current time during a render
   // pulls the whole landing page out of its prerendered static shell.

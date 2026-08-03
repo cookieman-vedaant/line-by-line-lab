@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import EvidenceWorkbench from "@/components/EvidenceWorkbench";
+import FeedbackButton from "@/components/FeedbackButton";
 import HumanGate from "@/components/HumanGate";
 import LiveCount from "@/components/LiveCount";
 import SignOutButton from "@/components/SignOutButton";
@@ -58,6 +59,7 @@ export default function Lab() {
             <Suspense fallback={null}>
               <SignedInAs />
             </Suspense>
+            <FeedbackButton />
             <SignOutButton />
           </div>
         </div>

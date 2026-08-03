@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { checkAuthAttempt } from "@/lib/apiClient";
 import { safeNext } from "@/lib/safeNext";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
@@ -146,6 +147,16 @@ export default function ConfirmEmail() {
       return;
     }
     setResending(true);
+
+    // Same preflight as AuthForm's resend — this is the second entry point to
+    // the same email-sending call, and an uncapped one would make the other
+    // cap pointless.
+    const allowed = await checkAuthAttempt("resend", email.trim());
+    if (!allowed.ok) {
+      setResending(false);
+      return setResendError(allowed.error);
+    }
+
     const supabase = createSupabaseBrowserClient();
     const { error } = await supabase.auth.resend({
       type: "signup",

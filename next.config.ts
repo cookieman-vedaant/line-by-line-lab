@@ -2,18 +2,28 @@ import type { NextConfig } from "next";
 import { withBotId } from "botid/next/config";
 
 /**
- * Content-Security-Policy — shipped in REPORT-ONLY first so it can never break a
- * page on the live app; it logs violations to the browser console instead. Once
- * we've confirmed no legitimate resource is flagged, flip the header name to
- * "Content-Security-Policy" to enforce it.
+ * Content-Security-Policy — defaults to REPORT-ONLY so it can never break a live
+ * page; violations go to the browser console instead.
+ *
+ * TO ENFORCE: set CSP_ENFORCE=1 in the environment. Do that only AFTER loading
+ * the app (landing, /lab, every tool, sign-in, theme switching) with the console
+ * open and seeing zero CSP reports — an enforced policy with a missed allowance
+ * silently breaks a feature for every user at once. Kept as an env flag rather
+ * than a code edit so it can be flipped, and rolled back, without a deploy.
  *
  * Allowances: 'unsafe-inline' scripts cover Next's hydration bootstrap + our
  * theme pre-paint script (layout.tsx); next/font self-hosts fonts (same origin);
  * Supabase auth/REST/realtime is *.supabase.co (+ wss); Turnstile (optional) is
  * challenges.cloudflare.com. Clickjacking is enforced separately via
  * X-Frame-Options below (frame-ancestors in report-only mode only reports).
+ *
+ * KNOWN WEAKNESS: 'unsafe-inline' in script-src substantially limits what this
+ * policy can stop, and removing it needs a nonce threaded through Next's inline
+ * bootstrap — which conflicts with the prerendered static shell this app relies
+ * on (cacheComponents). Documented rather than silently accepted; see
+ * docs/adr/0003-security-headers.md.
  */
-const cspReportOnly = [
+const csp = [
   "default-src 'self'",
   "base-uri 'self'",
   "form-action 'self'",
@@ -41,8 +51,14 @@ const securityHeaders = [
     key: "Permissions-Policy",
     value: "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()",
   },
-  // CSP, non-blocking for now (see note above).
-  { key: "Content-Security-Policy-Report-Only", value: cspReportOnly },
+  // CSP. Report-only unless CSP_ENFORCE=1 (see the note above).
+  {
+    key:
+      process.env.CSP_ENFORCE === "1"
+        ? "Content-Security-Policy"
+        : "Content-Security-Policy-Report-Only",
+    value: csp,
+  },
 ];
 
 const nextConfig: NextConfig = {
