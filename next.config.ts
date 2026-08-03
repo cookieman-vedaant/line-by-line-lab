@@ -46,6 +46,13 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  /* Partial Prerendering. The landing page is ~95% identical for every visitor;
+     only the hero's sign-in box depends on the request. With this on, Next
+     prerenders the static shell and streams just that slot, so marketing traffic
+     is served from the CDN instead of re-rendering the whole tree per request.
+     In Next 16 this single flag replaces experimental.ppr / dynamicIO / useCache. */
+  cacheComponents: true,
+
   /* Article extraction uses linkedom (serverless-safe), not jsdom, so no
      special bundling config is needed. */
   async headers() {

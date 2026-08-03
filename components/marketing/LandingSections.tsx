@@ -96,55 +96,9 @@ export function Mission() {
   );
 }
 
-/** Versatility — the whole prep loop in one app, vs. single-trick alternatives. */
-export function Versatility() {
-  const loop = ["Find", "Cut", "Re-Highlight", "Coach", "Record"];
-  return (
-    <section
-      aria-labelledby="versatility-heading"
-      className="border-y-[3px] border-ink bg-paper-2 px-5 py-20 sm:py-28"
-    >
-      <div className="mx-auto w-full max-w-5xl">
-        <Reveal>
-          <h2
-            id="versatility-heading"
-            className="max-w-3xl font-display text-4xl font-extrabold leading-[0.95] tracking-tight sm:text-6xl"
-          >
-            One Lab for the <span className="text-accent">whole round.</span>
-          </h2>
-          <p className="mt-5 max-w-2xl text-lg font-medium leading-snug text-ink/70">
-            The Lab runs every stage of prep in one workspace. Evidence flows from a search into a
-            card, a card into a block, and a block into the Coach, and your results feed the coaching
-            you get next.
-          </p>
-        </Reveal>
-
-        <ol className="mt-12 flex flex-wrap items-center gap-x-1 gap-y-3">
-          {loop.map((step, i) => (
-            <li key={step}>
-              <Reveal delay={i * 90} className="flex items-center gap-1">
-                <span className="frame shadow-hard bg-paper px-4 py-2.5 font-display text-sm font-bold uppercase tracking-wide">
-                  {step}
-                </span>
-                {i < loop.length - 1 && (
-                  <span aria-hidden className="px-1 font-display text-2xl font-bold text-accent">
-                    →
-                  </span>
-                )}
-              </Reveal>
-            </li>
-          ))}
-        </ol>
-        <Reveal delay={loop.length * 90}>
-          <p className="mt-6 max-w-2xl text-sm font-medium leading-relaxed text-ink/60">
-            Your citations and cards carry through every step, so nothing gets lost as you move
-            between tools.
-          </p>
-        </Reveal>
-      </div>
-    </section>
-  );
-}
+/* The prep loop that used to live here as a row of chips is now
+   components/marketing/TheRound.tsx, which scrubs the same five stages by
+   scroll position and shows what each one hands to the next. */
 
 /** Capability list shared by every tool card. */
 function PointList({ points, twoCol }: { points: string[]; twoCol?: boolean }) {
@@ -353,7 +307,7 @@ export function LandingFooter() {
         </div>
         <div className="masthead-rule mt-8 h-[3px] w-full bg-ink" />
         <p className="mt-4 text-[10px] font-semibold uppercase tracking-wide text-ink/40">
-          © {new Date().getFullYear()} {SITE.name} · Built for Lincoln-Douglas, Public Forum &amp;
+          © {SITE.copyrightYear} {SITE.name} · Built for Lincoln-Douglas, Public Forum &amp;
           Policy debaters · Never fabricates evidence
         </p>
       </div>

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import EvidenceWorkbench from "@/components/EvidenceWorkbench";
 import HumanGate from "@/components/HumanGate";
 import LiveCount from "@/components/LiveCount";
@@ -6,14 +7,32 @@ import SignOutButton from "@/components/SignOutButton";
 import ThemeStudio from "@/components/ThemeStudio";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-// The app itself (Find Articles / Cut a Card / Coach). Gated by middleware.ts —
-// a logged-out visitor is redirected to "/" before this ever renders.
-export default async function Lab() {
+/**
+ * The signed-in address in the header — the one part of this page that depends on
+ * the request. Behind its own Suspense boundary so the rest of the Lab shell
+ * prerenders instead of waiting on an auth round trip. Access itself is enforced
+ * in middleware.ts, not here.
+ */
+async function SignedInAs() {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  if (!user) return null;
 
+  return (
+    <span
+      className="label-mono hidden max-w-[12ch] truncate text-[10px] text-ink/50 md:inline"
+      title={user.email ?? undefined}
+    >
+      {user.email}
+    </span>
+  );
+}
+
+// The app itself (Find Articles / Cut a Card / Coach). Gated by middleware.ts —
+// a logged-out visitor is redirected to "/" before this ever renders.
+export default function Lab() {
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-5 py-12 sm:py-16">
       <header className="mb-10 sm:mb-14">
@@ -36,14 +55,9 @@ export default async function Lab() {
           <div className="flex items-center gap-2 sm:gap-3">
             <LiveCount />
             <ThemeStudio />
-            {user && (
-              <span
-                className="label-mono hidden max-w-[12ch] truncate text-[10px] text-ink/50 md:inline"
-                title={user.email ?? undefined}
-              >
-                {user.email}
-              </span>
-            )}
+            <Suspense fallback={null}>
+              <SignedInAs />
+            </Suspense>
             <SignOutButton />
           </div>
         </div>

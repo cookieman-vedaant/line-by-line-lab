@@ -471,6 +471,148 @@ body * {
   opacity: clamp(0, calc(var(--load) * 5 - 4), 1);
 }
 
+/* ---- The Round (landing) ------------------------------------------------ */
+/* Five stages of prep, scrubbed by scroll position.
+   The DEFAULT here is a plain vertical list that reads correctly with no motion
+   at all — that is what mobile, Firefox, and reduced-motion visitors get. The
+   pinned scroll-scrubbed version is layered on top only where a view timeline
+   actually exists, so `animation-timeline` never silently falls back to a 0s
+   time-driven animation (which would leave every panel stuck at opacity 0). */
+
+.round-panel + .round-panel {
+  border-top: var(--bw) solid var(--stroke);
+}
+
+/* The scroll rail means nothing without scroll scrubbing. */
+.round-rail {
+  display: none;
+}
+
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) and (min-width: 768px) {
+    .round-section {
+      timeline-scope: --round;
+    }
+
+    .round-track {
+      height: 440vh;
+      view-timeline-name: --round;
+      view-timeline-axis: block;
+    }
+
+    .round-stage {
+      position: sticky;
+      top: 0;
+      display: flex;
+      height: 100svh;
+      flex-direction: column;
+      justify-content: center;
+      gap: 2.5rem;
+      overflow: hidden;
+    }
+
+    .round-rail {
+      display: grid;
+    }
+
+    .round-panels {
+      position: relative;
+      min-height: 22rem;
+    }
+
+    .round-panel {
+      position: absolute;
+      inset: 0;
+      border-top: 0;
+      padding: 0;
+      animation: round-panel linear both;
+      animation-timeline: --round;
+      will-change: opacity, transform, filter;
+    }
+
+    .round-panel + .round-panel {
+      border-top: 0;
+    }
+
+    .round-seg-fill {
+      transform-origin: left center;
+      animation: round-seg-fill linear both;
+      animation-timeline: --round;
+    }
+
+    .round-seg-label {
+      animation: round-seg-label linear both;
+      animation-timeline: --round;
+    }
+
+    /* Each stage owns one fifth of the pinned scroll. */
+    .round-panel:nth-child(1),
+    .round-seg:nth-child(1) .round-seg-fill,
+    .round-seg:nth-child(1) .round-seg-label {
+      animation-range: contain 0% contain 20%;
+    }
+    .round-panel:nth-child(2),
+    .round-seg:nth-child(2) .round-seg-fill,
+    .round-seg:nth-child(2) .round-seg-label {
+      animation-range: contain 20% contain 40%;
+    }
+    .round-panel:nth-child(3),
+    .round-seg:nth-child(3) .round-seg-fill,
+    .round-seg:nth-child(3) .round-seg-label {
+      animation-range: contain 40% contain 60%;
+    }
+    .round-panel:nth-child(4),
+    .round-seg:nth-child(4) .round-seg-fill,
+    .round-seg:nth-child(4) .round-seg-label {
+      animation-range: contain 60% contain 80%;
+    }
+    .round-panel:nth-child(5),
+    .round-seg:nth-child(5) .round-seg-fill,
+    .round-seg:nth-child(5) .round-seg-label {
+      animation-range: contain 80% contain 100%;
+    }
+  }
+}
+
+@keyframes round-panel {
+  0% {
+    opacity: 0;
+    transform: translateY(26px);
+    filter: blur(6px);
+  }
+  13%,
+  87% {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-18px);
+    filter: blur(6px);
+  }
+}
+
+@keyframes round-seg-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes round-seg-label {
+  0%,
+  100% {
+    opacity: 0.34;
+  }
+  10%,
+  90% {
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .reveal,
   .tab-panel,

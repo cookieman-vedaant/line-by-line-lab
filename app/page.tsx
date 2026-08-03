@@ -1,8 +1,10 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import AuthForm from "@/components/AuthForm";
 import Scales from "@/components/marketing/Scales";
 import SourceField from "@/components/marketing/SourceField";
+import TheRound from "@/components/marketing/TheRound";
 import {
   FinalCta,
   LandingFooter,
@@ -11,7 +13,6 @@ import {
   StatBar,
   Toolkit,
   ToolStrip,
-  Versatility,
 } from "@/components/marketing/LandingSections";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -21,17 +22,16 @@ export const metadata: Metadata = {
     "Find reputable evidence, cut verbatim debate-ready cards, re-highlight opponents, and get a real AI coach. Free to start. Built to close the prep gap for every LD, PF, and Policy debater.",
 };
 
+type SearchParams = Promise<{ next?: string | string[]; error?: string | string[] }>;
+
 /**
- * Home page (route "/") — the marketing + sign-in surface. Signed-out visitors
- * get the full pitch with a free sign-up form in the hero; signed-in visitors get
- * a link into the app. Route protection lives in middleware.ts. This page reads
- * the auth cookie (so it renders per-user), which is why it's dynamic.
+ * The only part of this page that varies by request: which box the hero shows.
+ * It reads the auth cookie and the search params, so it is deliberately the one
+ * thing behind a Suspense boundary — everything around it is identical for every
+ * visitor and prerenders into the static shell. Keep request-scoped reads
+ * (cookies, headers, searchParams) inside here or the whole page goes dynamic.
  */
-export default async function Landing({
-  searchParams,
-}: {
-  searchParams: Promise<{ next?: string | string[]; error?: string | string[] }>;
-}) {
+async function HeroSlot({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
   const next = typeof params.next === "string" ? params.next : undefined;
   const error = typeof params.error === "string" ? params.error : undefined;
@@ -41,6 +41,69 @@ export default async function Landing({
     data: { user },
   } = await supabase.auth.getUser();
 
+  if (user) {
+    return (
+      <div className="frame shadow-hard w-full max-w-sm bg-paper-2 p-6">
+        <p className="label-mono text-[11px] text-ink/60">Signed in as {user.email}</p>
+        <Link
+          href="/lab"
+          className="btn-press frame shadow-hard mt-4 inline-flex w-full items-center justify-center gap-2 bg-accent px-7 py-4 font-display text-lg font-bold uppercase tracking-wide text-paper"
+        >
+          Enter the Lab <span aria-hidden>→</span>
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex w-full max-w-sm flex-col gap-3">
+      <p className="label-mono text-center text-[11px] text-ink/60 lg:text-right">
+        Start free. No credit card.
+      </p>
+      {error && (
+        <p role="alert" className="frame bg-red px-3 py-2 text-xs font-semibold text-white">
+          {error}
+        </p>
+      )}
+      <AuthForm next={next} />
+    </div>
+  );
+}
+
+/**
+ * Holds the hero slot's footprint while it streams, so the shell doesn't reflow
+ * when the real box arrives. Sized to the sign-in form, which is the case almost
+ * every visitor lands in.
+ */
+function HeroSlotFallback() {
+  return (
+    <div className="flex w-full max-w-sm flex-col gap-3" aria-hidden>
+      <p className="label-mono text-center text-[11px] text-ink/60 lg:text-right">
+        Start free. No credit card.
+      </p>
+      <div className="frame shadow-hard w-full bg-paper-2 p-6">
+        <div className="mb-4 flex gap-2">
+          <div className="frame h-8 flex-1 bg-paper" />
+          <div className="frame h-8 flex-1 bg-paper" />
+        </div>
+        <div className="flex flex-col gap-4">
+          <div className="h-[70px] rounded-sm bg-ink/5" />
+          <div className="h-[70px] rounded-sm bg-ink/5" />
+          <div className="h-4 w-32 rounded-sm bg-ink/5" />
+          <div className="h-[46px] rounded-sm bg-ink/10" />
+          <div className="h-6 rounded-sm bg-ink/5" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Home page (route "/") — the marketing + sign-in surface. The marketing shell is
+ * the same for everyone and prerenders; only <HeroSlot /> is request-scoped.
+ * Route protection lives in middleware.ts.
+ */
+export default function Landing({ searchParams }: { searchParams: SearchParams }) {
   return (
     <main className="flex w-full flex-1 flex-col">
       {/* ---- HERO ---------------------------------------------------------- */}
@@ -92,32 +155,9 @@ export default async function Landing({
 
           {/* Sign-up / enter (the actual conversion) */}
           <div id="start" className="reveal reveal-3 flex flex-col items-center lg:items-end">
-            {user ? (
-              <div className="frame shadow-hard w-full max-w-sm bg-paper-2 p-6">
-                <p className="label-mono text-[11px] text-ink/60">Signed in as {user.email}</p>
-                <Link
-                  href="/lab"
-                  className="btn-press frame shadow-hard mt-4 inline-flex w-full items-center justify-center gap-2 bg-accent px-7 py-4 font-display text-lg font-bold uppercase tracking-wide text-paper"
-                >
-                  Enter the Lab <span aria-hidden>→</span>
-                </Link>
-              </div>
-            ) : (
-              <div className="flex w-full max-w-sm flex-col gap-3">
-                <p className="label-mono text-center text-[11px] text-ink/60 lg:text-right">
-                  Start free. No credit card.
-                </p>
-                {error && (
-                  <p
-                    role="alert"
-                    className="frame bg-red px-3 py-2 text-xs font-semibold text-white"
-                  >
-                    {error}
-                  </p>
-                )}
-                <AuthForm next={next} />
-              </div>
-            )}
+            <Suspense fallback={<HeroSlotFallback />}>
+              <HeroSlot searchParams={searchParams} />
+            </Suspense>
           </div>
         </div>
 
@@ -129,7 +169,7 @@ export default async function Landing({
 
       <Scales />
       <Mission />
-      <Versatility />
+      <TheRound />
       <SourceField />
       <Toolkit />
       <Pricing />

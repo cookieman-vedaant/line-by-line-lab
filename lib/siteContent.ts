@@ -36,6 +36,10 @@ export const SITE = {
   // (or your email). It's the TDPSA privacy-request contact shown in the policy.
   contactEmail: "thelinebylinelab@gmail.com",
   privacyUpdated: "August 2, 2026",
+  // TODO(annually): bump this each January. Held as a constant rather than
+  // read from the clock because reading the current time during a render
+  // pulls the whole landing page out of its prerendered static shell.
+  copyrightYear: "2026",
   mission:
     "Debate shouldn't be a competition of who has the better prep and goes to the larger school. The Line by Line Lab exists to close the gap and balance the scales for all debaters.",
 };
