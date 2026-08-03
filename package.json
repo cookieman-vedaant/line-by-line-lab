@@ -17,6 +17,7 @@
     "@supabase/supabase-js": "^2.111.0",
     "@upstash/redis": "^1.38.0",
     "botid": "^1.5.11",
+    "docx": "^9.7.1",
     "jsdom": "^29.1.1",
     "linkedom": "^0.18.13",
     "next": "^16.2.12",
