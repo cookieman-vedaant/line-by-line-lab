@@ -1,6 +1,7 @@
 "use client";
 
 import { Turnstile } from "@marsidev/react-turnstile";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { verifyHuman } from "@/lib/apiClient";
@@ -115,7 +116,7 @@ export default function AuthForm({ next }: { next?: string }) {
         });
         if (error) return setError(error.message);
         if (!data.session) {
-          setNotice("Account created — check your email to confirm, then sign in.");
+          setNotice("Account created. Check your email to confirm, then sign in.");
           setMode("signin");
           return;
         }
@@ -241,6 +242,16 @@ export default function AuthForm({ next }: { next?: string }) {
         >
           {busy ? "…" : submitLabel}
         </button>
+
+        {mode !== "reset" && (
+          <p className="label-mono text-center text-[10px] leading-relaxed text-ink/50">
+            By continuing, you agree to our{" "}
+            <Link href="/privacy" className="text-accent hover:underline">
+              Privacy Policy
+            </Link>{" "}
+            and confirm you&apos;re 13 or older.
+          </p>
+        )}
 
         {mode === "reset" && (
           <button

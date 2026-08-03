@@ -7,12 +7,37 @@ function isProtectedPath(pathname: string): boolean {
 }
 
 /**
+ * Does this request carry a Supabase session at all? @supabase/ssr stores the
+ * session in cookies named `sb-<project-ref>-auth-token`, chunked as `.0`, `.1`
+ * when it exceeds the 4KB cookie limit — so match on the stem, not an exact name.
+ */
+function hasSessionCookie(request: NextRequest): boolean {
+  return request.cookies
+    .getAll()
+    .some((c) => c.name.startsWith("sb-") && c.name.includes("auth-token"));
+}
+
+/**
  * Refreshes the Supabase session on every request and gates protected routes.
  * If a logged-out visitor tries to reach a protected app route (e.g. by typing
  * /lab in the URL), they're redirected to "/" to sign in — enforced here on the
  * server, so it can't be skipped from the client.
  */
 export async function updateSession(request: NextRequest): Promise<NextResponse> {
+  // No session cookie means there is nothing to refresh and nobody to look up,
+  // so skip building a Supabase client entirely. This is every landing-page
+  // visit, every crawler, and every share-link preview: the bulk of traffic at
+  // any real scale. The gate below still holds, because no cookie means no user.
+  if (!hasSessionCookie(request)) {
+    if (isProtectedPath(request.nextUrl.pathname)) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/";
+      url.searchParams.set("next", request.nextUrl.pathname);
+      return NextResponse.redirect(url);
+    }
+    return NextResponse.next({ request });
+  }
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(

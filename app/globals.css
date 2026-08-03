@@ -357,6 +357,402 @@ body * {
   animation: tab-in 0.4s cubic-bezier(0.2, 0.9, 0.3, 1);
 }
 
+/* ---- Living newsprint + scroll (landing) -------------------------------- */
+
+/* A soft ink/accent wash drifts behind the hero. No motion = a plain surface. */
+.hero-atmos {
+  position: relative;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .hero-atmos::before {
+    content: "";
+    position: absolute;
+    inset: -20%;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(40% 50% at 24% 18%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%),
+      radial-gradient(44% 46% at 82% 30%, color-mix(in srgb, var(--red) 8%, transparent), transparent 70%);
+    animation: hero-drift 26s ease-in-out infinite alternate;
+  }
+}
+@keyframes hero-drift {
+  from {
+    transform: translate3d(-2%, -1%, 0);
+  }
+  to {
+    transform: translate3d(2%, 2%, 0);
+  }
+}
+
+/* Masthead rules draw themselves as they scroll into view. Static fallback. */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .masthead-rule {
+      transform-origin: left center;
+      animation: rule-draw linear both;
+      animation-timeline: view();
+      animation-range: entry 10% cover 12%;
+    }
+  }
+}
+@keyframes rule-draw {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* ---- The Scales (landing) ----------------------------------------------- */
+/* One registered property drives the whole apparatus: 0 is the prep gap, 1 is
+   balanced. The beam angle, the counter-rotation that keeps each load upright,
+   the tool chips dropping in one at a time, and the accent level line are all
+   derived from it, so no two parts can drift out of sync. With motion reduced
+   --load stays at its initial 1 and the scales render level and static. */
+@property --load {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+
+.scales {
+  --load: 1;
+  --tilt: calc((1 - var(--load)) * -7deg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .scales {
+    animation: scales-balance 9s infinite;
+  }
+  .scales-beam {
+    will-change: transform;
+  }
+}
+
+@keyframes scales-balance {
+  /* Overshoot on the way to level: the beam passes the horizon and settles. */
+  0%,
+  8% {
+    --load: 0;
+    animation-timing-function: cubic-bezier(0.32, 1.45, 0.45, 1);
+  }
+  62%,
+  86% {
+    --load: 1;
+    animation-timing-function: cubic-bezier(0.65, 0, 0.75, 0.35);
+  }
+  100% {
+    --load: 0;
+  }
+}
+
+.scales-beam {
+  transform: rotate(var(--tilt));
+  transform-origin: 50% 50%;
+}
+
+/* Loads sit on the plank and stay upright as it swings. */
+.scales-upright {
+  transform: rotate(calc(-1 * var(--tilt)));
+}
+
+/* Chip N lands at --load = (N+1)/7, so the sixth one lands exactly on level. */
+.scales-chip {
+  --p: clamp(0, calc(var(--load) * 7 - var(--i)), 1);
+  opacity: var(--p);
+  transform: translateY(calc((1 - var(--p)) * -58px)) rotate(calc((1 - var(--p)) * -12deg));
+}
+
+/* The horizon: arrives only in the last of the swing, so levelling reads as the
+   payoff rather than as a line that was there the whole time. */
+.scales-level {
+  opacity: clamp(0, calc(var(--load) * 5 - 4), 1);
+}
+
+/* ---- The Round (landing) ------------------------------------------------ */
+/* Five stages of prep, scrubbed by scroll position.
+   The DEFAULT here is a plain vertical list that reads correctly with no motion
+   at all — that is what mobile, Firefox, and reduced-motion visitors get. The
+   pinned scroll-scrubbed version is layered on top only where a view timeline
+   actually exists, so `animation-timeline` never silently falls back to a 0s
+   time-driven animation (which would leave every panel stuck at opacity 0). */
+
+.round-panel + .round-panel {
+  border-top: var(--bw) solid var(--stroke);
+}
+
+.round-panel {
+  position: relative;
+  isolation: isolate; /* keeps the stage wash below the copy, above the section */
+}
+
+/* The rail and its playhead mean nothing without scroll scrubbing. */
+.round-rail,
+.round-carry {
+  display: none;
+}
+
+/* Each stage owns a hue: five steps evenly spaced around the OKLCH wheel at one
+   pinned lightness and chroma.
+
+   Lightness is pinned rather than inherited from the theme so the pairing is
+   guaranteed rather than hoped for. Measured across both shipped themes, the
+   worst fill clears --stage-fg at 5.25:1 and the page at 2.98:1. --stage is
+   always a FILL with --stage-fg on top, never foreground text on paper. Color
+   is never the only cue: every stage keeps its number and its name.
+
+   (Mixing the theme's own --accent/--yellow/--red was the first attempt. In
+   OKLCH the short hue arc from yellow to blue runs through red, so "Coach" came
+   out pink and collided with "Re-Highlight", and red-on-paper measured 2.92:1.) */
+.round-panel,
+.round-seg {
+  --stage-fg: #fbf7ee;
+}
+.round-panel:nth-child(1),
+.round-seg:nth-child(1) {
+  --stage: oklch(0.5 0.19 268);
+}
+.round-panel:nth-child(2),
+.round-seg:nth-child(2) {
+  --stage: oklch(0.5 0.19 340);
+}
+.round-panel:nth-child(3),
+.round-seg:nth-child(3) {
+  --stage: oklch(0.5 0.19 52);
+}
+.round-panel:nth-child(4),
+.round-seg:nth-child(4) {
+  --stage: oklch(0.5 0.19 124);
+}
+.round-panel:nth-child(5),
+.round-seg:nth-child(5) {
+  --stage: oklch(0.5 0.19 196);
+}
+
+/* Where relative color syntax exists, rotate the same ramp off the live accent
+   so a Theme Studio theme recolors the sequence instead of leaving five fixed
+   hues behind. Lightness and chroma are unchanged, so the contrast above holds
+   for any accent hue. The fixed ramp above is the fallback, and it is what the
+   default theme resolves to anyway. */
+@supports (color: oklch(from red l c h)) {
+  .round-panel:nth-child(1),
+  .round-seg:nth-child(1) {
+    --stage: oklch(from var(--accent) 0.5 0.19 h);
+  }
+  .round-panel:nth-child(2),
+  .round-seg:nth-child(2) {
+    --stage: oklch(from var(--accent) 0.5 0.19 calc(h + 72));
+  }
+  .round-panel:nth-child(3),
+  .round-seg:nth-child(3) {
+    --stage: oklch(from var(--accent) 0.5 0.19 calc(h + 144));
+  }
+  .round-panel:nth-child(4),
+  .round-seg:nth-child(4) {
+    --stage: oklch(from var(--accent) 0.5 0.19 calc(h + 216));
+  }
+  .round-panel:nth-child(5),
+  .round-seg:nth-child(5) {
+    --stage: oklch(from var(--accent) 0.5 0.19 calc(h + 288));
+  }
+}
+
+/* Atmosphere behind each stage, in that stage's hue. Rides the panel's own
+   opacity, so it costs no extra animation. */
+.round-panel::before {
+  content: "";
+  position: absolute;
+  inset: -22% -10%;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(
+    46% 54% at 76% 46%,
+    color-mix(in srgb, var(--stage) 24%, transparent),
+    transparent 72%
+  );
+}
+
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) and (min-width: 768px) {
+    .round-section {
+      timeline-scope: --round;
+    }
+
+    .round-track {
+      height: 440vh;
+      view-timeline-name: --round;
+      view-timeline-axis: block;
+    }
+
+    .round-stage {
+      position: sticky;
+      top: 0;
+      display: flex;
+      height: 100svh;
+      flex-direction: column;
+      justify-content: center;
+      gap: 2.5rem;
+      overflow: hidden;
+    }
+
+    .round-rail {
+      display: grid;
+    }
+
+    .round-panels {
+      position: relative;
+      min-height: 22rem;
+    }
+
+    .round-panel {
+      position: absolute;
+      inset: 0;
+      border-top: 0;
+      padding: 0;
+      animation: round-panel linear both;
+      animation-timeline: --round;
+      will-change: opacity, transform;
+    }
+
+    .round-panel + .round-panel {
+      border-top: 0;
+    }
+
+    /* The artifact trails its copy into place. Same range, later curve, so the
+       stagger costs no extra range rules. */
+    .round-art {
+      animation: round-art linear both;
+      animation-timeline: --round;
+      will-change: opacity, transform;
+    }
+
+    /* The playhead: one mark riding the rail for the whole sequence. The tools
+       change, the evidence being carried does not. */
+    .round-carry {
+      display: flex;
+      position: absolute;
+      left: 0;
+      bottom: -0.7rem;
+      width: 20%; /* exactly one rail column, so translateX(400%) lands on the last */
+      justify-content: center;
+      animation: round-carry linear both;
+      animation-timeline: --round;
+      animation-range: contain 0% contain 100%;
+      /* Advance, arrive, wait. Ignored where linear() is unsupported, which
+         leaves a smooth glide rather than a broken one. */
+      animation-timing-function: linear(0 0% 9%, 0.25 18% 34%, 0.5 43% 59%, 0.75 66% 84%, 1 91% 100%);
+    }
+
+    .round-seg-fill {
+      transform-origin: left center;
+      animation: round-seg-fill linear both;
+      animation-timeline: --round;
+    }
+
+    .round-seg-label {
+      animation: round-seg-label linear both;
+      animation-timeline: --round;
+    }
+
+    /* Each stage owns one fifth of the pinned scroll. */
+    .round-panel:nth-child(1),
+    .round-panel:nth-child(1) .round-art,
+    .round-seg:nth-child(1) .round-seg-fill,
+    .round-seg:nth-child(1) .round-seg-label {
+      animation-range: contain 0% contain 20%;
+    }
+    .round-panel:nth-child(2),
+    .round-panel:nth-child(2) .round-art,
+    .round-seg:nth-child(2) .round-seg-fill,
+    .round-seg:nth-child(2) .round-seg-label {
+      animation-range: contain 20% contain 40%;
+    }
+    .round-panel:nth-child(3),
+    .round-panel:nth-child(3) .round-art,
+    .round-seg:nth-child(3) .round-seg-fill,
+    .round-seg:nth-child(3) .round-seg-label {
+      animation-range: contain 40% contain 60%;
+    }
+    .round-panel:nth-child(4),
+    .round-panel:nth-child(4) .round-art,
+    .round-seg:nth-child(4) .round-seg-fill,
+    .round-seg:nth-child(4) .round-seg-label {
+      animation-range: contain 60% contain 80%;
+    }
+    .round-panel:nth-child(5),
+    .round-panel:nth-child(5) .round-art,
+    .round-seg:nth-child(5) .round-seg-fill,
+    .round-seg:nth-child(5) .round-seg-label {
+      animation-range: contain 80% contain 100%;
+    }
+  }
+}
+
+/* Transform and opacity only. A blur here would re-rasterize on every scroll
+   frame, which is the one thing a scroll-scrubbed sequence cannot afford. */
+@keyframes round-panel {
+  0% {
+    opacity: 0;
+    transform: translate3d(30px, 22px, 0) scale(0.985);
+  }
+  14%,
+  86% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(-26px, -15px, 0) scale(0.99);
+  }
+}
+
+@keyframes round-art {
+  0% {
+    opacity: 0;
+    transform: translate3d(52px, 0, 0) scale(0.94);
+  }
+  27%,
+  82% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(-36px, 0, 0) scale(0.96);
+  }
+}
+
+@keyframes round-carry {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(400%);
+  }
+}
+
+@keyframes round-seg-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes round-seg-label {
+  0%,
+  100% {
+    opacity: 0.34;
+  }
+  10%,
+  90% {
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .reveal,
   .tab-panel,

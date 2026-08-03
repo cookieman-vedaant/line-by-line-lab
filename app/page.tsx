@@ -1,30 +1,37 @@
 import Link from "next/link";
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import AuthForm from "@/components/AuthForm";
+import Scales from "@/components/marketing/Scales";
+import SourceField from "@/components/marketing/SourceField";
+import TheRound from "@/components/marketing/TheRound";
+import {
+  FinalCta,
+  LandingFooter,
+  Mission,
+  Pricing,
+  StatBar,
+  Toolkit,
+  ToolStrip,
+} from "@/components/marketing/LandingSections";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = {
-  title: "Line by Line Lab — debate evidence, cut in minutes",
+  title: "Line by Line Lab: prep like the biggest program in the room",
   description:
-    "Find reputable, readable evidence, cut debate-ready cards, and coach your case. Built for Lincoln-Douglas debaters.",
+    "Find reputable evidence, cut verbatim debate-ready cards, re-highlight opponents, and get a real AI coach. Free to start. Built to close the prep gap for every LD, PF, and Policy debater.",
 };
 
-const FEATURES: [string, string, string][] = [
-  ["01", "Find Articles", "Reputable sources, verified readable — not just abstracts."],
-  ["02", "Cut a Card", "Verbatim, formatted, ready to read in-round."],
-  ["03", "Coach", "Real feedback on your own case — upload it as a PDF."],
-];
+type SearchParams = Promise<{ next?: string | string[]; error?: string | string[] }>;
 
 /**
- * Home page (route "/") — now the sign-in surface. Signed-out visitors see the
- * intro + an email/password form; signed-in visitors get a link into the app.
- * Route protection lives in middleware.ts (this page is just the entry point).
+ * The only part of this page that varies by request: which box the hero shows.
+ * It reads the auth cookie and the search params, so it is deliberately the one
+ * thing behind a Suspense boundary — everything around it is identical for every
+ * visitor and prerenders into the static shell. Keep request-scoped reads
+ * (cookies, headers, searchParams) inside here or the whole page goes dynamic.
  */
-export default async function Landing({
-  searchParams,
-}: {
-  searchParams: Promise<{ next?: string | string[]; error?: string | string[] }>;
-}) {
+async function HeroSlot({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
   const next = typeof params.next === "string" ? params.next : undefined;
   const error = typeof params.error === "string" ? params.error : undefined;
@@ -34,67 +41,140 @@ export default async function Landing({
     data: { user },
   } = await supabase.auth.getUser();
 
-  return (
-    <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-start justify-center px-5 py-16 sm:py-24">
-      <p className="reveal reveal-1 label-mono flex items-center gap-2 text-xs text-accent">
-        <span className="inline-block h-2.5 w-2.5 rotate-45 bg-red" />
-        debate evidence engine
-      </p>
-
-      <h1 className="reveal reveal-2 mt-5 font-display text-6xl font-extrabold leading-[0.88] tracking-tight sm:text-8xl">
-        Line by
-        <br />
-        Line{" "}
-        <span className="lab-mark frame shadow-hard inline-block -rotate-1 bg-accent px-3 pb-1 text-paper">
-          Lab
-        </span>
-      </h1>
-
-      <p className="reveal reveal-3 mt-7 max-w-xl text-xl font-medium leading-snug">
-        Find reputable, readable evidence, cut debate-ready cards, and get a real
-        coach for your case.{" "}
-        <span className="bg-yellow box-decoration-clone px-1 font-semibold text-black">
-          In minutes, not hours.
-        </span>
-      </p>
-
-      <ul className="reveal reveal-3 mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-        {FEATURES.map(([n, title, desc]) => (
-          <li key={n} className="frame bg-paper-2 px-4 py-3 sm:max-w-[13rem] sm:flex-1">
-            <p className="label-mono text-[10px] text-accent">{n}</p>
-            <p className="mt-0.5 font-display text-sm font-bold">{title}</p>
-            <p className="mt-1 text-xs font-medium leading-snug text-ink/70">{desc}</p>
-          </li>
-        ))}
-      </ul>
-
-      <div className="reveal reveal-4 mt-10 w-full">
-        {user ? (
-          <div className="flex flex-col items-start gap-3">
-            <p className="label-mono text-[11px] text-ink/60">Signed in as {user.email}</p>
-            <Link
-              href="/lab"
-              className="btn-press frame shadow-hard inline-flex items-center gap-2 bg-accent px-7 py-4 font-display text-lg font-bold uppercase tracking-wide text-paper"
-            >
-              Enter the Lab <span aria-hidden>→</span>
-            </Link>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {error && (
-              <p role="alert" className="frame w-full max-w-sm bg-red px-3 py-2 text-xs font-semibold text-white">
-                {error}
-              </p>
-            )}
-            <AuthForm next={next} />
-          </div>
-        )}
+  if (user) {
+    return (
+      <div className="frame shadow-hard w-full max-w-sm bg-paper-2 p-6">
+        <p className="label-mono text-[11px] text-ink/60">Signed in as {user.email}</p>
+        <Link
+          href="/lab"
+          className="btn-press frame shadow-hard mt-4 inline-flex w-full items-center justify-center gap-2 bg-accent px-7 py-4 font-display text-lg font-bold uppercase tracking-wide text-paper"
+        >
+          Enter the Lab <span aria-hidden>→</span>
+        </Link>
       </div>
+    );
+  }
 
-      <div className="masthead-rule reveal reveal-4 mt-12 h-[3px] w-full bg-ink" />
-      <p className="reveal reveal-4 mt-4 label-mono text-[10px] text-ink/50">
-        Free to start · Built for Lincoln-Douglas debaters
+  return (
+    <div className="flex w-full max-w-sm flex-col gap-3">
+      <p className="label-mono text-center text-[11px] text-ink/60 lg:text-right">
+        Start free. No credit card.
       </p>
+      {error && (
+        <p role="alert" className="frame bg-red px-3 py-2 text-xs font-semibold text-white">
+          {error}
+        </p>
+      )}
+      <AuthForm next={next} />
+    </div>
+  );
+}
+
+/**
+ * Holds the hero slot's footprint while it streams, so the shell doesn't reflow
+ * when the real box arrives. Sized to the sign-in form, which is the case almost
+ * every visitor lands in.
+ */
+function HeroSlotFallback() {
+  return (
+    <div className="flex w-full max-w-sm flex-col gap-3" aria-hidden>
+      <p className="label-mono text-center text-[11px] text-ink/60 lg:text-right">
+        Start free. No credit card.
+      </p>
+      <div className="frame shadow-hard w-full bg-paper-2 p-6">
+        <div className="mb-4 flex gap-2">
+          <div className="frame h-8 flex-1 bg-paper" />
+          <div className="frame h-8 flex-1 bg-paper" />
+        </div>
+        <div className="flex flex-col gap-4">
+          <div className="h-[70px] rounded-sm bg-ink/5" />
+          <div className="h-[70px] rounded-sm bg-ink/5" />
+          <div className="h-4 w-32 rounded-sm bg-ink/5" />
+          <div className="h-[46px] rounded-sm bg-ink/10" />
+          <div className="h-6 rounded-sm bg-ink/5" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Home page (route "/") — the marketing + sign-in surface. The marketing shell is
+ * the same for everyone and prerenders; only <HeroSlot /> is request-scoped.
+ * Route protection lives in middleware.ts.
+ */
+export default function Landing({ searchParams }: { searchParams: SearchParams }) {
+  return (
+    <main className="flex w-full flex-1 flex-col">
+      {/* ---- HERO ---------------------------------------------------------- */}
+      <section className="hero-atmos mx-auto w-full max-w-6xl overflow-hidden px-5 pb-10 pt-14 sm:pt-20">
+        <div className="grid items-center gap-10 lg:grid-cols-[1.1fr_0.9fr]">
+          {/* Pitch */}
+          <div>
+            <p className="reveal reveal-1 label-mono flex items-center gap-2 text-xs text-accent">
+              <span aria-hidden className="inline-block h-2.5 w-2.5 rotate-45 bg-red" />
+              line by line lab · free to start
+            </p>
+
+            <h1 className="reveal reveal-2 mt-5 font-display text-5xl font-extrabold leading-[0.9] tracking-tight sm:text-7xl">
+              Prep like the
+              <br />
+              biggest program{" "}
+              <span className="lab-mark frame shadow-hard inline-block -rotate-1 bg-accent px-3 pb-1 text-paper">
+                in the room.
+              </span>
+            </h1>
+
+            <p className="reveal reveal-3 mt-7 max-w-xl text-lg font-medium leading-snug sm:text-xl">
+              Find reputable evidence, cut verbatim debate-ready cards, re-highlight your
+              opponents, and get a real coach.{" "}
+              <span className="bg-yellow box-decoration-clone px-1 font-semibold text-black">
+                In minutes.
+              </span>
+            </p>
+
+            <div className="reveal reveal-3 mt-8">
+              <ToolStrip />
+            </div>
+
+            <div className="reveal reveal-4 mt-8 flex flex-wrap items-center gap-3">
+              <Link
+                href="#start"
+                className="btn-press frame shadow-hard inline-flex items-center gap-2 bg-accent px-6 py-3.5 font-display text-base font-bold uppercase tracking-wide text-paper lg:hidden"
+              >
+                Start free <span aria-hidden>→</span>
+              </Link>
+              <Link
+                href="#tools"
+                className="btn-press frame inline-flex items-center gap-2 bg-paper-2 px-6 py-3.5 font-display text-base font-bold uppercase tracking-wide text-ink"
+              >
+                See the tools <span aria-hidden>→</span>
+              </Link>
+            </div>
+          </div>
+
+          {/* Sign-up / enter (the actual conversion) */}
+          <div id="start" className="reveal reveal-3 flex flex-col items-center lg:items-end">
+            <Suspense fallback={<HeroSlotFallback />}>
+              <HeroSlot searchParams={searchParams} />
+            </Suspense>
+          </div>
+        </div>
+
+        {/* Accomplishments strip */}
+        <div className="reveal reveal-4 mt-16 sm:mt-20">
+          <StatBar />
+        </div>
+      </section>
+
+      <Scales />
+      <Mission />
+      <TheRound />
+      <SourceField />
+      <Toolkit />
+      <Pricing />
+      <FinalCta />
+      <LandingFooter />
     </main>
   );
 }
