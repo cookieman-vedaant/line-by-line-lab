@@ -2,9 +2,9 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import AuthForm from "@/components/AuthForm";
-import Redaction from "@/components/marketing/Redaction";
 import Scales from "@/components/marketing/Scales";
 import SourceField from "@/components/marketing/SourceField";
+import Tear from "@/components/marketing/Tear";
 import Verifier from "@/components/marketing/Verifier";
 import TheRound from "@/components/marketing/TheRound";
 import {
@@ -169,12 +169,14 @@ export default function Landing({ searchParams }: { searchParams: SearchParams }
         </div>
       </section>
 
+      {/* The page comes apart here — full bleed, between the pitch and the argument. */}
+      <Tear />
+
       <Scales />
       <Mission />
       <TheRound />
       <SourceField />
       <Verifier />
-      <Redaction />
       <Toolkit />
       <Pricing />
       <FinalCta />

@@ -658,135 +658,87 @@ body {
   }
 }
 
-/* ---- The Redaction (landing) --------------------------------------------- */
-/* An opponent's card IS a redaction: you are handed the lines they chose, and the
-   rest of the article is blacked out as far as you're concerned. So this blacks it
-   out literally, then lifts the bars outward from their card and flares the lines
-   the author wrote that the card was cut around.
+/* ---- The Cut (landing) --------------------------------------------------- */
+/* The page tears. Not a graphic sitting in a section — the sheet the whole site
+   is printed on comes apart edge to edge, and a second sheet shows through the
+   gap with its own printing on it.
 
-   Same rule as the Verifier: the RESTING state is the ANSWER — unredacted, flares
-   lit. The loop departs from it and comes back. Set the other way round, anyone
-   with reduced motion would be left staring at a black rectangle.
+   The torn edge is one clip-path polygon generated in components/marketing/Tear.tsx:
+   a random-walk wander with fine fibre jitter and occasional pulled fibres, so it
+   reads as paper rather than as a zigzag. It is computed once at module scope from
+   a fixed seed, which means it is identical on every render and every reload and
+   costs nothing at runtime.
 
-   Every animated property here is a transform or an opacity, so the whole piece
-   runs on the compositor; the stagger rides animation-delay off each row rather
-   than a per-frame custom property. Nothing recalculates layout. */
-.redact-line {
+   Two nested clips compose: .tear-run wipes left-to-right along the scroll (the
+   tear propagating), .tear-stock holds the torn shape. Nothing here runs per
+   frame in JavaScript and nothing listens to scroll.
+
+   Base state is FULLY TORN. Firefox has no animation-timeline and reduced motion
+   opts out, and in both cases what is left is the finished torn edge — a designed
+   graphic, not a blank strip. */
+.tear {
   position: relative;
-  display: block;
-  height: 9px;
+  width: 100%;
+  height: 112px;
+  overflow: hidden;
 }
 
-/* The article's own text, sitting under everything. Deliberately low contrast:
-   these rules are texture standing in for prose you aren't meant to read. The
-   informational elements are the two bands, which are measured against paper. */
-.redact-rule {
+.tear-run {
   position: absolute;
   inset: 0;
-  z-index: 2;
-  background: color-mix(in srgb, var(--ink) 22%, transparent);
-}
-.redact-line[data-found] .redact-rule {
-  background: color-mix(in srgb, var(--ink) 42%, transparent);
-}
-.redact-line[data-card] .redact-rule {
-  background: color-mix(in srgb, var(--ink) 58%, transparent);
+  clip-path: inset(0 0 0 0);
 }
 
-/* The blackout. Origin right, so the reveal opens left-to-right the way a line is
-   read, and the redaction closes back in from the right. Slight overhang on all
-   four sides so it reads as a marker stroke rather than a fitted box. */
-.redact-bar {
+/* The sheet underneath. The gradient is the shadow the torn edge above casts down
+   into the gap — without it the band reads as a flat stripe rather than a depth. */
+.tear-stock {
   position: absolute;
-  inset: -2px -3px;
-  z-index: 3;
-  background: var(--ink);
-  transform: scaleX(0);
-  transform-origin: right center;
+  inset: 0;
+  background:
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--ink) 52%, transparent) 0,
+      color-mix(in srgb, var(--ink) 12%, transparent) 10px,
+      transparent 22px
+    ),
+    var(--accent);
 }
 
-/* What the other team highlighted, and what the author also said. Both sit behind
-   the text rule, the way a highlighter does. --red is mixed 10% toward --ink
-   because plain --red measures 2.92:1 on light paper, under the 3:1 floor for a
-   graphic that carries meaning; the mix lands it at 3.45:1 and, because it moves
-   toward whatever --ink is, it stays clear of paper in the dark theme too. */
-.redact-mark,
-.redact-found {
+/* Printing on that lower sheet, glimpsed through the tear. --paper on --accent is
+   the pairing the buttons and the wordmark already use, so it tracks any theme. */
+.tear-print {
   position: absolute;
-  top: -2px;
-  bottom: -2px;
-  z-index: 1;
-}
-.redact-mark {
-  background: var(--accent);
-}
-.redact-found,
-.redact-swatch {
-  background: color-mix(in srgb, var(--red) 90%, var(--ink));
-}
-.redact-found {
-  transform: scaleX(1);
-  transform-origin: left center;
+  top: 50px;
+  left: 0;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: 0.34em;
+  color: var(--paper);
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  /* animation-delay: inherit takes the per-row stagger set on .redact-line, so a
-     row's blackout and its flare stay locked to each other and to their distance
-     from the card. Equal durations keep every row on one period forever. */
-  .redact-bar,
-  .redact-found {
-    animation-delay: inherit;
-    animation-duration: 11s;
-    animation-timing-function: linear;
-    animation-iteration-count: infinite;
-    animation-fill-mode: both;
-  }
-  .redact-bar {
-    animation-name: redact-bar;
-  }
-  .redact-found {
-    animation-name: redact-found;
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .tear {
+      view-timeline-name: --tear;
+    }
+    .tear-run {
+      animation: tear-run linear both;
+      animation-timeline: --tear;
+      animation-range: cover 14% cover 54%;
+    }
   }
 }
 
-/* Closes in hard (ease-in), lifts slow (exponential ease-out). The reveal is the
-   moment worth watching, so it gets nearly three times the time and most of the
-   loop is spent holding on the finished state. */
-@keyframes redact-bar {
-  0%,
-  10% {
-    transform: scaleX(0);
-    animation-timing-function: cubic-bezier(0.7, 0, 0.84, 0);
+/* Linear on purpose: the tear is scrubbed by the scroll, so the reader's own
+   scrolling supplies the easing. Anything else fights the input. */
+@keyframes tear-run {
+  from {
+    clip-path: inset(0 100% 0 0);
   }
-  22%,
-  34% {
-    transform: scaleX(1);
-    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  62%,
-  100% {
-    transform: scaleX(0);
-  }
-}
-
-/* Held back until the blackout has cleared, so the author's line arrives as an
-   answer to the reveal instead of riding in underneath it. */
-@keyframes redact-found {
-  0%,
-  8% {
-    transform: scaleX(1);
-    opacity: 1;
-  }
-  14%,
-  66% {
-    transform: scaleX(0);
-    opacity: 0;
-    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  80%,
-  100% {
-    transform: scaleX(1);
-    opacity: 1;
+  to {
+    clip-path: inset(0 0 0 0);
   }
 }
 
