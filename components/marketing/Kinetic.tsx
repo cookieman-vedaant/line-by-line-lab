@@ -151,8 +151,10 @@ export function MagneticLink({
         cancelAnimationFrame(raf);
         raf = 0;
       }
-      // Spring back rather than snapping.
-      target.style.transition = "transform 0.42s cubic-bezier(0.22, 1.4, 0.4, 1)";
+      // Decelerate back to rest. Exponential ease-out rather than an elastic
+      // overshoot: nothing here has momentum, the pointer just left, and at this
+      // displacement an overshoot is a couple of pixels nobody reads as spring.
+      target.style.transition = "transform 0.4s cubic-bezier(0.22, 1, 0.36, 1)";
       target.style.transform = "translate3d(0, 0, 0)";
     };
 
