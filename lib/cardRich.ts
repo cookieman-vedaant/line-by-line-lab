@@ -83,29 +83,31 @@ export function detailsHtml(details: string): string {
 /**
  * One body paragraph. The three-layer format, plus bold as an emphasis axis:
  *
- *   plain                       8pt grey — context you don't read aloud
- *   underline                   11pt underlined — read aloud
- *   underline + highlight       11pt underlined + cyan — the key warrant
- *   ...any of the above + BOLD  the most important context within the underline
+ *   plain                          8pt grey — context you don't read aloud
+ *   underline                      11pt underlined — read aloud
+ *   underline + highlight          11pt underlined + cyan — read aloud, stressed
+ *   underline + bold               11pt underlined, bold — critical context
+ *   underline + highlight + bold   all three — the strongest language in the card
  *
- * Highlighted text is always bold (it's the strongest emphasis the card has), so
- * `bold` only changes the weight of underlined-but-not-highlighted text.
- * Un-underlined text can never be bold — the parser guarantees it.
+ * Bold is its own axis, so it must be the ONLY thing that renders weight. An
+ * earlier version made every highlight bold, which collapsed the last two states
+ * into identical pixels and left the bold layer invisible wherever the marker
+ * put it on a highlight — the card format's "not all highlighted text should be
+ * bolded" was unrepresentable. Un-underlined text can never be bold; the parser
+ * guarantees that, so this only has to render what it's given.
  */
 export function bodyParagraphHtml(paragraph: string, highlightHex: string): string {
   return parseCardMarkup(paragraph)
     .map((n) => {
+      const weight = n.bold ? ";font-weight:700" : "";
       if (n.kind === "highlight") {
         return span(
           n.text,
-          `font-size:${READ_PT}pt;font-weight:700;text-decoration:underline;background-color:${highlightHex}`,
+          `font-size:${READ_PT}pt;text-decoration:underline;background-color:${highlightHex}${weight}`,
         );
       }
       if (n.kind === "underline") {
-        return span(
-          n.text,
-          `font-size:${READ_PT}pt;text-decoration:underline${n.bold ? ";font-weight:700" : ""}`,
-        );
+        return span(n.text, `font-size:${READ_PT}pt;text-decoration:underline${weight}`);
       }
       return span(n.text, `font-size:${CONTEXT_PT}pt;color:${MUTED_HEX}`);
     })

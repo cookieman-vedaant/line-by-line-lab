@@ -211,6 +211,21 @@ Worked example (match this style exactly):
   BAD  -> highlights: ["Christian nationalism", "Christian nationalism", "predictor", "support"]   (lone, repeated, out-of-context buzzwords — NEVER do this)
 
 - Prioritize by the claim AND its warrants: highlight the phrases that most directly state WHY or HOW the claim is true — the load-bearing reasoning, mechanisms, and consequences — not only phrases that echo the claim's keywords. Because you are now underlining the full reasoning chain, spread highlights across that reasoning (the warrant and implication sentences too), not just the sentences that restate the claim.
+
+- bolds: a SEPARATE, much smaller layer marking the MOST IMPORTANT context inside the underlined text. Bold is not a ranking of your highlights — it is its own judgment about what a reader's eye must land on. Rules:
+  • ONLY text that is already underlined may be bolded. NEVER bold text that is not underlined — that is always wrong and gets discarded.
+  • MOST OF YOUR BOLDS MUST BE ON UNDERLINED TEXT THAT YOU DID NOT HIGHLIGHT. This is the single most common mistake: do NOT simply repeat your highlight phrases back as bolds. If every bold you return is also a highlight, you have done this WRONG — go back and find the un-highlighted underlined language that carries critical context.
+  • What deserves bold in un-highlighted underlined text: the load-bearing qualifier, limitation, scope condition, credential, number, date, or causal connector that a reader must not miss — e.g. "fewer than one in three", "only when the coalition is broad", "the world's largest emitter", "declined by 40% since 2010".
+  • A highlight may ALSO be bolded, but only for the strongest one or two phrases in the entire card. Never bold every highlight.
+  • Keep bolds SHORT — usually 2 to 8 words, tighter than a highlight. Bold a phrase, never a whole sentence.
+  • Do NOT overuse bolding: a typical card has only about 3 to 6 bolds total. If several underlined sections are equally critical, bold each; otherwise bold only the strongest.
+  The legal combinations are: underlined only; underlined + highlighted; underlined + bold; underlined + highlighted + bold. Text that is not underlined must never be bolded or highlighted.
+  Copy each bold EXACTLY from inside an underlined span; a bold that isn't inside underlined text is discarded.
+  Worked example (continuing the sanctions card above):
+    Underlined + highlighted: "sanctions achieve their stated political objectives in fewer than one in three cases"
+    GOOD -> bolds: ["fewer than one in three cases", "leaving elites insulated", "most effective when the demand is modest"]  (a mix: one inside a highlight, the rest from underlined text that was NOT highlighted)
+    BAD  -> bolds: [every phrase you already listed in highlights]   (bold adds nothing — NEVER do this)
+
 - tag: a punchy 1-2 sentence statement of what the evidence proves, phrased from the user's claim (this is YOUR wording). Mark 1-3 key phrases with __underline__ markers.
 - cite: the HUMAN author's last name + 2-digit year, no apostrophe (e.g. "Rodrigues 16"). Multiple authors: "FirstAuthorLastName et al. YY". Only when NO human author is stated anywhere: publication name + YY. See "Finding the author".
 - citeDetails: full cite content WITHOUT brackets: author (+ qualifications if known), "Article Title." Publication, date. Do NOT include a URL — the app appends the real link itself.
@@ -220,16 +235,6 @@ Finding the author (name the PERSON who wrote it, never the website):
 - Treat the metadata author as NOT a real byline if it is an organization or matches/contains the publication (e.g. author "Reuters" with publication "Reuters", or "BBC News"). In that case ignore it and search the CITE CONTEXT block for a human byline ("By Jane Smith", "Article written by: Jane Smith", usually at the very top or bottom) and use that name.
 - NEVER invent, guess, or infer an author from the topic. Only if NO human author is stated anywhere (metadata or cite context) may you cite by the publication (e.g. "Reuters 25").
 - Same rule for dates and credentials: use only what the metadata or cite context actually states.
-
-- bolds: the MOST IMPORTANT context inside the underlined text. Bold is a separate layer from underline and highlight, and it obeys strict rules:
-  • ONLY text that is already underlined may be bolded. NEVER bold text that is not underlined — that is always wrong.
-  • Highlighted text is always underlined, so it may also be bolded — but do NOT bold every highlight.
-  • Underlined text that is NOT highlighted may still be bolded when it carries especially important context: a warrant, a qualifier, a limitation, or a credential that is critical to understanding or supporting the claim.
-  • Choose bolds by importance relative to (i) the claim being supported, (ii) the surrounding context, and (iii) the rest of the underlined text.
-  • Do NOT overuse bolding. Reserve it for the highest-value language so a reader's eye is pulled to the strongest support. A typical card has only a handful of bolds.
-  • If several underlined sections are equally important, bold each of them. Otherwise bold only the strongest supporting language.
-  The legal combinations are: underlined only; underlined + highlighted; underlined + bold; underlined + highlighted + bold. Text that is not underlined must never be bolded or highlighted.
-  Copy each bold EXACTLY from inside an underlined span; a bold phrase that isn't inside underlined text is discarded.
 
 Strings that don't match the passage exactly get silently dropped, so copy underlines/highlights/bolds with care — including punctuation and capitalization.`;
 
