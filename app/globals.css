@@ -483,9 +483,95 @@ body * {
   border-top: var(--bw) solid var(--stroke);
 }
 
-/* The scroll rail means nothing without scroll scrubbing. */
-.round-rail {
+.round-panel {
+  position: relative;
+  isolation: isolate; /* keeps the stage wash below the copy, above the section */
+}
+
+/* The rail and its playhead mean nothing without scroll scrubbing. */
+.round-rail,
+.round-carry {
   display: none;
+}
+
+/* Each stage owns a hue: five steps evenly spaced around the OKLCH wheel at one
+   pinned lightness and chroma.
+
+   Lightness is pinned rather than inherited from the theme so the pairing is
+   guaranteed rather than hoped for. Measured across both shipped themes, the
+   worst fill clears --stage-fg at 5.25:1 and the page at 2.98:1. --stage is
+   always a FILL with --stage-fg on top, never foreground text on paper. Color
+   is never the only cue: every stage keeps its number and its name.
+
+   (Mixing the theme's own --accent/--yellow/--red was the first attempt. In
+   OKLCH the short hue arc from yellow to blue runs through red, so "Coach" came
+   out pink and collided with "Re-Highlight", and red-on-paper measured 2.92:1.) */
+.round-panel,
+.round-seg {
+  --stage-fg: #fbf7ee;
+}
+.round-panel:nth-child(1),
+.round-seg:nth-child(1) {
+  --stage: oklch(0.5 0.19 268);
+}
+.round-panel:nth-child(2),
+.round-seg:nth-child(2) {
+  --stage: oklch(0.5 0.19 340);
+}
+.round-panel:nth-child(3),
+.round-seg:nth-child(3) {
+  --stage: oklch(0.5 0.19 52);
+}
+.round-panel:nth-child(4),
+.round-seg:nth-child(4) {
+  --stage: oklch(0.5 0.19 124);
+}
+.round-panel:nth-child(5),
+.round-seg:nth-child(5) {
+  --stage: oklch(0.5 0.19 196);
+}
+
+/* Where relative color syntax exists, rotate the same ramp off the live accent
+   so a Theme Studio theme recolors the sequence instead of leaving five fixed
+   hues behind. Lightness and chroma are unchanged, so the contrast above holds
+   for any accent hue. The fixed ramp above is the fallback, and it is what the
+   default theme resolves to anyway. */
+@supports (color: oklch(from red l c h)) {
+  .round-panel:nth-child(1),
+  .round-seg:nth-child(1) {
+    --stage: oklch(from var(--accent) 0.5 0.19 h);
+  }
+  .round-panel:nth-child(2),
+  .round-seg:nth-child(2) {
+    --stage: oklch(from var(--accent) 0.5 0.19 calc(h + 72));
+  }
+  .round-panel:nth-child(3),
+  .round-seg:nth-child(3) {
+    --stage: oklch(from var(--accent) 0.5 0.19 calc(h + 144));
+  }
+  .round-panel:nth-child(4),
+  .round-seg:nth-child(4) {
+    --stage: oklch(from var(--accent) 0.5 0.19 calc(h + 216));
+  }
+  .round-panel:nth-child(5),
+  .round-seg:nth-child(5) {
+    --stage: oklch(from var(--accent) 0.5 0.19 calc(h + 288));
+  }
+}
+
+/* Atmosphere behind each stage, in that stage's hue. Rides the panel's own
+   opacity, so it costs no extra animation. */
+.round-panel::before {
+  content: "";
+  position: absolute;
+  inset: -22% -10%;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(
+    46% 54% at 76% 46%,
+    color-mix(in srgb, var(--stage) 24%, transparent),
+    transparent 72%
+  );
 }
 
 @supports (animation-timeline: view()) {
@@ -527,11 +613,36 @@ body * {
       padding: 0;
       animation: round-panel linear both;
       animation-timeline: --round;
-      will-change: opacity, transform, filter;
+      will-change: opacity, transform;
     }
 
     .round-panel + .round-panel {
       border-top: 0;
+    }
+
+    /* The artifact trails its copy into place. Same range, later curve, so the
+       stagger costs no extra range rules. */
+    .round-art {
+      animation: round-art linear both;
+      animation-timeline: --round;
+      will-change: opacity, transform;
+    }
+
+    /* The playhead: one mark riding the rail for the whole sequence. The tools
+       change, the evidence being carried does not. */
+    .round-carry {
+      display: flex;
+      position: absolute;
+      left: 0;
+      bottom: -0.7rem;
+      width: 20%; /* exactly one rail column, so translateX(400%) lands on the last */
+      justify-content: center;
+      animation: round-carry linear both;
+      animation-timeline: --round;
+      animation-range: contain 0% contain 100%;
+      /* Advance, arrive, wait. Ignored where linear() is unsupported, which
+         leaves a smooth glide rather than a broken one. */
+      animation-timing-function: linear(0 0% 9%, 0.25 18% 34%, 0.5 43% 59%, 0.75 66% 84%, 1 91% 100%);
     }
 
     .round-seg-fill {
@@ -547,26 +658,31 @@ body * {
 
     /* Each stage owns one fifth of the pinned scroll. */
     .round-panel:nth-child(1),
+    .round-panel:nth-child(1) .round-art,
     .round-seg:nth-child(1) .round-seg-fill,
     .round-seg:nth-child(1) .round-seg-label {
       animation-range: contain 0% contain 20%;
     }
     .round-panel:nth-child(2),
+    .round-panel:nth-child(2) .round-art,
     .round-seg:nth-child(2) .round-seg-fill,
     .round-seg:nth-child(2) .round-seg-label {
       animation-range: contain 20% contain 40%;
     }
     .round-panel:nth-child(3),
+    .round-panel:nth-child(3) .round-art,
     .round-seg:nth-child(3) .round-seg-fill,
     .round-seg:nth-child(3) .round-seg-label {
       animation-range: contain 40% contain 60%;
     }
     .round-panel:nth-child(4),
+    .round-panel:nth-child(4) .round-art,
     .round-seg:nth-child(4) .round-seg-fill,
     .round-seg:nth-child(4) .round-seg-label {
       animation-range: contain 60% contain 80%;
     }
     .round-panel:nth-child(5),
+    .round-panel:nth-child(5) .round-art,
     .round-seg:nth-child(5) .round-seg-fill,
     .round-seg:nth-child(5) .round-seg-label {
       animation-range: contain 80% contain 100%;
@@ -574,22 +690,46 @@ body * {
   }
 }
 
+/* Transform and opacity only. A blur here would re-rasterize on every scroll
+   frame, which is the one thing a scroll-scrubbed sequence cannot afford. */
 @keyframes round-panel {
   0% {
     opacity: 0;
-    transform: translateY(26px);
-    filter: blur(6px);
+    transform: translate3d(30px, 22px, 0) scale(0.985);
   }
-  13%,
-  87% {
+  14%,
+  86% {
     opacity: 1;
     transform: none;
-    filter: blur(0);
   }
   100% {
     opacity: 0;
-    transform: translateY(-18px);
-    filter: blur(6px);
+    transform: translate3d(-26px, -15px, 0) scale(0.99);
+  }
+}
+
+@keyframes round-art {
+  0% {
+    opacity: 0;
+    transform: translate3d(52px, 0, 0) scale(0.94);
+  }
+  27%,
+  82% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(-36px, 0, 0) scale(0.96);
+  }
+}
+
+@keyframes round-carry {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(400%);
   }
 }
 

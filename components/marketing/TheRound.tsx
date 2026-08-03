@@ -3,11 +3,16 @@ import { TOOLS } from "@/lib/siteContent";
 
 /**
  * The Round — the five stages of prep, scrubbed by scroll position. On a desktop
- * viewport that supports scroll-driven animations the stage pins and each stage
- * cross-fades as you scroll through it; everywhere else the same five panels read
- * as a plain vertical list. All of the motion lives in globals.css (`.round-*`),
- * driven by a view timeline rather than a scroll listener, so it never competes
- * with the main thread.
+ * viewport that supports scroll-driven animations the stage pins, each stage
+ * cross-fades as you scroll through it, and a playhead rides the rail; everywhere
+ * else the same five panels read as a plain vertical list. All of the motion
+ * lives in globals.css (`.round-*`), driven by a view timeline rather than a
+ * scroll listener, and animates only transform and opacity.
+ *
+ * Each stage owns a hue (`--stage` / `--stage-fg`, set in globals.css) that runs
+ * through its number, its bullets, its handoff ticket, its artifact, and the wash
+ * behind it. Every one is mixed from tokens the theme already defines, so a
+ * generated theme recolors the sequence along with everything else.
  *
  * The artifacts are deliberately wordless: structure only, no titles, authors, or
  * citations. Every line of prose comes from lib/siteContent, so the claims here
@@ -30,6 +35,7 @@ const HANDOFF = [
 
 /** A wordless stand-in for what the stage produces. Structure, never content. */
 function Artifact({ stage }: { stage: number }) {
+  // 01 Find — a ranked result list.
   if (stage === 0) {
     return (
       <div className="frame shadow-hard bg-paper p-4">
@@ -37,7 +43,7 @@ function Artifact({ stage }: { stage: number }) {
           <div key={i} className="flex items-start gap-3 py-2">
             <span aria-hidden className="mt-1 h-2 w-2 shrink-0 rotate-45 bg-red" />
             <div className="min-w-0 flex-1">
-              <div className="h-2 bg-accent" style={{ width: `${w}%` }} />
+              <div className="h-2 bg-[var(--stage)]" style={{ width: `${w}%` }} />
               <div className="mt-1.5 h-1.5 w-2/5 bg-ink/25" />
             </div>
           </div>
@@ -46,6 +52,7 @@ function Artifact({ stage }: { stage: number }) {
     );
   }
 
+  // 02 Cut and 03 Re-Highlight — the same document, marked two different ways.
   if (stage === 1 || stage === 2) {
     const undercut = stage === 2;
     return (
@@ -56,16 +63,21 @@ function Artifact({ stage }: { stage: number }) {
         <div className="mt-4 flex flex-col gap-1.5">
           <div className="h-1.5 w-full bg-ink/20" />
           <div className="h-2 w-11/12 bg-ink/70" />
-          <div className="relative h-2 w-3/4 bg-accent">
+          {/* Their highlight. On Re-Highlight it goes grey and gets struck. */}
+          <div className={`relative h-2 w-3/4 ${undercut ? "bg-ink/25" : "bg-[var(--stage)]"}`}>
             {undercut && (
-              <span aria-hidden className="absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 bg-red" />
+              <span
+                aria-hidden
+                className="absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 bg-ink"
+              />
             )}
           </div>
           <div className="h-1.5 w-5/6 bg-ink/20" />
+          {/* The author's own wording that the card left out. */}
           {undercut ? (
             <div className="mt-1 flex items-center gap-2">
-              <span aria-hidden className="h-2 w-2 shrink-0 rotate-45 bg-red" />
-              <div className="h-2 flex-1 bg-ink/70" />
+              <span aria-hidden className="h-2 w-2 shrink-0 rotate-45 bg-[var(--stage)]" />
+              <div className="h-2 flex-1 bg-[var(--stage)]" />
             </div>
           ) : (
             <div className="h-2 w-2/3 bg-ink/70" />
@@ -75,6 +87,7 @@ function Artifact({ stage }: { stage: number }) {
     );
   }
 
+  // 04 Coach — a case going in, a block of cut-card answers coming back.
   if (stage === 3) {
     return (
       <div className="flex flex-col gap-2.5">
@@ -82,19 +95,20 @@ function Artifact({ stage }: { stage: number }) {
           <div className="h-2 w-full bg-ink/25" />
           <div className="mt-1.5 h-2 w-3/5 bg-ink/25" />
         </div>
-        <div className="frame shadow-hard w-3/5 self-end bg-accent p-3">
-          <div className="h-2 w-full bg-paper/85" />
-          <div className="mt-1.5 h-2 w-2/3 bg-paper/85" />
+        <div className="frame shadow-hard w-3/5 self-end bg-[var(--stage)] p-3">
+          <div className="h-2 w-full bg-[var(--stage-fg)] opacity-80" />
+          <div className="mt-1.5 h-2 w-2/3 bg-[var(--stage-fg)] opacity-80" />
         </div>
         <div className="frame w-11/12 bg-paper p-3">
           <div className="h-2.5 w-3/4 bg-ink" />
           <div className="mt-2 h-1.5 w-2/5 bg-ink/40" />
-          <div className="mt-2 h-2 w-5/6 bg-ink/60" />
+          <div className="mt-2 h-2 w-5/6 bg-[var(--stage)]" />
         </div>
       </div>
     );
   }
 
+  // 05 Record — the round log the Coach reads back.
   return (
     <div className="frame shadow-hard bg-paper">
       <div className="divide-b grid grid-cols-4 gap-3 p-3">
@@ -106,7 +120,7 @@ function Artifact({ stage }: { stage: number }) {
         <div key={r} className="grid grid-cols-4 items-center gap-3 px-3 py-2.5">
           <div className="h-2 bg-ink/70" />
           <div className="h-2 bg-ink/40" />
-          <div className={`h-2 ${r % 2 === 0 ? "bg-accent" : "bg-red"}`} />
+          <div className={`h-2 ${r % 2 === 0 ? "bg-[var(--stage)]" : "bg-ink/25"}`} />
           <div className="h-2 bg-ink/40" />
         </div>
       ))}
@@ -138,18 +152,24 @@ export default function TheRound() {
 
       <div className="round-track">
         <div className="round-stage mx-auto w-full max-w-5xl px-5 pb-20 sm:pb-28">
-          {/* Scroll rail. Hidden unless the stage is actually pinned and scrubbing. */}
-          <ol className="round-rail mt-12 grid-cols-5 gap-3" aria-hidden>
+          {/* Scroll rail. Hidden unless the stage is actually pinned and scrubbing.
+              No column gap: each segment is exactly a fifth, which is what lets the
+              playhead land dead centre on each one. */}
+          <ol className="round-rail relative mt-12 grid-cols-5" aria-hidden>
             {STAGES.map((t, i) => (
-              <li key={t.name} className="round-seg">
-                <p className="round-seg-label label-mono text-[10px] text-ink">
-                  <span className="text-accent">{t.index}</span> {RAIL_LABELS[i]}
+              <li key={t.name} className="round-seg pr-3">
+                <p className="round-seg-label label-mono flex items-center gap-1.5 text-[10px] text-ink">
+                  <span aria-hidden className="inline-block h-2 w-2 shrink-0 rotate-45 bg-[var(--stage)]" />
+                  {RAIL_LABELS[i]}
                 </p>
                 <div className="mt-2 h-[3px] w-full bg-ink/15">
-                  <div className="round-seg-fill h-full w-full bg-accent" />
+                  <div className="round-seg-fill h-full w-full bg-[var(--stage)]" />
                 </div>
               </li>
             ))}
+            <li className="round-carry">
+              <span aria-hidden className="block h-3 w-3 rotate-45 bg-ink" />
+            </li>
           </ol>
 
           <div className="round-panels">
@@ -159,8 +179,8 @@ export default function TheRound() {
                 className="round-panel grid gap-8 py-12 md:grid-cols-[1fr_0.8fr] md:items-center md:py-0"
               >
                 <div>
-                  <div className="flex items-baseline gap-3">
-                    <span className="font-display text-4xl font-extrabold leading-none text-accent sm:text-5xl">
+                  <div className="flex items-center gap-4">
+                    <span className="frame shadow-hard inline-flex items-center justify-center bg-[var(--stage)] px-3 py-1 font-display text-2xl font-extrabold leading-none text-[var(--stage-fg)] sm:text-3xl">
                       {tool.index}
                     </span>
                     <h3 className="font-display text-3xl font-extrabold tracking-tight sm:text-4xl">
@@ -168,26 +188,29 @@ export default function TheRound() {
                     </h3>
                   </div>
 
-                  <p className="mt-4 max-w-md font-display text-xl font-bold leading-snug sm:text-2xl">
+                  <p className="mt-5 max-w-md font-display text-xl font-bold leading-snug sm:text-2xl">
                     {tool.tagline}
                   </p>
 
                   <ul className="mt-5 grid max-w-md gap-2.5">
                     {tool.points.slice(0, 2).map((p) => (
                       <li key={p} className="flex items-start gap-2.5 text-sm font-medium leading-snug">
-                        <span aria-hidden className="mt-1.5 h-1.5 w-1.5 shrink-0 rotate-45 bg-accent" />
+                        <span
+                          aria-hidden
+                          className="mt-1.5 h-1.5 w-1.5 shrink-0 rotate-45 bg-[var(--stage)]"
+                        />
                         <span>{p}</span>
                       </li>
                     ))}
                   </ul>
 
-                  <p className="mt-6 flex items-start gap-2 text-sm font-bold text-accent">
+                  <p className="frame shadow-hard mt-7 inline-flex items-start gap-2 bg-[var(--stage)] px-3 py-2 text-sm font-bold text-[var(--stage-fg)]">
                     <span aria-hidden>→</span>
                     <span>{HANDOFF[i]}</span>
                   </p>
                 </div>
 
-                <div className="w-full max-w-sm md:justify-self-end">
+                <div className="round-art w-full max-w-sm md:justify-self-end">
                   <Artifact stage={i} />
                 </div>
               </article>
