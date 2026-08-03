@@ -1,4 +1,6 @@
 import {
+  BOLD_CLOSE,
+  BOLD_OPEN,
   HIGHLIGHT_CLOSE,
   HIGHLIGHT_OPEN,
   stripDelimiters,
@@ -77,6 +79,7 @@ export function applyEmphasis(
   text: string,
   underlines: string[],
   highlights: string[],
+  bolds: string[] = [],
 ): EmphasisResult {
   // Guard against the (astronomically unlikely) case of the source already
   // containing our private-use delimiters, so none can leak through as marks.
@@ -125,11 +128,55 @@ export function applyEmphasis(
     }
   }
 
+  /*
+   * Bold is a SEPARATE mark layer, not a higher level of the same scale, because
+   * it combines with the others (underline+bold, underline+highlight+bold).
+   *
+   * The card format's rule: bold marks the most important CONTEXT inside
+   * underlined text, so a bold span is only honored where the character is
+   * already underlined or highlighted. A bold phrase that lands entirely in
+   * plain text is dropped — un-underlined text must never render bold.
+   */
+  const boldMarks = new Uint8Array(text.length);
+  const seenBolds = new Set<string>();
+  for (const needle of bolds) {
+    const key = normalizeForComparison(stripDelimiters(needle));
+    if (seenBolds.has(key)) continue;
+    seenBolds.add(key);
+
+    const spans = locateSpans(index, text, needle);
+    if (spans.length === 0) {
+      missed++;
+      continue;
+    }
+    // Prefer an occurrence that actually sits inside emphasized text; otherwise
+    // this phrase contributes nothing and is counted as a miss.
+    const chosen = spans.find(([start]) => marks[start] !== PLAIN);
+    if (!chosen) {
+      missed++;
+      continue;
+    }
+    applied++;
+    for (let i = chosen[0]; i < chosen[1]; i++) {
+      if (marks[i] !== PLAIN) boldMarks[i] = 1;
+    }
+  }
+
   // Emit text with markers, closing/reopening at line breaks.
   const out: string[] = [];
   let current = PLAIN;
+  let boldOn = false;
 
+  // Bold closes before its enclosing emphasis so the delimiters stay properly
+  // nested (…B_OPEN text B_CLOSE U_CLOSE), never interleaved.
+  const closeBold = () => {
+    if (boldOn) {
+      out.push(BOLD_CLOSE);
+      boldOn = false;
+    }
+  };
   const close = () => {
+    closeBold();
     if (current === HIGHLIGHT) out.push(HIGHLIGHT_CLOSE);
     else if (current === UNDERLINE) out.push(UNDERLINE_CLOSE);
     current = PLAIN;
@@ -147,6 +194,17 @@ export function applyEmphasis(
     if (effective !== current) {
       close();
       if (effective !== PLAIN) open(effective);
+    }
+    // Bold can only be on inside emphasized text, so it's evaluated after the
+    // kind transition above has settled.
+    const wantBold = effective !== PLAIN && boldMarks[i] === 1;
+    if (wantBold !== boldOn) {
+      if (wantBold) {
+        out.push(BOLD_OPEN);
+        boldOn = true;
+      } else {
+        closeBold();
+      }
     }
     out.push(ch);
   }

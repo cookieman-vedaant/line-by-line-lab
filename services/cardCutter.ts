@@ -168,12 +168,15 @@ const markerSchema = z.object({
   citeDetails: z.string().min(1),
   underlines: z.array(z.string()).max(300),
   highlights: z.array(z.string()).max(400),
+  // Optional so an older/underspecified model response still parses — a card
+  // with no bolds is valid, just less emphasized.
+  bolds: z.array(z.string()).max(200).optional().default([]),
 });
 
 const MARKER_SYSTEM = `You are the emphasis marker inside a debate card-cutting tool (Lincoln-Douglas). You receive a claim and a passage extracted VERBATIM from an article. You do NOT rewrite anything — you return metadata that the app applies to the original text.
 
 Return ONLY JSON:
-{"tag": "...", "cite": "...", "citeDetails": "...", "underlines": ["...", ...], "highlights": ["...", ...]}
+{"tag": "...", "cite": "...", "citeDetails": "...", "underlines": ["...", ...], "highlights": ["...", ...], "bolds": ["...", ...]}
 
 There are THREE layers of emphasis, exactly like a hand-cut debate card:
   1. plain text — context that is kept but NOT read aloud (most of the passage stays plain).
@@ -218,7 +221,17 @@ Finding the author (name the PERSON who wrote it, never the website):
 - NEVER invent, guess, or infer an author from the topic. Only if NO human author is stated anywhere (metadata or cite context) may you cite by the publication (e.g. "Reuters 25").
 - Same rule for dates and credentials: use only what the metadata or cite context actually states.
 
-Strings that don't match the passage exactly get silently dropped, so copy underlines/highlights with care — including punctuation and capitalization.`;
+- bolds: the MOST IMPORTANT context inside the underlined text. Bold is a separate layer from underline and highlight, and it obeys strict rules:
+  • ONLY text that is already underlined may be bolded. NEVER bold text that is not underlined — that is always wrong.
+  • Highlighted text is always underlined, so it may also be bolded — but do NOT bold every highlight.
+  • Underlined text that is NOT highlighted may still be bolded when it carries especially important context: a warrant, a qualifier, a limitation, or a credential that is critical to understanding or supporting the claim.
+  • Choose bolds by importance relative to (i) the claim being supported, (ii) the surrounding context, and (iii) the rest of the underlined text.
+  • Do NOT overuse bolding. Reserve it for the highest-value language so a reader's eye is pulled to the strongest support. A typical card has only a handful of bolds.
+  • If several underlined sections are equally important, bold each of them. Otherwise bold only the strongest supporting language.
+  The legal combinations are: underlined only; underlined + highlighted; underlined + bold; underlined + highlighted + bold. Text that is not underlined must never be bolded or highlighted.
+  Copy each bold EXACTLY from inside an underlined span; a bold phrase that isn't inside underlined text is discarded.
+
+Strings that don't match the passage exactly get silently dropped, so copy underlines/highlights/bolds with care — including punctuation and capitalization.`;
 
 function buildMarkerPrompt(claim: string, article: ExtractedArticle, passage: string): string {
   // Bylines usually live at the very top or bottom of the article, which the
@@ -424,10 +437,12 @@ async function runCut(req: CutRequest): Promise<Card> {
   let head: MarkerData;
   const underlines: string[] = [];
   const highlights: string[] = [];
+  const bolds: string[] = [];
 
   if (sections.length <= 1) {
     head = await markPassageSection(req.claim, article, sections[0] ?? passage);
     underlines.push(...head.underlines);
+    bolds.push(...head.bolds);
     highlights.push(...head.highlights);
   } else {
     // Section 0 owns the tag/cite (it holds the article's opening) and MUST
@@ -452,11 +467,12 @@ async function runCut(req: CutRequest): Promise<Card> {
     for (const m of marked) {
       if (!m) continue;
       underlines.push(...m.underlines);
+      bolds.push(...m.bolds);
       highlights.push(...m.highlights);
     }
   }
 
-  const { body, missed, applied } = applyEmphasis(passage, underlines, highlights);
+  const { body, missed, applied } = applyEmphasis(passage, underlines, highlights, bolds);
   if (missed > 0) {
     console.warn(`cardCutter: ${missed} emphasis substrings didn't match and were skipped (${applied} applied)`);
   }

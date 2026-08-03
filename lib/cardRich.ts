@@ -80,7 +80,18 @@ export function detailsHtml(details: string): string {
   return span(`[${stripDelimiters(details)}]`, `font-size:${READ_PT}pt;color:${MUTED_HEX}`);
 }
 
-/** One body paragraph: read-aloud text at 11pt, unread context shrunk and grey. */
+/**
+ * One body paragraph. The three-layer format, plus bold as an emphasis axis:
+ *
+ *   plain                       8pt grey — context you don't read aloud
+ *   underline                   11pt underlined — read aloud
+ *   underline + highlight       11pt underlined + cyan — the key warrant
+ *   ...any of the above + BOLD  the most important context within the underline
+ *
+ * Highlighted text is always bold (it's the strongest emphasis the card has), so
+ * `bold` only changes the weight of underlined-but-not-highlighted text.
+ * Un-underlined text can never be bold — the parser guarantees it.
+ */
 export function bodyParagraphHtml(paragraph: string, highlightHex: string): string {
   return parseCardMarkup(paragraph)
     .map((n) => {
@@ -91,7 +102,10 @@ export function bodyParagraphHtml(paragraph: string, highlightHex: string): stri
         );
       }
       if (n.kind === "underline") {
-        return span(n.text, `font-size:${READ_PT}pt;text-decoration:underline`);
+        return span(
+          n.text,
+          `font-size:${READ_PT}pt;text-decoration:underline${n.bold ? ";font-weight:700" : ""}`,
+        );
       }
       return span(n.text, `font-size:${CONTEXT_PT}pt;color:${MUTED_HEX}`);
     })

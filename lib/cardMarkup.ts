@@ -17,9 +17,12 @@ export const HIGHLIGHT_OPEN = String.fromCharCode(0xe000);
 export const HIGHLIGHT_CLOSE = String.fromCharCode(0xe001);
 export const UNDERLINE_OPEN = String.fromCharCode(0xe002);
 export const UNDERLINE_CLOSE = String.fromCharCode(0xe003);
+/** Bold is ORTHOGONAL to the other two — see MarkupNode.bold below. */
+export const BOLD_OPEN = String.fromCharCode(0xe004);
+export const BOLD_CLOSE = String.fromCharCode(0xe005);
 
 const DELIMITER_RE = new RegExp(
-  `[${HIGHLIGHT_OPEN}${HIGHLIGHT_CLOSE}${UNDERLINE_OPEN}${UNDERLINE_CLOSE}]`,
+  `[${HIGHLIGHT_OPEN}${HIGHLIGHT_CLOSE}${UNDERLINE_OPEN}${UNDERLINE_CLOSE}${BOLD_OPEN}${BOLD_CLOSE}]`,
   "g",
 );
 
@@ -45,6 +48,16 @@ export type MarkupNodeKind = "plain" | "underline" | "highlight";
 
 export interface MarkupNode {
   kind: MarkupNodeKind;
+  /**
+   * Bold is a SEPARATE axis from `kind`, not a fourth kind, because the card
+   * format allows it to combine: underline+bold and underline+highlight+bold are
+   * both valid. Modeling it as a kind would make those states unrepresentable.
+   *
+   * INVARIANT: bold is only ever true where `kind !== "plain"`. Un-underlined
+   * text must never be bolded, so the parser enforces this rather than trusting
+   * whoever produced the markup.
+   */
+  bold: boolean;
   text: string;
 }
 
@@ -52,46 +65,61 @@ export function parseCardMarkup(text: string): MarkupNode[] {
   const nodes: MarkupNode[] = [];
   let highlightOpen = false;
   let underlineOpen = false;
+  let boldOpen = false;
   let buf = "";
   let current: MarkupNodeKind = "plain";
+  let currentBold = false;
 
   const kindNow = (): MarkupNodeKind =>
     highlightOpen ? "highlight" : underlineOpen ? "underline" : "plain";
 
+  // Bold requires emphasis underneath it. A stray bold span over plain text is
+  // dropped rather than rendered — the format has no "bold only" state.
+  const boldNow = (): boolean => boldOpen && kindNow() !== "plain";
+
   const flush = () => {
     if (buf.length > 0) {
-      nodes.push({ kind: current, text: buf });
+      nodes.push({ kind: current, bold: currentBold, text: buf });
       buf = "";
     }
   };
 
-  const setState = (highlight: boolean | null, underline: boolean | null) => {
+  const setState = (
+    highlight: boolean | null,
+    underline: boolean | null,
+    bold: boolean | null,
+  ) => {
     flush();
     if (highlight !== null) highlightOpen = highlight;
     if (underline !== null) underlineOpen = underline;
+    if (bold !== null) boldOpen = bold;
     current = kindNow();
+    currentBold = boldNow();
   };
 
   for (const ch of text) {
-    if (ch === HIGHLIGHT_OPEN) setState(true, null);
-    else if (ch === HIGHLIGHT_CLOSE) setState(false, null);
-    else if (ch === UNDERLINE_OPEN) setState(null, true);
-    else if (ch === UNDERLINE_CLOSE) setState(null, false);
+    if (ch === HIGHLIGHT_OPEN) setState(true, null, null);
+    else if (ch === HIGHLIGHT_CLOSE) setState(false, null, null);
+    else if (ch === UNDERLINE_OPEN) setState(null, true, null);
+    else if (ch === UNDERLINE_CLOSE) setState(null, false, null);
+    else if (ch === BOLD_OPEN) setState(null, null, true);
+    else if (ch === BOLD_CLOSE) setState(null, null, false);
     else buf += ch;
   }
   flush();
 
-  // Merge adjacent nodes of the same kind (state changes can fragment them),
-  // and strip any delimiter that somehow survived so nothing internal leaks.
+  // Merge adjacent nodes with the SAME kind AND bold state (state changes can
+  // fragment them), and strip any delimiter that somehow survived so nothing
+  // internal leaks into rendered text.
   const merged: MarkupNode[] = [];
   for (const node of nodes) {
     const clean = stripDelimiters(node.text);
     if (clean.length === 0) continue;
     const last = merged[merged.length - 1];
-    if (last && last.kind === node.kind) {
+    if (last && last.kind === node.kind && last.bold === node.bold) {
       last.text += clean;
     } else {
-      merged.push({ kind: node.kind, text: clean });
+      merged.push({ kind: node.kind, bold: node.bold, text: clean });
     }
   }
   return merged;
