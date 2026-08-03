@@ -405,6 +405,72 @@ body * {
   }
 }
 
+/* ---- The Scales (landing) ----------------------------------------------- */
+/* One registered property drives the whole apparatus: 0 is the prep gap, 1 is
+   balanced. The beam angle, the counter-rotation that keeps each load upright,
+   the tool chips dropping in one at a time, and the accent level line are all
+   derived from it, so no two parts can drift out of sync. With motion reduced
+   --load stays at its initial 1 and the scales render level and static. */
+@property --load {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+
+.scales {
+  --load: 1;
+  --tilt: calc((1 - var(--load)) * -7deg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .scales {
+    animation: scales-balance 9s infinite;
+  }
+  .scales-beam {
+    will-change: transform;
+  }
+}
+
+@keyframes scales-balance {
+  /* Overshoot on the way to level: the beam passes the horizon and settles. */
+  0%,
+  8% {
+    --load: 0;
+    animation-timing-function: cubic-bezier(0.32, 1.45, 0.45, 1);
+  }
+  62%,
+  86% {
+    --load: 1;
+    animation-timing-function: cubic-bezier(0.65, 0, 0.75, 0.35);
+  }
+  100% {
+    --load: 0;
+  }
+}
+
+.scales-beam {
+  transform: rotate(var(--tilt));
+  transform-origin: 50% 50%;
+}
+
+/* Loads sit on the plank and stay upright as it swings. */
+.scales-upright {
+  transform: rotate(calc(-1 * var(--tilt)));
+}
+
+/* Chip N lands at --load = (N+1)/7, so the sixth one lands exactly on level. */
+.scales-chip {
+  --p: clamp(0, calc(var(--load) * 7 - var(--i)), 1);
+  opacity: var(--p);
+  transform: translateY(calc((1 - var(--p)) * -58px)) rotate(calc((1 - var(--p)) * -12deg));
+}
+
+/* The horizon: arrives only in the last of the swing, so levelling reads as the
+   payoff rather than as a line that was there the whole time. */
+.scales-level {
+  opacity: clamp(0, calc(var(--load) * 5 - 4), 1);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .reveal,
   .tab-panel,

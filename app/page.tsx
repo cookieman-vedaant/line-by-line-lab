@@ -1,7 +1,8 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import AuthForm from "@/components/AuthForm";
-import HighlightDemo from "@/components/marketing/HighlightDemo";
+import Scales from "@/components/marketing/Scales";
+import SourceField from "@/components/marketing/SourceField";
 import {
   FinalCta,
   LandingFooter,
@@ -126,9 +127,10 @@ export default async function Landing({
         </div>
       </section>
 
-      <HighlightDemo />
+      <Scales />
       <Mission />
       <Versatility />
+      <SourceField />
       <Toolkit />
       <Pricing />
       <FinalCta />
