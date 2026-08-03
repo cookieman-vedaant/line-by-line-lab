@@ -147,7 +147,7 @@ export default function PrivacyPolicy() {
       </section>
 
       <nav aria-label="Contents" className="mt-10">
-        <p className="text-xs font-bold uppercase tracking-[0.18em] text-ink/55">Contents</p>
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-ink/65">Contents</p>
         <ol className="mt-3 grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
           {(
             [

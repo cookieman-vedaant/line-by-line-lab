@@ -327,8 +327,8 @@ export default function SourceField() {
           <canvas ref={attach} aria-hidden className="block h-[260px] w-full sm:h-[340px]" />
         </div>
         <div className="mt-4 flex items-start justify-between gap-6">
-          <p className="label-mono text-[11px] text-ink/55">the index</p>
-          <p className="label-mono text-right text-[11px] text-ink/55">your ranked results</p>
+          <p className="label-mono text-[11px] text-ink/65">the index</p>
+          <p className="label-mono text-right text-[11px] text-ink/65">your ranked results</p>
         </div>
       </Reveal>
     </section>

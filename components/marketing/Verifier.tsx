@@ -44,9 +44,9 @@ export default function Verifier() {
       <Reveal delay={120}>
         <div className="verify mt-12">
           <div className="grid grid-cols-[1fr_auto_1fr] items-start gap-x-4 gap-y-0 sm:gap-x-8">
-            <p className="label-mono mb-3 text-[10px] text-ink/55">the article</p>
+            <p className="label-mono mb-3 text-[10px] text-ink/65">the article</p>
             <span aria-hidden />
-            <p className="label-mono mb-3 text-right text-[10px] text-ink/55">your card</p>
+            <p className="label-mono mb-3 text-right text-[10px] text-ink/65">your card</p>
           </div>
 
           <div className="verify-stage frame relative bg-paper-2 p-5 sm:p-7">

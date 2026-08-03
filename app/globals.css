@@ -658,6 +658,138 @@ body {
   }
 }
 
+/* ---- The Redaction (landing) --------------------------------------------- */
+/* An opponent's card IS a redaction: you are handed the lines they chose, and the
+   rest of the article is blacked out as far as you're concerned. So this blacks it
+   out literally, then lifts the bars outward from their card and flares the lines
+   the author wrote that the card was cut around.
+
+   Same rule as the Verifier: the RESTING state is the ANSWER — unredacted, flares
+   lit. The loop departs from it and comes back. Set the other way round, anyone
+   with reduced motion would be left staring at a black rectangle.
+
+   Every animated property here is a transform or an opacity, so the whole piece
+   runs on the compositor; the stagger rides animation-delay off each row rather
+   than a per-frame custom property. Nothing recalculates layout. */
+.redact-line {
+  position: relative;
+  display: block;
+  height: 9px;
+}
+
+/* The article's own text, sitting under everything. Deliberately low contrast:
+   these rules are texture standing in for prose you aren't meant to read. The
+   informational elements are the two bands, which are measured against paper. */
+.redact-rule {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: color-mix(in srgb, var(--ink) 22%, transparent);
+}
+.redact-line[data-found] .redact-rule {
+  background: color-mix(in srgb, var(--ink) 42%, transparent);
+}
+.redact-line[data-card] .redact-rule {
+  background: color-mix(in srgb, var(--ink) 58%, transparent);
+}
+
+/* The blackout. Origin right, so the reveal opens left-to-right the way a line is
+   read, and the redaction closes back in from the right. Slight overhang on all
+   four sides so it reads as a marker stroke rather than a fitted box. */
+.redact-bar {
+  position: absolute;
+  inset: -2px -3px;
+  z-index: 3;
+  background: var(--ink);
+  transform: scaleX(0);
+  transform-origin: right center;
+}
+
+/* What the other team highlighted, and what the author also said. Both sit behind
+   the text rule, the way a highlighter does. --red is mixed 10% toward --ink
+   because plain --red measures 2.92:1 on light paper, under the 3:1 floor for a
+   graphic that carries meaning; the mix lands it at 3.45:1 and, because it moves
+   toward whatever --ink is, it stays clear of paper in the dark theme too. */
+.redact-mark,
+.redact-found {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  z-index: 1;
+}
+.redact-mark {
+  background: var(--accent);
+}
+.redact-found,
+.redact-swatch {
+  background: color-mix(in srgb, var(--red) 90%, var(--ink));
+}
+.redact-found {
+  transform: scaleX(1);
+  transform-origin: left center;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* animation-delay: inherit takes the per-row stagger set on .redact-line, so a
+     row's blackout and its flare stay locked to each other and to their distance
+     from the card. Equal durations keep every row on one period forever. */
+  .redact-bar,
+  .redact-found {
+    animation-delay: inherit;
+    animation-duration: 11s;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+    animation-fill-mode: both;
+  }
+  .redact-bar {
+    animation-name: redact-bar;
+  }
+  .redact-found {
+    animation-name: redact-found;
+  }
+}
+
+/* Closes in hard (ease-in), lifts slow (exponential ease-out). The reveal is the
+   moment worth watching, so it gets nearly three times the time and most of the
+   loop is spent holding on the finished state. */
+@keyframes redact-bar {
+  0%,
+  10% {
+    transform: scaleX(0);
+    animation-timing-function: cubic-bezier(0.7, 0, 0.84, 0);
+  }
+  22%,
+  34% {
+    transform: scaleX(1);
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  62%,
+  100% {
+    transform: scaleX(0);
+  }
+}
+
+/* Held back until the blackout has cleared, so the author's line arrives as an
+   answer to the reveal instead of riding in underneath it. */
+@keyframes redact-found {
+  0%,
+  8% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+  14%,
+  66% {
+    transform: scaleX(0);
+    opacity: 0;
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  80%,
+  100% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+}
+
 /* Theme Studio trigger: a red dot until it has been opened once, so the feature
    announces itself without taking any layout. */
 .theme-trigger[data-hint]::after {

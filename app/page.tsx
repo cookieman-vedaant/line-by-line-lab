@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import AuthForm from "@/components/AuthForm";
+import Redaction from "@/components/marketing/Redaction";
 import Scales from "@/components/marketing/Scales";
 import SourceField from "@/components/marketing/SourceField";
 import Verifier from "@/components/marketing/Verifier";
@@ -173,6 +174,7 @@ export default function Landing({ searchParams }: { searchParams: SearchParams }
       <TheRound />
       <SourceField />
       <Verifier />
+      <Redaction />
       <Toolkit />
       <Pricing />
       <FinalCta />
