@@ -18,8 +18,8 @@ type Mode = "signin" | "signup" | "reset";
 /**
  * Email + password sign-in / sign-up, plus a "forgot password" flow. Uses the
  * browser Supabase client, which sets the shared session cookie the server +
- * middleware read. On success it routes into the app (or the `next` path the
- * middleware wanted). "Reset" emails a recovery link that lands on
+ * proxy read. On success it routes into the app (or the `next` path the
+ * proxy wanted). "Reset" emails a recovery link that lands on
  * /auth/callback → /reset-password (see components/ResetPasswordForm).
  */
 export default function AuthForm({ next }: { next?: string }) {

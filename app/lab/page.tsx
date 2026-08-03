@@ -11,7 +11,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
  * The signed-in address in the header — the one part of this page that depends on
  * the request. Behind its own Suspense boundary so the rest of the Lab shell
  * prerenders instead of waiting on an auth round trip. Access itself is enforced
- * in middleware.ts, not here.
+ * in proxy.ts, not here.
  */
 async function SignedInAs() {
   const supabase = await createSupabaseServerClient();
@@ -30,7 +30,7 @@ async function SignedInAs() {
   );
 }
 
-// The app itself (Find Articles / Cut a Card / Coach). Gated by middleware.ts —
+// The app itself (Find Articles / Cut a Card / Coach). Gated by proxy.ts —
 // a logged-out visitor is redirected to "/" before this ever renders.
 export default function Lab() {
   return (

@@ -14,7 +14,7 @@ export type RequireUserResult =
   | { ok: false; response: NextResponse };
 
 /**
- * Gate an API route on a valid session. The middleware route-guard covers PAGE
+ * Gate an API route on a valid session. The proxy route-guard covers PAGE
  * routes only (its matcher skips `/api`), so each data route must check auth
  * itself — otherwise `/api/rounds` etc. would be an open door even though `/lab`
  * isn't. Returns the user + client, or a ready-to-return 401.

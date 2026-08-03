@@ -102,7 +102,7 @@ function HeroSlotFallback() {
 /**
  * Home page (route "/") — the marketing + sign-in surface. The marketing shell is
  * the same for everyone and prerenders; only <HeroSlot /> is request-scoped.
- * Route protection lives in middleware.ts.
+ * Route protection lives in proxy.ts.
  */
 export default function Landing({ searchParams }: { searchParams: SearchParams }) {
   return (
