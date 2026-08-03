@@ -2,9 +2,9 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import AuthForm from "@/components/AuthForm";
-import HeroScanner from "@/components/marketing/HeroScanner";
 import Scales from "@/components/marketing/Scales";
 import SourceField from "@/components/marketing/SourceField";
+import Verifier from "@/components/marketing/Verifier";
 import TheRound from "@/components/marketing/TheRound";
 import {
   FinalCta,
@@ -108,8 +108,7 @@ export default function Landing({ searchParams }: { searchParams: SearchParams }
   return (
     <main className="flex w-full flex-1 flex-col">
       {/* ---- HERO ---------------------------------------------------------- */}
-      <section className="hero-atmos relative isolate mx-auto w-full max-w-6xl overflow-hidden px-5 pb-10 pt-14 sm:pt-20">
-        <HeroScanner />
+      <section className="hero-atmos mx-auto w-full max-w-6xl overflow-hidden px-5 pb-10 pt-14 sm:pt-20">
         <div className="grid items-center gap-10 lg:grid-cols-[1.1fr_0.9fr]">
           {/* Pitch */}
           <div>
@@ -173,6 +172,7 @@ export default function Landing({ searchParams }: { searchParams: SearchParams }
       <Mission />
       <TheRound />
       <SourceField />
+      <Verifier />
       <Toolkit />
       <Pricing />
       <FinalCta />

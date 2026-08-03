@@ -501,6 +501,163 @@ body {
   opacity: clamp(0, calc(var(--load) * 5 - 4), 1);
 }
 
+/* ---- The Verifier (landing) --------------------------------------------- */
+/* A scan runs down the article and the card together, each card line locks onto
+   the source line it came from, and the sheet is stamped.
+
+   The RESTING state is the finished one: filled, linked, stamped. The animation
+   starts from empty and returns there. That ordering is deliberate — with the
+   base state set to empty, anyone with reduced motion (and so no animation)
+   would be left looking at a blank frame. */
+.verify-stage {
+  overflow: hidden;
+}
+
+.verify-bar {
+  position: relative;
+  display: block;
+  height: 10px;
+  background: color-mix(in srgb, var(--ink) 16%, transparent);
+}
+
+.verify-fill {
+  position: absolute;
+  inset: 0;
+  display: block;
+  background: var(--accent);
+  transform: scaleX(1);
+  transform-origin: left center;
+}
+
+.verify-link {
+  display: block;
+  height: 3px;
+  width: 26px;
+  background: var(--accent);
+  transform: scaleX(1);
+  transform-origin: left center;
+}
+
+/* Full height with the line drawn at its middle, so translateY percentages
+   resolve against the stage rather than a 2px element. */
+.verify-scan {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    transparent calc(50% - 1.5px),
+    var(--red) 50%,
+    transparent calc(50% + 1.5px)
+  );
+  opacity: 0;
+}
+
+.verify-stamp {
+  transform: rotate(-4deg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* animation-delay: inherit picks up the per-row delay set on .verify-row,
+     so one stagger value drives both sides of a row and its connector. */
+  .verify-fill,
+  .verify-link {
+    animation-delay: inherit;
+    animation-duration: 6s;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    animation-iteration-count: infinite;
+    animation-fill-mode: both;
+  }
+  .verify-fill {
+    animation-name: verify-fill;
+  }
+  .verify-link {
+    animation-name: verify-link;
+  }
+  .verify-scan {
+    animation: verify-scan 6s linear infinite both;
+  }
+  .verify-stamp {
+    animation: verify-stamp 6s linear infinite both;
+  }
+}
+
+@keyframes verify-fill {
+  0%,
+  6% {
+    transform: scaleX(0);
+  }
+  17%,
+  80% {
+    transform: scaleX(1);
+  }
+  90%,
+  100% {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes verify-link {
+  0%,
+  9% {
+    transform: scaleX(0);
+    opacity: 0;
+  }
+  19%,
+  80% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+  90%,
+  100% {
+    transform: scaleX(0);
+    opacity: 0;
+  }
+}
+
+@keyframes verify-scan {
+  0% {
+    transform: translateY(-52%);
+    opacity: 0;
+  }
+  7%,
+  46% {
+    opacity: 0.9;
+  }
+  56% {
+    transform: translateY(52%);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(52%);
+    opacity: 0;
+  }
+}
+
+/* The stamp lands: it compresses on contact and settles, the way a stamp does. */
+@keyframes verify-stamp {
+  0%,
+  56% {
+    opacity: 0;
+    transform: rotate(-4deg) scale(0.86);
+  }
+  62% {
+    opacity: 1;
+    transform: rotate(-4deg) scale(1.06);
+  }
+  68%,
+  86% {
+    opacity: 1;
+    transform: rotate(-4deg) scale(1);
+  }
+  94%,
+  100% {
+    opacity: 0;
+    transform: rotate(-4deg) scale(1);
+  }
+}
+
 /* Theme Studio trigger: a red dot until it has been opened once, so the feature
    announces itself without taking any layout. */
 .theme-trigger[data-hint]::after {
