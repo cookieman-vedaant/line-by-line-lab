@@ -93,8 +93,8 @@ export default function Scales() {
         </div>
 
         <div className="mt-4 flex items-start justify-between gap-6">
-          <p className="label-mono text-[11px] text-ink/55">the big program</p>
-          <p className="label-mono text-right text-[11px] text-ink/55">you, with the Lab</p>
+          <p className="label-mono text-[11px] text-ink/65">the big program</p>
+          <p className="label-mono text-right text-[11px] text-ink/65">you, with the Lab</p>
         </div>
       </Reveal>
     </section>

@@ -91,9 +91,14 @@ body {
   font-family: var(--app-display), ui-sans-serif, system-ui, sans-serif;
 }
 
-/* Per-theme background atmosphere (never a flat fill). */
+/* Per-theme background atmosphere (never a flat fill).
+   Scoped to Rostrum and to the no-attribute case only. This used to read
+   `:root body`, which matches every page including custom themes — and since
+   the custom-theme rules below override only `background-image`, the 22px tile
+   survived and chopped a gradient background into a grid of blocks. Each
+   [data-bg] style now owns the body background outright. */
 [data-theme="rostrum"] body,
-:root body {
+:root:not([data-theme]) body {
   background-image: radial-gradient(var(--dot) 1.4px, transparent 1.4px);
   background-size: 22px 22px;
   background-position: -11px -11px;
@@ -126,10 +131,14 @@ body {
   }
 }
 
-/* Smooth every color/shadow change — this is what makes a theme switch (and
-   general interaction) feel fluid instead of stiff. Buttons keep their own
-   snappier transition via higher specificity below. */
-body * {
+/* Smooth the theme switch itself, and ONLY that.
+   This used to be an unconditional `body *`, which put a transition on every
+   element in the document: the browser then tracks transitionable properties
+   for the whole tree on every style change, which is a permanent tax paid to
+   make one rare interaction look good. lib/theme.ts now flags the document
+   while a theme is being applied, so the cost lands during the switch and
+   nowhere else. */
+[data-theming] body * {
   transition:
     background-color 0.3s ease,
     border-color 0.3s ease,
@@ -274,8 +283,29 @@ body * {
     linear-gradient(90deg, color-mix(in srgb, var(--ink) 7%, transparent) 1px, transparent 1px);
   background-size: 46px 46px, 46px 46px;
 }
+/* A gradient theme is ONE cohesive field across the whole viewport, running
+   through both of the theme's colors. It lives on a fixed full-viewport layer
+   rather than the body's background-image so it can never tile, never restart,
+   and never depend on how tall the document happens to be.
+
+   The two stops are precomputed in lib/themeTokens.ts (--grad-1 / --grad-2),
+   tinted as far toward the accents as the theme's own text contrast allows. */
 [data-theme="custom"][data-bg="gradient"] body {
-  background-image: linear-gradient(160deg, color-mix(in srgb, var(--accent) 16%, var(--paper)), var(--paper) 62%);
+  background-image: none;
+}
+[data-theme="custom"][data-bg="gradient"] body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  /* Fallbacks cover themes saved to localStorage before --grad-* existed. */
+  background: linear-gradient(
+    155deg,
+    var(--grad-1, color-mix(in srgb, var(--accent) 20%, var(--paper))) 0%,
+    var(--grad-2, color-mix(in srgb, var(--accent-2) 20%, var(--paper))) 54%,
+    color-mix(in srgb, var(--grad-2, var(--accent-2)) 30%, var(--paper)) 100%
+  );
 }
 [data-theme="custom"][data-bg="solid"] body {
   background-image: none;
@@ -469,6 +499,276 @@ body * {
    payoff rather than as a line that was there the whole time. */
 .scales-level {
   opacity: clamp(0, calc(var(--load) * 5 - 4), 1);
+}
+
+/* ---- The Verifier (landing) --------------------------------------------- */
+/* A scan runs down the article and the card together, each card line locks onto
+   the source line it came from, and the sheet is stamped.
+
+   The RESTING state is the finished one: filled, linked, stamped. The animation
+   starts from empty and returns there. That ordering is deliberate — with the
+   base state set to empty, anyone with reduced motion (and so no animation)
+   would be left looking at a blank frame. */
+.verify-stage {
+  overflow: hidden;
+}
+
+.verify-bar {
+  position: relative;
+  display: block;
+  height: 10px;
+  background: color-mix(in srgb, var(--ink) 16%, transparent);
+}
+
+.verify-fill {
+  position: absolute;
+  inset: 0;
+  display: block;
+  background: var(--accent);
+  transform: scaleX(1);
+  transform-origin: left center;
+}
+
+.verify-link {
+  display: block;
+  height: 3px;
+  width: 26px;
+  background: var(--accent);
+  transform: scaleX(1);
+  transform-origin: left center;
+}
+
+/* Full height with the line drawn at its middle, so translateY percentages
+   resolve against the stage rather than a 2px element. */
+.verify-scan {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    transparent calc(50% - 1.5px),
+    var(--red) 50%,
+    transparent calc(50% + 1.5px)
+  );
+  opacity: 0;
+}
+
+.verify-stamp {
+  transform: rotate(-4deg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* animation-delay: inherit picks up the per-row delay set on .verify-row,
+     so one stagger value drives both sides of a row and its connector. */
+  .verify-fill,
+  .verify-link {
+    animation-delay: inherit;
+    animation-duration: 6s;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    animation-iteration-count: infinite;
+    animation-fill-mode: both;
+  }
+  .verify-fill {
+    animation-name: verify-fill;
+  }
+  .verify-link {
+    animation-name: verify-link;
+  }
+  .verify-scan {
+    animation: verify-scan 6s linear infinite both;
+  }
+  .verify-stamp {
+    animation: verify-stamp 6s linear infinite both;
+  }
+}
+
+@keyframes verify-fill {
+  0%,
+  6% {
+    transform: scaleX(0);
+  }
+  17%,
+  80% {
+    transform: scaleX(1);
+  }
+  90%,
+  100% {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes verify-link {
+  0%,
+  9% {
+    transform: scaleX(0);
+    opacity: 0;
+  }
+  19%,
+  80% {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+  90%,
+  100% {
+    transform: scaleX(0);
+    opacity: 0;
+  }
+}
+
+@keyframes verify-scan {
+  0% {
+    transform: translateY(-52%);
+    opacity: 0;
+  }
+  7%,
+  46% {
+    opacity: 0.9;
+  }
+  56% {
+    transform: translateY(52%);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(52%);
+    opacity: 0;
+  }
+}
+
+/* The stamp lands: it compresses on contact and settles, the way a stamp does. */
+@keyframes verify-stamp {
+  0%,
+  56% {
+    opacity: 0;
+    transform: rotate(-4deg) scale(0.86);
+  }
+  62% {
+    opacity: 1;
+    transform: rotate(-4deg) scale(1.06);
+  }
+  68%,
+  86% {
+    opacity: 1;
+    transform: rotate(-4deg) scale(1);
+  }
+  94%,
+  100% {
+    opacity: 0;
+    transform: rotate(-4deg) scale(1);
+  }
+}
+
+/* ---- The Cut (landing) --------------------------------------------------- */
+/* The page tears. Not a graphic sitting in a section — the sheet the whole site
+   is printed on comes apart edge to edge, and a second sheet shows through the
+   gap with its own printing on it.
+
+   The torn edge is one clip-path polygon generated in components/marketing/Tear.tsx:
+   a random-walk wander with fine fibre jitter and occasional pulled fibres, so it
+   reads as paper rather than as a zigzag. It is computed once at module scope from
+   a fixed seed, which means it is identical on every render and every reload and
+   costs nothing at runtime.
+
+   Two nested clips compose: .tear-run wipes left-to-right along the scroll (the
+   tear propagating), .tear-stock holds the torn shape. Nothing here runs per
+   frame in JavaScript and nothing listens to scroll.
+
+   Base state is FULLY TORN. Firefox has no animation-timeline and reduced motion
+   opts out, and in both cases what is left is the finished torn edge — a designed
+   graphic, not a blank strip. */
+.tear {
+  position: relative;
+  width: 100%;
+  height: 112px;
+  overflow: hidden;
+}
+
+.tear-run {
+  position: absolute;
+  inset: 0;
+  clip-path: inset(0 0 0 0);
+}
+
+/* The sheet underneath. The gradient is the shadow the torn edge above casts down
+   into the gap — without it the band reads as a flat stripe rather than a depth. */
+.tear-stock {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--ink) 52%, transparent) 0,
+      color-mix(in srgb, var(--ink) 12%, transparent) 10px,
+      transparent 22px
+    ),
+    var(--accent);
+}
+
+/* Printing on that lower sheet, glimpsed through the tear. --paper on --accent is
+   the pairing the buttons and the wordmark already use, so it tracks any theme. */
+.tear-print {
+  position: absolute;
+  top: 50px;
+  left: 0;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: 0.34em;
+  color: var(--paper);
+}
+
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .tear {
+      view-timeline-name: --tear;
+    }
+    .tear-run {
+      animation: tear-run linear both;
+      animation-timeline: --tear;
+      animation-range: cover 14% cover 54%;
+    }
+  }
+}
+
+/* Linear on purpose: the tear is scrubbed by the scroll, so the reader's own
+   scrolling supplies the easing. Anything else fights the input. */
+@keyframes tear-run {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+/* Theme Studio trigger: a red dot until it has been opened once, so the feature
+   announces itself without taking any layout. */
+.theme-trigger[data-hint]::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  height: 9px;
+  width: 9px;
+  border-radius: 999px;
+  background: var(--red);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .theme-trigger[data-hint]::after {
+    animation: theme-ping 2.2s ease-out infinite;
+  }
+}
+@keyframes theme-ping {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.55);
+    opacity: 0.5;
+  }
 }
 
 /* ---- The Round (landing) ------------------------------------------------ */

@@ -9,7 +9,7 @@ export const metadata: Metadata = {
  * Where a password-reset email link lands (directly, or after /auth/callback
  * establishes the recovery session). The form detects the recovery session on
  * the client and either lets the user set a new password or explains that the
- * link is invalid/expired. Not gated by middleware; the actual password change
+ * link is invalid/expired. Not gated by the proxy; the actual password change
  * (updateUser) only works with a real recovery session.
  */
 export default function ResetPasswordPage() {

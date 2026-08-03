@@ -4,6 +4,8 @@ import { Suspense } from "react";
 import AuthForm from "@/components/AuthForm";
 import Scales from "@/components/marketing/Scales";
 import SourceField from "@/components/marketing/SourceField";
+import Tear from "@/components/marketing/Tear";
+import Verifier from "@/components/marketing/Verifier";
 import TheRound from "@/components/marketing/TheRound";
 import {
   FinalCta,
@@ -101,7 +103,7 @@ function HeroSlotFallback() {
 /**
  * Home page (route "/") — the marketing + sign-in surface. The marketing shell is
  * the same for everyone and prerenders; only <HeroSlot /> is request-scoped.
- * Route protection lives in middleware.ts.
+ * Route protection lives in proxy.ts.
  */
 export default function Landing({ searchParams }: { searchParams: SearchParams }) {
   return (
@@ -167,10 +169,14 @@ export default function Landing({ searchParams }: { searchParams: SearchParams }
         </div>
       </section>
 
+      {/* The page comes apart here — full bleed, between the pitch and the argument. */}
+      <Tear />
+
       <Scales />
       <Mission />
       <TheRound />
       <SourceField />
+      <Verifier />
       <Toolkit />
       <Pricing />
       <FinalCta />

@@ -39,7 +39,7 @@ export function StatBar() {
           <dt className="font-display text-4xl font-extrabold tracking-tighter text-ink sm:text-5xl">
             {s.value}
           </dt>
-          <dd className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-ink/55">
+          <dd className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-ink/65">
             {s.label}
           </dd>
         </div>
@@ -213,7 +213,7 @@ export function Pricing() {
                   coming soon
                 </span>
               )}
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-ink/55">{tier.name}</p>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-ink/65">{tier.name}</p>
               <p className="mt-2 font-display text-4xl font-extrabold tracking-tight sm:text-5xl">
                 {tier.price}
               </p>

@@ -18,8 +18,8 @@ import { requestIsVerifiedHuman } from "@/lib/turnstile";
  *
  * All counters live in Redis (durable, cross-instance) with an in-memory
  * fallback, so the guard is best-effort and never breaks the app itself.
- * NOTE: every new /api route must call guardApi — there is no middleware
- * catch-all, so an unguarded route is an open door.
+ * NOTE: every new /api route must call guardApi — proxy.ts deliberately skips
+ * /api, so there is no catch-all and an unguarded route is an open door.
  */
 
 const DEFAULT_BODY_LIMIT = 256 * 1024; // 256 KB — plenty for JSON claims/prompts.
@@ -87,9 +87,9 @@ export interface GuardOptions {
   perDay?: number;
   /**
    * Require a signed-in Supabase session (401 if none). Defense in depth on top
-   * of the page middleware: the app's tools are only meant for logged-in users,
-   * so a direct unauthenticated API call is rejected even if the middleware
-   * route-gate were somehow bypassed. Default off.
+   * of the page proxy: the app's tools are only meant for logged-in users, so a
+   * direct unauthenticated API call is rejected even if the proxy route-gate
+   * were somehow bypassed. Default off.
    */
   requireAuth?: boolean;
 }
@@ -120,7 +120,7 @@ export async function guardApi(req: Request, opts: GuardOptions): Promise<NextRe
   }
 
   // Session gate (defense in depth). Rejects unauthenticated calls to app-only
-  // tools even if the page middleware were bypassed.
+  // tools even if the page proxy were bypassed.
   if (opts.requireAuth) {
     const auth = await requireUser();
     if (!auth.ok) return auth.response;
