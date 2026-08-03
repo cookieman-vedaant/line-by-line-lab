@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { verifyHuman } from "@/lib/apiClient";
 import { turnstileSiteKey } from "@/lib/humanGate";
+import { safeNext } from "@/lib/safeNext";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 const inputClasses =
@@ -19,8 +20,12 @@ type Mode = "signin" | "signup" | "reset";
  * Email + password sign-in / sign-up, plus a "forgot password" flow. Uses the
  * browser Supabase client, which sets the shared session cookie the server +
  * proxy read. On success it routes into the app (or the `next` path the
- * proxy wanted). "Reset" emails a recovery link that lands on
- * /auth/callback → /reset-password (see components/ResetPasswordForm).
+ * proxy wanted).
+ *
+ * Both email flows deliberately land on CLIENT pages — "reset" on
+ * /reset-password, signup confirmation on /auth/confirm. Supabase can deliver
+ * the credential in the URL fragment, which no server route handler can read;
+ * recovery learned this first and confirmation was still paying for it.
  */
 export default function AuthForm({ next }: { next?: string }) {
   const router = useRouter();
@@ -30,6 +35,11 @@ export default function AuthForm({ next }: { next?: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Shown once we know an unconfirmed account exists for this address. Survives a
+  // mode switch on purpose: the user is usually sent from signup to signin, and
+  // the offer to resend has to travel with them.
+  const [canResend, setCanResend] = useState(false);
+  const [resending, setResending] = useState(false);
 
   // Turnstile anti-brute-force gate (no-op when no site key is configured). A
   // fresh, single-use token is required for each sign-in / sign-up / reset
@@ -65,6 +75,31 @@ export default function AuthForm({ next }: { next?: string }) {
     setNotice(null);
   }
 
+  /**
+   * Send a fresh confirmation link. This is the recovery path that was missing:
+   * the old copy told users to "sign up again", which for an address that is
+   * already registered does nothing at all except mint a new password that
+   * Supabase silently discards.
+   */
+  async function onResend() {
+    setError(null);
+    setNotice(null);
+    if (!email.trim()) {
+      setError("Enter your email first, then resend.");
+      return;
+    }
+    setResending(true);
+    const supabase = createSupabaseBrowserClient();
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email: email.trim(),
+      options: { emailRedirectTo: `${window.location.origin}/auth/confirm?next=%2Flab` },
+    });
+    setResending(false);
+    if (error) return setError(error.message);
+    setNotice("New confirmation link sent. Open it on this device if you can.");
+  }
+
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
@@ -88,7 +123,7 @@ export default function AuthForm({ next }: { next?: string }) {
     }
 
     const supabase = createSupabaseBrowserClient();
-    const dest = next && next.startsWith("/") ? next : "/lab";
+    const dest = safeNext(next);
     try {
       if (mode === "reset") {
         const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
@@ -109,22 +144,50 @@ export default function AuthForm({ next }: { next?: string }) {
         const { data, error } = await supabase.auth.signUp({
           email: email.trim(),
           password,
-          // Send the confirmation link back to THIS origin's callback (prod when
-          // signing up on prod). Requires the origin to be in Supabase's allowed
-          // Redirect URLs; otherwise Supabase falls back to the Site URL.
-          options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=%2Flab` },
+          // Land on the CLIENT confirm page, not the server callback: one of the
+          // shapes Supabase sends the credential in lives in the URL fragment,
+          // which a route handler can never see. Requires this origin to be in
+          // Supabase's Redirect URLs, or it falls back to the Site URL.
+          options: { emailRedirectTo: `${window.location.origin}/auth/confirm?next=%2Flab` },
         });
         if (error) return setError(error.message);
-        if (!data.session) {
-          setNotice("Account created. Check your email to confirm, then sign in.");
+
+        // With confirmations on, signing up with an address that ALREADY exists
+        // returns a success carrying an obfuscated user — Supabase does that so
+        // an attacker can't enumerate accounts. It does not set the password.
+        // Reporting it as "account created" is what stranded people: told to
+        // "sign up again" after a failed confirmation, they'd re-register with a
+        // new password that was never stored, and every subsequent sign-in came
+        // back "Invalid login credentials" against an account that plainly
+        // existed in the dashboard.
+        if (data.user && (data.user.identities?.length ?? 0) === 0) {
           setMode("signin");
+          setCanResend(true);
+          setNotice(
+            "That email is already registered. Sign in below with your original password — or resend the confirmation link if you never confirmed it.",
+          );
+          return;
+        }
+
+        if (!data.session) {
+          setMode("signin");
+          setCanResend(true);
+          setNotice("Account created. Check your email for the confirmation link, then sign in.");
           return;
         }
         router.push(dest);
         router.refresh();
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-        if (error) return setError(error.message);
+        if (error) {
+          // An unconfirmed account is a fixable state, not a bad password. Say so
+          // and offer the fix, rather than leaving the user to guess.
+          if (error.code === "email_not_confirmed") {
+            setCanResend(true);
+            return setError("This email hasn't been confirmed yet — resend the link below.");
+          }
+          return setError(error.message);
+        }
         router.push(dest);
         router.refresh();
       }
@@ -216,6 +279,17 @@ export default function AuthForm({ next }: { next?: string }) {
           <p role="status" className="frame bg-yellow px-3 py-2 text-xs font-medium text-black">
             {notice}
           </p>
+        )}
+
+        {canResend && mode !== "reset" && (
+          <button
+            type="button"
+            onClick={onResend}
+            disabled={resending}
+            className="label-mono self-start text-[11px] text-accent hover:underline disabled:opacity-60"
+          >
+            {resending ? "Sending…" : "Resend confirmation email"}
+          </button>
         )}
 
         {siteKey && (

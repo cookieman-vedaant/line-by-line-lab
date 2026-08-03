@@ -10,11 +10,23 @@ function isProtectedPath(pathname: string): boolean {
  * Does this request carry a Supabase session at all? @supabase/ssr stores the
  * session in cookies named `sb-<project-ref>-auth-token`, chunked as `.0`, `.1`
  * when it exceeds the 4KB cookie limit — so match on the stem, not an exact name.
+ *
+ * The `-code-verifier` exclusion is load-bearing. Mid-signup the browser holds
+ * `sb-<ref>-auth-token-code-verifier`, which satisfies both of the other tests
+ * while representing the *absence* of a session — it is the half of a PKCE
+ * exchange that has not happened yet. Counting it as a session sent this
+ * function's callers down the full getUser() path during email confirmation,
+ * which is exactly when nothing should be touching these cookies.
  */
 function hasSessionCookie(request: NextRequest): boolean {
   return request.cookies
     .getAll()
-    .some((c) => c.name.startsWith("sb-") && c.name.includes("auth-token"));
+    .some(
+      (c) =>
+        c.name.startsWith("sb-") &&
+        c.name.includes("auth-token") &&
+        !c.name.endsWith("-code-verifier"),
+    );
 }
 
 /**
