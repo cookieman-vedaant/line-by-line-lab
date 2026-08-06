@@ -1,6 +1,15 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+/**
+ * How long to wait for session revalidation before giving up for THIS request.
+ * This middleware runs on every page load, so an unbounded wait here hangs the
+ * whole app when the database is briefly slow — see the note at the getUser()
+ * call in updateSession. 3s is far above a healthy call (~100ms) but well below
+ * the point where a user is left staring at a frozen page.
+ */
+const AUTH_REVALIDATE_TIMEOUT_MS = 3000;
+
 /** App routes that require a signed-in user. Extend this list as the app grows. */
 function isProtectedPath(pathname: string): boolean {
   return pathname === "/lab" || pathname.startsWith("/lab/");
@@ -73,9 +82,23 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
 
   // IMPORTANT: getUser() revalidates the token with Supabase (getSession alone
   // trusts the cookie). Do not run code between creating the client and this call.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  //
+  // But BOUND it. This middleware runs on every page request, so an unbounded
+  // getUser() against a briefly-overloaded database would hang the ENTIRE app —
+  // the marketing home and the sign-in page included — until it finally answered.
+  // (That is exactly what took the app down during a heavy backfill.) If
+  // revalidation doesn't return within AUTH_REVALIDATE_TIMEOUT_MS, we stop waiting
+  // and treat the session as unverified for THIS request only. The degradation is
+  // deliberately safe: a protected route then redirects to sign-in (fail closed),
+  // a public route just renders, and the refresh happens on the next request. A
+  // slow DB becomes "signed out for a moment," never "nothing loads."
+  const user = await Promise.race([
+    supabase.auth
+      .getUser()
+      .then((r) => r.data.user)
+      .catch(() => null),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), AUTH_REVALIDATE_TIMEOUT_MS)),
+  ]);
 
   if (isProtectedPath(request.nextUrl.pathname) && !user) {
     const url = request.nextUrl.clone();

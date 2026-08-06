@@ -567,6 +567,27 @@ export async function ingestAll(): Promise<IngestSummary[]> {
 const REFRESH_ARCHIVES_PER_CASELIST = 4;
 
 /**
+ * Divisions too heavy to refresh against the LIVE instance. College-policy
+ * (`ndtceda`) cards are enormous, so even a few archives of writes spike the
+ * shared DB's disk IO and can slow the live app — sign-in and search included. A
+ * 12.5h backfill of `ndtceda25` added only ~3k cards yet cooked the instance,
+ * while lighter divisions filled cleanly. So the weekly cron SKIPS these; heavy
+ * divisions are backfilled out-of-band on a quiet (or bigger) instance instead.
+ * Override with WIKI_REFRESH_SKIP_DIVISIONS (comma-separated slug prefixes; empty
+ * string re-includes everything).
+ */
+const HEAVY_REFRESH_DIVISIONS = (process.env.WIKI_REFRESH_SKIP_DIVISIONS ?? "ndtceda")
+  .split(",")
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
+
+/** A caselist whose division is too heavy to refresh live (e.g. `ndtceda26`). */
+export function isHeavyRefreshCaselist(slug: string): boolean {
+  const s = slug.toLowerCase();
+  return HEAVY_REFRESH_DIVISIONS.some((d) => s.startsWith(d));
+}
+
+/**
  * Refresh only the CURRENT season's caselists, newest archives first.
  *
  * Past seasons are frozen — a 2024 wiki never gains new archives — so the full
@@ -580,7 +601,9 @@ export async function ingestActiveSeason(): Promise<IngestSummary[]> {
   const season = currentSeasonYear();
   const slugs = (await ingestableCaselists(token)).filter((slug) => {
     const y = yearFromSlug(slug);
-    return y !== null && y >= season;
+    // Current season only, and never a heavy division (college policy) — those
+    // must not run against the live instance. See HEAVY_REFRESH_DIVISIONS.
+    return y !== null && y >= season && !isHeavyRefreshCaselist(slug);
   });
   const summaries: IngestSummary[] = [];
   for (const slug of slugs) {
