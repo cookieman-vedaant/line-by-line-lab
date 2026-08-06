@@ -327,3 +327,47 @@ export interface RehighlightResult {
   sourceUrl?: string;
   notice?: string;
 }
+
+/* ------------------------------------------------------------------------- */
+/* Wiki mining (opencaselist) — search our own index of disclosed cards       */
+/* ------------------------------------------------------------------------- */
+
+/**
+ * What `/api/wiki/search` accepts.
+ *
+ * Just a claim — no caselist and no year. opencaselist has no whole-wiki search
+ * (its own site searches one caselist at a time), so we ingest the whole wiki
+ * into our own index and search that. The debater describes the argument they
+ * want; we return matching cards from everywhere at once.
+ */
+export interface WikiSearchRequest {
+  claim: string;
+}
+
+/**
+ * One search result: a ready-to-use card plus where it came from.
+ *
+ * `card` is an ordinary `Card` — the same shape the Card Cutter produces — read
+ * from the disclosed Word file with the debater's own emphasis intact, so it
+ * renders, edits and exports through the machinery that already exists. Nothing
+ * in it is generated.
+ */
+export interface WikiCardResult {
+  card: Card;
+  caselist: string | null;
+  year: number | null;
+  school: string | null;
+  team: string | null;
+  /** Link back to the disclosure on opencaselist. Attribution is never optional. */
+  sourceUrl: string | null;
+}
+
+/**
+ * What `/api/wiki/search` returns. `query` is the normalized string we actually
+ * searched for — shown to the user because it can differ from what they typed.
+ */
+export interface WikiSearchResult {
+  query: string;
+  cards: WikiCardResult[];
+  notice?: string;
+}

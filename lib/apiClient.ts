@@ -10,6 +10,8 @@ import type {
   Round,
   SearchParams,
   ThemeSpec,
+  WikiSearchRequest,
+  WikiSearchResult,
 } from "@/types";
 
 /** Browser-side helpers for the two API routes; normalize outcomes for the UI. */
@@ -228,6 +230,28 @@ export async function requestRehighlight(req: RehighlightRequest): Promise<Rehig
         ok: false,
         error: data.error ?? "Re-highlight failed. Try another card or paste the article URL.",
       };
+    }
+    return { ok: true, result: data.result };
+  } catch {
+    return { ok: false, error: "Could not reach the server. Is it running?" };
+  }
+}
+
+export type WikiSearchOutcome =
+  | { ok: true; result: WikiSearchResult }
+  | { ok: false; error: string };
+
+/** Search our indexed copy of the wiki for disclosed cards matching a claim. */
+export async function requestWikiSearch(req: WikiSearchRequest): Promise<WikiSearchOutcome> {
+  try {
+    const res = await fetch("/api/wiki/search", {
+      method: "POST",
+      headers: apiHeaders(),
+      body: JSON.stringify(req),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.result) {
+      return { ok: false, error: data.error ?? "That search didn't go through. Try again." };
     }
     return { ok: true, result: data.result };
   } catch {

@@ -62,6 +62,25 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  /* Lets a second, throwaway server (e.g. the one-time wiki backfill) use its own
+     build output dir so it never fights the main dev server's `.next`. Unset in
+     normal use, so the default `.next` is untouched. */
+  ...(process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : {}),
+
+  /* DEV ONLY (ignored in production builds). Next blocks cross-origin requests to
+     dev-only assets/endpoints, so opening the dev server from a phone on the same
+     Wi-Fi (http://<LAN-IP>:3000) fails on /_next/* and HMR unless that origin is
+     listed here. Covers the whole home subnet plus quick tunnels, so a DHCP lease
+     change doesn't break it. Add your own subnet if it differs. */
+  allowedDevOrigins: [
+    "192.168.50.*",
+    "192.168.1.*",
+    "192.168.0.*",
+    "10.*.*.*",
+    "*.trycloudflare.com",
+    "*.ngrok-free.app",
+  ],
+
   /* Partial Prerendering. The landing page is ~95% identical for every visitor;
      only the hero's sign-in box depends on the request. With this on, Next
      prerenders the static shell and streams just that slot, so marketing traffic

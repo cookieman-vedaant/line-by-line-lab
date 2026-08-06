@@ -1,24 +1,22 @@
 import Link from "next/link";
 import Reveal from "@/components/marketing/Reveal";
 import {
-  CAPABILITY_STATS,
+  capabilityStats,
   PRICING,
   SITE,
   type Stat,
   TOOLS,
   USAGE_STATS,
 } from "@/lib/siteContent";
+import { getIndexedCardCount } from "@/services/wikiStats";
 
 /** Red diamond — the site's recurring section marker. */
 function Diamond() {
   return <span aria-hidden className="inline-block h-2.5 w-2.5 rotate-45 bg-red" />;
 }
 
-/**
- * Accomplishments strip. Real usage counts (lib/siteContent.ts) show first when
- * set, then the always-true capability stats — capped at four for a clean row.
- */
-export function StatBar() {
+/** Build the four-stat row from a live indexed-card count (null when unknown). */
+function statsFor(indexedCards: number | null): Stat[] {
   const usage: Stat[] = [];
   if (USAGE_STATS.cardsCut != null)
     usage.push({ value: `${USAGE_STATS.cardsCut.toLocaleString()}+`, label: "cards cut" });
@@ -29,9 +27,11 @@ export function StatBar() {
     });
   if (USAGE_STATS.searchesRun != null)
     usage.push({ value: `${USAGE_STATS.searchesRun.toLocaleString()}+`, label: "searches run" });
+  return [...usage, ...capabilityStats(indexedCards)].slice(0, 4);
+}
 
-  const stats = [...usage, ...CAPABILITY_STATS].slice(0, 4);
-
+/** The rendered stat grid — shared by the live bar and its instant fallback. */
+function StatGrid({ stats }: { stats: Stat[] }) {
   return (
     <dl className="grid grid-cols-2 divide-y divide-ink/10 sm:grid-cols-4 sm:divide-y-0">
       {stats.map((s) => (
@@ -46,6 +46,27 @@ export function StatBar() {
       ))}
     </dl>
   );
+}
+
+/**
+ * Accomplishments strip. Real usage counts (lib/siteContent.ts) show first when
+ * set, then the always-true capability stats — capped at four for a clean row.
+ *
+ * The indexed-card count is read live from the database so the figure can't
+ * drift from reality as ingestion runs. That read MUST NOT block the page shell:
+ * the page wraps this in <Suspense fallback={<StatBarFallback/>}>, so the static
+ * row paints instantly and the live count streams in. (Before, this awaited the
+ * DB read with no boundary, so a cold or loaded query stalled the whole landing
+ * page for seconds.)
+ */
+export async function StatBar() {
+  const indexedCards = await getIndexedCardCount();
+  return <StatGrid stats={statsFor(indexedCards)} />;
+}
+
+/** Instant, DB-free stand-in for the Suspense fallback — same row, static count. */
+export function StatBarFallback() {
+  return <StatGrid stats={statsFor(null)} />;
 }
 
 /** Compact "what's inside" overview — the tool names at a glance. */
@@ -164,11 +185,11 @@ export function Toolkit() {
           id="toolkit-heading"
           className="max-w-3xl font-display text-4xl font-extrabold leading-[0.95] tracking-tight sm:text-6xl"
         >
-          Six tools. <span className="text-accent">One workflow.</span>
+          Seven tools. <span className="text-accent">One workflow.</span>
         </h2>
         <p className="mt-5 max-w-xl text-lg font-medium text-ink/70">
-          Everything a round demands: research, cards, opponent prep, coaching, and your own record,
-          in one workspace.
+          Everything a round demands: research, disclosed prep, cards, opponent prep, coaching, and
+          your own record, in one workspace.
         </p>
       </Reveal>
 

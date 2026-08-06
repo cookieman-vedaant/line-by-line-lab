@@ -18,6 +18,8 @@ import { initBotId } from "botid/client/core";
  *    positive there costs a customer rather than a few tokens.
  *  - /api/feedback — auth-gated, tightly rate-limited, and not AI-backed. Making
  *    it harder to report a bug is a bad trade.
+ *  (/api/wiki/search IS protected: it's an authed database search that a bot
+ *    could otherwise scrape in bulk.)
  */
 initBotId({
   protect: [
@@ -28,5 +30,6 @@ initBotId({
     { path: "/api/theme", method: "POST" },
     { path: "/api/pdf", method: "POST" },
     { path: "/api/profile", method: "POST" },
+    { path: "/api/wiki/search", method: "POST" },
   ],
 });

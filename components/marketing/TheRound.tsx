@@ -2,7 +2,7 @@ import Reveal from "@/components/marketing/Reveal";
 import { TOOLS } from "@/lib/siteContent";
 
 /**
- * The Round — the five stages of prep, scrubbed by scroll position. On a desktop
+ * The Round — the six stages of prep, scrubbed by scroll position. On a desktop
  * viewport that supports scroll-driven animations the stage pins, each stage
  * cross-fades as you scroll through it, and a playhead rides the rail; everywhere
  * else the same five panels read as a plain vertical list. All of the motion
@@ -19,14 +19,16 @@ import { TOOLS } from "@/lib/siteContent";
  * are the same ones the Toolkit makes.
  */
 
-/** The workflow loop: the five tools a round actually passes through. */
-const STAGES = TOOLS.slice(0, 5);
+/** The workflow loop: the six tools a round actually passes through.
+    Theme Studio is the seventh tool but isn't part of the prep loop. */
+const STAGES = TOOLS.slice(0, 6);
 
-const RAIL_LABELS = ["Find", "Cut", "Re-Highlight", "Coach", "Record"];
+const RAIL_LABELS = ["Find", "Wiki", "Cut", "Re-Highlight", "Coach", "Record"];
 
 /** What each stage hands to the next. This is the argument for one workspace. */
 const HANDOFF = [
   "Send any result straight into the Cutter.",
+  "A disclosed cite goes to the Cutter like any other source.",
   "The cut card carries its cite wherever it goes next.",
   "The contradiction report drops into your block.",
   "Blocks and cards come back ready to read.",
@@ -52,9 +54,33 @@ function Artifact({ stage }: { stage: number }) {
     );
   }
 
-  // 02 Cut and 03 Re-Highlight — the same document, marked two different ways.
-  if (stage === 1 || stage === 2) {
-    const undercut = stage === 2;
+  // 02 Wiki — disclosed files from other schools, each with the matching line lit.
+  if (stage === 1) {
+    return (
+      <div className="frame shadow-hard bg-paper p-4">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className={i > 0 ? "divide-t mt-3 pt-3" : ""}>
+            {/* who disclosed it: school, then team */}
+            <div className="flex items-center gap-2">
+              <span aria-hidden className="h-2 w-2 shrink-0 rotate-45 bg-[var(--stage)]" />
+              <div className="h-1.5 w-1/3 bg-ink/45" />
+              <div className="h-1.5 w-1/5 bg-ink/25" />
+            </div>
+            {/* the matched line inside the file: the hit is the lit run */}
+            <div className="mt-2 flex items-center gap-1">
+              <div className="h-2 flex-1 bg-ink/20" />
+              <div className="h-2 w-2/5 bg-[var(--stage)]" />
+              <div className="h-2 w-1/6 bg-ink/20" />
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // 03 Cut and 04 Re-Highlight — the same document, marked two different ways.
+  if (stage === 2 || stage === 3) {
+    const undercut = stage === 3;
     return (
       <div className="frame shadow-hard bg-paper p-4">
         <div className="h-3 w-4/5 bg-ink" />
@@ -87,8 +113,8 @@ function Artifact({ stage }: { stage: number }) {
     );
   }
 
-  // 04 Coach — a case going in, a block of cut-card answers coming back.
-  if (stage === 3) {
+  // 05 Coach — a case going in, a block of cut-card answers coming back.
+  if (stage === 4) {
     return (
       <div className="flex flex-col gap-2.5">
         <div className="frame w-4/5 bg-paper p-3">
@@ -108,7 +134,7 @@ function Artifact({ stage }: { stage: number }) {
     );
   }
 
-  // 05 Record — the round log the Coach reads back.
+  // 06 Record — the round log the Coach reads back.
   return (
     <div className="frame shadow-hard bg-paper">
       <div className="divide-b grid grid-cols-4 gap-3 p-3">
@@ -153,9 +179,9 @@ export default function TheRound() {
       <div className="round-track">
         <div className="round-stage mx-auto w-full max-w-5xl px-5 pb-20 sm:pb-28">
           {/* Scroll rail. Hidden unless the stage is actually pinned and scrubbing.
-              No column gap: each segment is exactly a fifth, which is what lets the
+              No column gap: each segment is exactly a sixth, which is what lets the
               playhead land dead centre on each one. */}
-          <ol className="round-rail relative mt-12 grid-cols-5" aria-hidden>
+          <ol className="round-rail relative mt-12 grid-cols-6" aria-hidden>
             {STAGES.map((t, i) => (
               <li key={t.name} className="round-seg pr-3">
                 <p className="round-seg-label label-mono flex items-center gap-1.5 text-[10px] text-ink">

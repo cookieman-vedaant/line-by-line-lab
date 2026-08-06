@@ -2,17 +2,20 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import AuthForm from "@/components/AuthForm";
+import CardCut from "@/components/marketing/CardCut";
 import Scales from "@/components/marketing/Scales";
 import SourceField from "@/components/marketing/SourceField";
 import Tear from "@/components/marketing/Tear";
 import Verifier from "@/components/marketing/Verifier";
 import TheRound from "@/components/marketing/TheRound";
+import { Wire, WireSkeleton } from "@/components/marketing/Wire";
 import {
   FinalCta,
   LandingFooter,
   Mission,
   Pricing,
   StatBar,
+  StatBarFallback,
   Toolkit,
   ToolStrip,
 } from "@/components/marketing/LandingSections";
@@ -163,16 +166,26 @@ export default function Landing({ searchParams }: { searchParams: SearchParams }
           </div>
         </div>
 
-        {/* Accomplishments strip */}
+        {/* Accomplishments strip. Behind Suspense so the live indexed-card count
+            read never blocks the page shell — the static row paints instantly. */}
         <div className="reveal reveal-4 mt-16 sm:mt-20">
-          <StatBar />
+          <Suspense fallback={<StatBarFallback />}>
+            <StatBar />
+          </Suspense>
         </div>
       </section>
+
+      {/* Real disclosed cards streaming past — proof the index is real, not a claim.
+          Behind Suspense so the ~hourly sample query never blocks the page shell. */}
+      <Suspense fallback={<WireSkeleton />}>
+        <Wire />
+      </Suspense>
 
       {/* The page comes apart here — full bleed, between the pitch and the argument. */}
       <Tear />
 
       <Scales />
+      <CardCut />
       <Mission />
       <TheRound />
       <SourceField />

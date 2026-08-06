@@ -11,9 +11,14 @@ export const metadata: Metadata = {
 /*
  * TDPSA-structured privacy notice. The disclosures below describe the app's ACTUAL
  * data practices (read from the codebase), so the representations are accurate.
- * TODO(before launch): have counsel review, especially the Minors section — your
- * users are high-schoolers, which implicates COPPA + the Texas SCOPE Act (HB 18)
- * beyond the TDPSA.
+ * TODO(before launch): have counsel review, especially:
+ *   - the Minors section — your users are high-schoolers, which implicates COPPA +
+ *     the Texas SCOPE Act (HB 18) beyond the TDPSA; and
+ *   - the "Content from the opencaselist wiki" section — indexing disclosed cards
+ *     into our own DB is a separate legal question (opencaselist's ToS on bulk
+ *     copying, copyright of the quoted source material, and processing non-users'
+ *     personal data i.e. school/team labels). Disclosure + takedown here is
+ *     necessary but not by itself a legal clearance.
  */
 
 const PROCESSORS: { name: string; purpose: string; data: string }[] = [
@@ -163,6 +168,7 @@ export default function PrivacyPolicy() {
               ["retention", "Data retention"],
               ["security", "Security"],
               ["location", "International transfers"],
+              ["wiki-content", "Content from the wiki"],
               ["changes", "Changes"],
               ["contact", "Contact us"],
             ] as const
@@ -478,7 +484,46 @@ export default function PrivacyPolicy() {
         safeguards for any specific transfer.
       </P>
 
-      <H2 id="changes" n="12">
+      <H2 id="wiki-content" n="12">
+        Content from the opencaselist wiki
+      </H2>
+      <P>
+        Line by Line Lab includes a wiki search that lets you find debate evidence
+        (&quot;cards&quot;) disclosed on <strong>opencaselist.com</strong> — the community wiki where
+        debaters openly publish the cards and cases they read in rounds. So that you can search
+        across it instantly, we index that <strong>already-public</strong> content into our own
+        database rather than querying opencaselist for every search.
+      </P>
+      <Bullets
+        items={[
+          <>
+            <strong>What we store:</strong> the card&apos;s text (the author&apos;s real, verbatim
+            published words), its tag and citation, and the caselist, school, and team it was
+            disclosed under. Every result links back to its source on opencaselist.
+          </>,
+          <>
+            <strong>Other people&apos;s data:</strong> because disclosure is attributed, this can
+            include labels (school and team, often debaters&apos; initials) identifying the students
+            who disclosed it. That information is already public on opencaselist; we store it only to
+            attribute the source and help you find prep, and we do <strong>not</strong> use it to
+            build profiles of those debaters or contact them.
+          </>,
+          <>
+            <strong>We never alter evidence:</strong> cards are the author&apos;s exact disclosed
+            words. Nothing is paraphrased, summarized, or generated.
+          </>,
+          <>
+            <strong>Takedown:</strong> if you disclosed content on opencaselist and want it removed
+            from our index, email{" "}
+            <a href={`mailto:${SITE.contactEmail}`} className="text-accent hover:underline">
+              {SITE.contactEmail}
+            </a>{" "}
+            and we will remove it promptly.
+          </>,
+        ]}
+      />
+
+      <H2 id="changes" n="13">
         Changes to this policy
       </H2>
       <P>
@@ -486,7 +531,7 @@ export default function PrivacyPolicy() {
         reflects the current version, and we will surface material changes in the app.
       </P>
 
-      <H2 id="contact" n="13">
+      <H2 id="contact" n="14">
         Contact us
       </H2>
       <P>

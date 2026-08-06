@@ -142,10 +142,11 @@ body {
   transition:
     background-color 0.3s ease,
     border-color 0.3s ease,
-    color 0.3s ease,
-    box-shadow 0.3s ease,
-    fill 0.3s ease;
+    color 0.3s ease;
 }
+/* Deliberately NOT transitioning box-shadow/fill here: animating box-shadow on
+   every element forces a full repaint per frame across the whole visible tree,
+   which is the bulk of the theme-switch jank. Colors cross-fade; shadows snap. */
 
 /* ---- Structural building blocks (token-driven, so they retheme) ---------- */
 
@@ -435,13 +436,142 @@ body {
   }
 }
 
+/* ---- The Wire (landing) ------------------------------------------------- */
+/* A press-service ticker of REAL disclosed card tags streaming edge to edge —
+   the "X,000+ cards" figure made tangible. One authored motion: a pure-CSS
+   marquee (no JS, no scroll listener) that pauses on hover/focus. The track is
+   the item list duplicated, so translateX(-50%) shifts by exactly one copy and
+   loops with no seam. Colors are all tokens, so the stamp inverts correctly
+   between Bold (dark stamp) and Cut (light stamp). Reduced motion freezes it
+   into a static, readable strip — the content is real either way. */
+.wire {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  min-height: 2.75rem; /* holds the band's height while the skeleton streams */
+  border-top: var(--bw) solid var(--stroke);
+  border-bottom: var(--bw) solid var(--stroke);
+  background: var(--paper-2);
+  overflow: hidden;
+}
+.wire-stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  padding: 0 0.9rem;
+  background: var(--ink);
+  color: var(--paper);
+  border-right: var(--bw) solid var(--stroke);
+  font-family: var(--app-mono), ui-monospace, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.wire-diamond {
+  height: 8px;
+  width: 8px;
+  transform: rotate(45deg);
+  background: var(--red);
+}
+/* An accent chip (paper-on-accent, the site's proven pairing) so it reads on the
+   stamp in either theme, where a colored text fill would fail contrast. */
+.wire-count {
+  padding: 0.14rem 0.42rem;
+  background: var(--accent);
+  color: var(--paper);
+  letter-spacing: 0.06em;
+}
+.wire-viewport {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 5%, #000 92%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 5%, #000 92%, transparent 100%);
+}
+.wire-track {
+  display: flex;
+  align-items: center;
+  width: max-content;
+  padding: 0.55rem 0;
+  white-space: nowrap;
+  will-change: transform;
+  animation: wire-scroll 80s linear infinite;
+}
+.wire:hover .wire-track,
+.wire:focus-within .wire-track {
+  animation-play-state: paused;
+}
+.wire-item {
+  display: inline-flex;
+  align-items: center;
+}
+.wire-div {
+  flex-shrink: 0;
+  padding: 0.16rem 0.5rem;
+  background: var(--accent);
+  color: var(--paper);
+  font-family: var(--app-mono), ui-monospace, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  font-weight: 700;
+}
+.wire-tag {
+  margin-left: 0.75rem;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+.wire-sep {
+  height: 7px;
+  width: 7px;
+  margin: 0 1.15rem;
+  transform: rotate(45deg);
+  background: var(--red);
+}
+.wire-loading {
+  padding-left: 1rem;
+  font-family: var(--app-mono), ui-monospace, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--ink) 55%, transparent);
+}
+@keyframes wire-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wire-track {
+    animation: none;
+    transform: none;
+  }
+}
+
 /* ---- The Scales (landing) ----------------------------------------------- */
-/* One registered property drives the whole apparatus: 0 is the prep gap, 1 is
-   balanced. The beam angle, the counter-rotation that keeps each load upright,
-   the tool chips dropping in one at a time, and the accent level line are all
-   derived from it, so no two parts can drift out of sync. With motion reduced
-   --load stays at its initial 1 and the scales render level and static. */
+/* Two registered properties drive the whole apparatus. --load (0 = prep gap,
+   1 = balanced) is the beam; --load-lag trails it by a beat and drives the pans,
+   so they lean against the swing (inertia) and settle a moment AFTER the beam —
+   the follow-through that makes the balance read as weight, not a slideshow.
+   Beam angle, upright counter-rotation, chip drops, and the level line are all
+   derived from these two, so nothing can drift out of sync. With motion reduced
+   both stay at 1 and the scales render level and static. */
 @property --load {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+@property --load-lag {
   syntax: "<number>";
   inherits: true;
   initial-value: 1;
@@ -449,32 +579,76 @@ body {
 
 .scales {
   --load: 1;
+  --load-lag: 1;
   --tilt: calc((1 - var(--load)) * -7deg);
+  --tilt-lag: calc((1 - var(--load-lag)) * -7deg);
 }
 
 @media (prefers-reduced-motion: no-preference) {
   .scales {
-    animation: scales-balance 9s infinite;
+    /* Beam springs to level; the pans trail it on --load-lag. Both loop on 8s. */
+    animation:
+      scales-balance 8s infinite,
+      scales-balance-lag 8s infinite;
   }
-  .scales-beam {
+  .scales-beam,
+  .scales-upright {
     will-change: transform;
   }
 }
 
+/* The beam. A DAMPED SPRING (generated from a real spring solver, not a lone
+   cubic-bezier bounce): it swings up, overshoots level to ~+0.9deg, and settles
+   with a decaying wobble instead of a single canned bounce. */
 @keyframes scales-balance {
-  /* Overshoot on the way to level: the beam passes the horizon and settles. */
   0%,
-  8% {
+  6% {
     --load: 0;
-    animation-timing-function: cubic-bezier(0.32, 1.45, 0.45, 1);
+    animation-timing-function: linear(
+      0, 0.0244, 0.089, 0.1818, 0.2921, 0.4108, 0.5305, 0.6453, 0.751, 0.8447,
+      0.9246, 0.9902, 1.0415, 1.0793, 1.105, 1.12, 1.126, 1.1248, 1.118, 1.1072,
+      1.0938, 1.079, 1.0638, 1.0491, 1.0353, 1.023, 1.0124, 1.0035, 0.9965,
+      0.9912, 0.9876, 0.9853, 0.9842, 0.9841, 0.9848, 0.986, 0.9876, 0.9894,
+      0.9914, 0.9933, 0.995, 0.9966, 0.9981, 0.9992, 1.0002, 1.0009, 1.0015, 1
+    );
   }
-  62%,
-  86% {
+  28% {
     --load: 1;
-    animation-timing-function: cubic-bezier(0.65, 0, 0.75, 0.35);
+  }
+  83% {
+    --load: 1;
+    animation-timing-function: cubic-bezier(0.5, 0, 0.78, 0.36);
   }
   100% {
     --load: 0;
+  }
+}
+
+/* The pans, one beat behind: the SAME spring, but reaching level a hair later
+   (30% vs the beam's 28%), so through the swing and the wobble they lag the beam
+   and their counter-rotation no longer perfectly cancels it — they visibly sway
+   and settle after it. */
+@keyframes scales-balance-lag {
+  0%,
+  6% {
+    --load-lag: 0;
+    animation-timing-function: linear(
+      0, 0.0244, 0.089, 0.1818, 0.2921, 0.4108, 0.5305, 0.6453, 0.751, 0.8447,
+      0.9246, 0.9902, 1.0415, 1.0793, 1.105, 1.12, 1.126, 1.1248, 1.118, 1.1072,
+      1.0938, 1.079, 1.0638, 1.0491, 1.0353, 1.023, 1.0124, 1.0035, 0.9965,
+      0.9912, 0.9876, 0.9853, 0.9842, 0.9841, 0.9848, 0.986, 0.9876, 0.9894,
+      0.9914, 0.9933, 0.995, 0.9966, 0.9981, 0.9992, 1.0002, 1.0009, 1.0015, 1
+    );
+  }
+  30% {
+    --load-lag: 1;
+  }
+  83% {
+    --load-lag: 1;
+    animation-timing-function: cubic-bezier(0.5, 0, 0.78, 0.36);
+  }
+  100% {
+    --load-lag: 0;
   }
 }
 
@@ -483,9 +657,11 @@ body {
   transform-origin: 50% 50%;
 }
 
-/* Loads sit on the plank and stay upright as it swings. */
+/* Loads ride the beam but counter-rotate on the LAGGED angle: as the beam
+   springs, they lean against the motion (inertia) and settle a beat later,
+   instead of staying rigidly, impossibly upright the whole swing. */
 .scales-upright {
-  transform: rotate(calc(-1 * var(--tilt)));
+  transform: rotate(calc(-1 * var(--tilt-lag)));
 }
 
 /* Chip N lands at --load = (N+1)/7, so the sixth one lands exactly on level. */
@@ -499,6 +675,95 @@ body {
    payoff rather than as a line that was there the whole time. */
 .scales-level {
   opacity: clamp(0, calc(var(--load) * 5 - 4), 1);
+}
+
+/* ---- Card cut (landing) ------------------------------------------------- */
+/* The app's real cut card (CardView / cardRich.ts) cutting itself, word by word.
+   The body starts fully UNFORMATTED (plain black) and the real formatting sweeps
+   in LEFT TO RIGHT: each word's context fades back, read-aloud draws a black
+   underline, and the key warrant fills with a cyan (#00ffff) highlight. Colors are
+   FIXED (a Word-doc, never theme-skinned). ONE shared, animated --cut-progress
+   drives the wave — each word's --wi index decides when the wave reaches it — so
+   ~200 words reveal in order from a SINGLE animation (cheap and perfectly in step).
+   BASE leaves --cut-progress high, so motion-reduced renders the finished card. */
+@property --cut-progress {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 99999;
+}
+
+.cut-body {
+  font-size: 11pt;
+  line-height: 1.75;
+  color: #000;
+  --cut-progress: 99999; /* finished — the reduced-motion / no-animation default */
+}
+
+.cut-para {
+  margin: 0 0 0.9rem 0;
+}
+.cut-para:last-child {
+  margin-bottom: 0;
+}
+
+/* Each word lights as the shared wave passes its index, ramping over ~7 words so
+   the leading edge is a soft sweep rather than a hard line. */
+.cut-w {
+  --on: clamp(0, calc((var(--cut-progress) - var(--wi)) / 7), 1);
+}
+
+/* Context: kept but not read aloud — fades back as the wave passes it. */
+.k-p {
+  opacity: calc(1 - var(--on) * 0.56);
+}
+
+/* Read-aloud: a black underline that draws in with the wave. */
+.k-u {
+  background: linear-gradient(#000, #000) no-repeat;
+  background-position: 0 100%;
+  background-size: calc(var(--on) * 100%) 1.5px;
+}
+
+/* Key warrant: the black underline PLUS a cyan highlight, both filling with the
+   wave (underline on top at the baseline, cyan wash behind the text). */
+.k-h {
+  background:
+    linear-gradient(#000, #000) no-repeat,
+    linear-gradient(#00ffff, #00ffff) no-repeat;
+  background-position:
+    0 100%,
+    0 0;
+  background-size:
+    calc(var(--on) * 100%) 1.5px,
+    calc(var(--on) * 100%) 100%;
+}
+
+.cut-bold {
+  font-weight: 700;
+}
+
+/* The sweep: --cut-progress climbs from before the first word to past the last
+   (set per card as --cut-end), holds the finished card, then resets and repeats. */
+@media (prefers-reduced-motion: no-preference) {
+  .cut-body {
+    --cut-progress: -7;
+    animation: cut-sweep 9s infinite;
+  }
+}
+
+@keyframes cut-sweep {
+  0% {
+    --cut-progress: -7;
+  }
+  55% {
+    --cut-progress: var(--cut-end);
+  }
+  90% {
+    --cut-progress: var(--cut-end);
+  }
+  100% {
+    --cut-progress: -7;
+  }
 }
 
 /* ---- The Verifier (landing) --------------------------------------------- */
@@ -772,7 +1037,7 @@ body {
 }
 
 /* ---- The Round (landing) ------------------------------------------------ */
-/* Five stages of prep, scrubbed by scroll position.
+/* Six stages of prep, scrubbed by scroll position.
    The DEFAULT here is a plain vertical list that reads correctly with no motion
    at all — that is what mobile, Firefox, and reduced-motion visitors get. The
    pinned scroll-scrubbed version is layered on top only where a view timeline
@@ -794,18 +1059,25 @@ body {
   display: none;
 }
 
-/* Each stage owns a hue: five steps evenly spaced around the OKLCH wheel at one
+/* Each stage owns a hue: six steps evenly spaced around the OKLCH wheel at one
    pinned lightness and chroma.
 
    Lightness is pinned rather than inherited from the theme so the pairing is
-   guaranteed rather than hoped for. Measured across both shipped themes, the
-   worst fill clears --stage-fg at 5.25:1 and the page at 2.98:1. --stage is
-   always a FILL with --stage-fg on top, never foreground text on paper. Color
-   is never the only cue: every stage keeps its number and its name.
+   guaranteed rather than hoped for. --stage is always a FILL with --stage-fg on
+   top, never foreground text on paper. Color is never the only cue: every stage
+   keeps its number and its name.
+
+   Re-measured when Wiki made this a six-stage ramp (60° apart instead of 72°),
+   on the same basis as the five it replaces: worst fill vs --stage-fg 4.56:1
+   (was 4.47:1) and vs a theme paper 2.89:1 (was 2.88:1) — so the new ramp is no
+   worse anywhere. Ratios are computed on the sRGB-CLIPPED values, because a few
+   of these sit outside sRGB and the browser clips them before they are painted.
 
    (Mixing the theme's own --accent/--yellow/--red was the first attempt. In
    OKLCH the short hue arc from yellow to blue runs through red, so "Coach" came
-   out pink and collided with "Re-Highlight", and red-on-paper measured 2.92:1.) */
+   out pink and collided with "Re-Highlight", and red-on-paper measured 2.92:1.
+   Measure this ramp with real contrast math if you change it — the hue wheel is
+   not intuitive here.) */
 .round-panel,
 .round-seg {
   --stage-fg: #fbf7ee;
@@ -816,19 +1088,23 @@ body {
 }
 .round-panel:nth-child(2),
 .round-seg:nth-child(2) {
-  --stage: oklch(0.5 0.19 340);
+  --stage: oklch(0.5 0.19 328);
 }
 .round-panel:nth-child(3),
 .round-seg:nth-child(3) {
-  --stage: oklch(0.5 0.19 52);
+  --stage: oklch(0.5 0.19 28);
 }
 .round-panel:nth-child(4),
 .round-seg:nth-child(4) {
-  --stage: oklch(0.5 0.19 124);
+  --stage: oklch(0.5 0.19 88);
 }
 .round-panel:nth-child(5),
 .round-seg:nth-child(5) {
-  --stage: oklch(0.5 0.19 196);
+  --stage: oklch(0.5 0.19 148);
+}
+.round-panel:nth-child(6),
+.round-seg:nth-child(6) {
+  --stage: oklch(0.5 0.19 208);
 }
 
 /* Where relative color syntax exists, rotate the same ramp off the live accent
@@ -843,19 +1119,23 @@ body {
   }
   .round-panel:nth-child(2),
   .round-seg:nth-child(2) {
-    --stage: oklch(from var(--accent) 0.5 0.19 calc(h + 72));
+    --stage: oklch(from var(--accent) 0.5 0.19 calc(h + 60));
   }
   .round-panel:nth-child(3),
   .round-seg:nth-child(3) {
-    --stage: oklch(from var(--accent) 0.5 0.19 calc(h + 144));
+    --stage: oklch(from var(--accent) 0.5 0.19 calc(h + 120));
   }
   .round-panel:nth-child(4),
   .round-seg:nth-child(4) {
-    --stage: oklch(from var(--accent) 0.5 0.19 calc(h + 216));
+    --stage: oklch(from var(--accent) 0.5 0.19 calc(h + 180));
   }
   .round-panel:nth-child(5),
   .round-seg:nth-child(5) {
-    --stage: oklch(from var(--accent) 0.5 0.19 calc(h + 288));
+    --stage: oklch(from var(--accent) 0.5 0.19 calc(h + 240));
+  }
+  .round-panel:nth-child(6),
+  .round-seg:nth-child(6) {
+    --stage: oklch(from var(--accent) 0.5 0.19 calc(h + 300));
   }
 }
 
@@ -881,7 +1161,9 @@ body {
     }
 
     .round-track {
-      height: 440vh;
+      /* ~88vh of scroll per stage, so adding one lengthens the track rather than
+         speeding every stage up. Six stages. */
+      height: 528vh;
       view-timeline-name: --round;
       view-timeline-axis: block;
     }
@@ -935,14 +1217,23 @@ body {
       position: absolute;
       left: 0;
       bottom: -0.7rem;
-      width: 20%; /* exactly one rail column, so translateX(400%) lands on the last */
+      width: 16.6667%; /* one rail column of six, so translateX(500%) lands on the last */
       justify-content: center;
       animation: round-carry linear both;
       animation-timeline: --round;
       animation-range: contain 0% contain 100%;
-      /* Advance, arrive, wait. Ignored where linear() is unsupported, which
+      /* Advance, arrive, wait — one hold per stage, so the playhead sits still
+         while a stage is being read instead of drifting through it. Six stops
+         now (0, .2, .4, .6, .8, 1). Ignored where linear() is unsupported, which
          leaves a smooth glide rather than a broken one. */
-      animation-timing-function: linear(0 0% 9%, 0.25 18% 34%, 0.5 43% 59%, 0.75 66% 84%, 1 91% 100%);
+      animation-timing-function: linear(
+        0 0% 8%,
+        0.2 15% 28%,
+        0.4 35% 45%,
+        0.6 52% 62%,
+        0.8 69% 86%,
+        1 92% 100%
+      );
     }
 
     .round-seg-fill {
@@ -956,36 +1247,42 @@ body {
       animation-timeline: --round;
     }
 
-    /* Each stage owns one fifth of the pinned scroll. */
+    /* Each stage owns one sixth of the pinned scroll. */
     .round-panel:nth-child(1),
     .round-panel:nth-child(1) .round-art,
     .round-seg:nth-child(1) .round-seg-fill,
     .round-seg:nth-child(1) .round-seg-label {
-      animation-range: contain 0% contain 20%;
+      animation-range: contain 0% contain 16.6667%;
     }
     .round-panel:nth-child(2),
     .round-panel:nth-child(2) .round-art,
     .round-seg:nth-child(2) .round-seg-fill,
     .round-seg:nth-child(2) .round-seg-label {
-      animation-range: contain 20% contain 40%;
+      animation-range: contain 16.6667% contain 33.3333%;
     }
     .round-panel:nth-child(3),
     .round-panel:nth-child(3) .round-art,
     .round-seg:nth-child(3) .round-seg-fill,
     .round-seg:nth-child(3) .round-seg-label {
-      animation-range: contain 40% contain 60%;
+      animation-range: contain 33.3333% contain 50%;
     }
     .round-panel:nth-child(4),
     .round-panel:nth-child(4) .round-art,
     .round-seg:nth-child(4) .round-seg-fill,
     .round-seg:nth-child(4) .round-seg-label {
-      animation-range: contain 60% contain 80%;
+      animation-range: contain 50% contain 66.6667%;
     }
     .round-panel:nth-child(5),
     .round-panel:nth-child(5) .round-art,
     .round-seg:nth-child(5) .round-seg-fill,
     .round-seg:nth-child(5) .round-seg-label {
-      animation-range: contain 80% contain 100%;
+      animation-range: contain 66.6667% contain 83.3333%;
+    }
+    .round-panel:nth-child(6),
+    .round-panel:nth-child(6) .round-art,
+    .round-seg:nth-child(6) .round-seg-fill,
+    .round-seg:nth-child(6) .round-seg-label {
+      animation-range: contain 83.3333% contain 100%;
     }
   }
 }
@@ -1029,7 +1326,8 @@ body {
     transform: translateX(0);
   }
   to {
-    transform: translateX(400%);
+    /* Five column-widths across a six-column rail: lands centred on the last. */
+    transform: translateX(500%);
   }
 }
 
@@ -1051,6 +1349,15 @@ body {
   90% {
     opacity: 1;
   }
+}
+
+/* Jump-to-card fix: while WikiResults scrolls to a chosen card, force every
+   result to its true height. Off-screen cards use content-visibility:auto with
+   an estimated 600px height, which otherwise makes scrollIntoView land inside
+   the wrong card as real heights resolve mid-scroll. WikiPanel toggles this
+   only for the duration of a jump. */
+.cv-measure > * {
+  content-visibility: visible !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

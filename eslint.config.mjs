@@ -9,6 +9,9 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    // Alternate build output for the throwaway backfill server (see NEXT_DIST_DIR
+    // in next.config.ts). Generated code, not ours — linting it is pure noise.
+    ".next-ingest/**",
     "out/**",
     "build/**",
     "next-env.d.ts",

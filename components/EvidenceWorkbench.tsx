@@ -8,6 +8,7 @@ import CoachPanel from "@/components/CoachPanel";
 import RehighlighterPanel from "@/components/RehighlighterPanel";
 import RoundLogPanel from "@/components/RoundLogPanel";
 import SearchForm from "@/components/SearchForm";
+import WikiPanel from "@/components/WikiPanel";
 import { requestCut, requestSearch } from "@/lib/apiClient";
 import { articlesToContext, cardToContext } from "@/lib/coachContext";
 import type { Article, AssistantContext, Card, CardLength, SearchParams } from "@/types";
@@ -19,7 +20,7 @@ type SearchState =
   | { status: "empty"; notice: string }
   | { status: "error"; message: string };
 
-type Tab = "find" | "cut" | "rehighlight" | "coach" | "record";
+type Tab = "find" | "cut" | "wiki" | "rehighlight" | "coach" | "record";
 
 export default function EvidenceWorkbench() {
   const [tab, setTab] = useState<Tab>("find");
@@ -128,6 +129,7 @@ export default function EvidenceWorkbench() {
       <nav aria-label="Tool" className="flex flex-wrap gap-3">
         {tabButton("find", "Find Articles")}
         {tabButton("cut", "Cut a Card")}
+        {tabButton("wiki", "Wiki")}
         {tabButton("rehighlight", "Re-Highlight")}
         {tabButton("coach", "Coach")}
         {tabButton("record", "Record")}
@@ -154,6 +156,12 @@ export default function EvidenceWorkbench() {
             initialClaim={lastParams?.claim}
             onCardCut={(card, source) => setLastCut({ card, source })}
           />
+        </div>
+      </div>
+
+      <div className={tab === "wiki" ? "" : "hidden"}>
+        <div className="tab-panel">
+          <WikiPanel />
         </div>
       </div>
 

@@ -35,7 +35,7 @@ export const SITE = {
   // Monitored inbox: TDPSA privacy requests (privacy page) and in-app feedback
   // (the "Report a problem" link in the Lab header) both point here.
   contactEmail: "thelinebylinelab@gmail.com",
-  privacyUpdated: "August 3, 2026",
+  privacyUpdated: "August 4, 2026",
   // TODO(annually): bump this each January. Held as a constant rather than
   // read from the clock because reading the current time during a render
   // pulls the whole landing page out of its prerendered static shell.
@@ -48,15 +48,42 @@ export const SITE = {
  * TRUE, verifiable capability stats — safe to show on day one.
  * - 250M+ : OpenAlex indexes ~250M scholarly works (plus Semantic Scholar + open web).
  * - 100%  : every card body is programmatically verified verbatim against its source.
- * - 6     : Find Articles · Cut a Card · Re-Highlight · Coach · Record · Theme Studio.
+ * - 7     : Find Articles · Wiki · Cut a Card · Re-Highlight · Coach · Record · Theme Studio.
  * - $0    : free to start, no account payment, no credit card.
  */
 export const CAPABILITY_STATS: Stat[] = [
   { value: "250M+", label: "scholarly sources searchable" },
   { value: "100%", label: "verbatim-verified cards" },
-  { value: "6", label: "tools, one workspace" },
+  { value: "7", label: "tools, one workspace" },
   { value: "$0", label: "to start, no card" },
 ];
+
+/** The stat that gives way when the live index count is available. */
+const TOOLS_STAT_LABEL = "tools, one workspace";
+
+/**
+ * Capability stats, with the live wiki-index count folded in when we have one.
+ *
+ * The count is a REAL figure read from the database and rounded down (see
+ * services/wikiStats.ts) — never a rounded-up marketing number. When it isn't
+ * available the row falls back to the four static stats, so the page never
+ * shows a placeholder or a zero.
+ *
+ * It sits second, right after the sources stat, because the two together say
+ * the whole pitch: everything published, plus everything already cut. The row
+ * is capped at four across, so the tools count steps aside — it is the one
+ * stat the ToolStrip directly above already shows.
+ */
+export function capabilityStats(indexedCards: number | null): Stat[] {
+  if (indexedCards == null) return CAPABILITY_STATS;
+
+  const rest = CAPABILITY_STATS.filter((s) => s.label !== TOOLS_STAT_LABEL);
+  return [
+    rest[0],
+    { value: `${indexedCards.toLocaleString()}+`, label: "pre-cut cards to search" },
+    ...rest.slice(1),
+  ];
+}
 
 /**
  * REAL usage counters. Leave `null` and only the capability stats above show —
@@ -98,6 +125,20 @@ export const TOOLS: Tool[] = [
   },
   {
     index: "02",
+    name: "Wiki",
+    tagline: "Every school's disclosed prep, one search away.",
+    blurb:
+      "opencaselist holds the disclosed cases and cards of programs across the country — but you can only click through it one school and one round at a time, which is useless when you need an answer mid-round. The Lab pre-cuts and indexes all of it into a single searchable library, so you just describe the argument you're hitting and pull a stack of ready-to-read cards in seconds — at the click of a button, even between speeches. No account to connect, no caselist to pick.",
+    points: [
+      "Search every school's disclosed cards by argument, not by clicking page after page",
+      "Describe a claim and pull a stack of on-point cards in seconds — even mid-round",
+      "Draws from every school, division, and year at once, all pre-cut",
+      "Shows the school, team, and caselist behind each card, linked to opencaselist",
+    ],
+    featured: true,
+  },
+  {
+    index: "03",
     name: "Cut a Card",
     tagline: "A formatted, verbatim card in one click.",
     blurb:
@@ -109,7 +150,7 @@ export const TOOLS: Tool[] = [
     ],
   },
   {
-    index: "03",
+    index: "04",
     name: "Re-Highlight",
     tagline: "Find the author's words that undercut their card.",
     blurb:
@@ -121,7 +162,7 @@ export const TOOLS: Tool[] = [
     ],
   },
   {
-    index: "04",
+    index: "05",
     name: "Coach",
     tagline: "One coach for research, cards, blocks, and drills.",
     blurb:
@@ -137,7 +178,7 @@ export const TOOLS: Tool[] = [
     featured: true,
   },
   {
-    index: "05",
+    index: "06",
     name: "Record",
     tagline: "Every round, logged and working for you.",
     blurb:
@@ -149,7 +190,7 @@ export const TOOLS: Tool[] = [
     ],
   },
   {
-    index: "06",
+    index: "07",
     name: "Theme Studio",
     tagline: "Style the whole app from one prompt.",
     blurb:
@@ -170,6 +211,7 @@ export const PRICING: PricingTier[] = [
     blurb: "Everything you need to prep a real round. No account payment, no credit card.",
     features: [
       "Debate-aware article search",
+      "Search disclosed prep on opencaselist",
       "Cut verbatim, formatted cards",
       "Re-Highlight opponents' cards",
       "AI Coach on your own case",

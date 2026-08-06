@@ -54,7 +54,19 @@ export function createSharedCache<V>(opts: {
   const shared = opts.shareAcrossInstances !== false;
 
   return {
-    async wrap(key: string, compute: () => Promise<V>): Promise<V> {
+    /**
+     * `shouldCache` lets a caller refuse to memoize a particular result. The
+     * wiki search uses it to never cache an EMPTY result: the index grows in the
+     * background (ingestion), so a "no matches" answer is only true for this
+     * instant — caching it would keep serving "nothing" for the full TTL after
+     * the cards actually land. Cheap-to-recompute misses like that must always
+     * re-run. Defaults to caching everything, so existing callers are unchanged.
+     */
+    async wrap(
+      key: string,
+      compute: () => Promise<V>,
+      shouldCache: (value: V) => boolean = () => true,
+    ): Promise<V> {
       const localHit = local.get(key);
       if (localHit !== undefined) return localHit;
 
@@ -72,6 +84,7 @@ export function createSharedCache<V>(opts: {
       }
 
       const value = await compute();
+      if (!shouldCache(value)) return value;
       local.set(key, value);
 
       if (redis) {
