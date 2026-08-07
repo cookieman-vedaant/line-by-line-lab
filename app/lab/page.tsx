@@ -48,6 +48,18 @@ export default function Lab() {
             >
               <span aria-hidden>←</span> Home
             </Link>
+            {/* The Lab deliberately carries none of the marketing nav. This one
+                link is the exception: looking up what a tool does shouldn't cost
+                you the card you're mid-way through editing, so it opens in a new
+                tab rather than navigating the workbench away. */}
+            <Link
+              href="/docs"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="label-mono frame btn-press inline-flex items-center gap-1.5 bg-paper-2 px-3 py-1.5 text-[10px] font-bold text-ink hover:text-accent"
+            >
+              Docs
+            </Link>
             <p className="label-mono hidden items-center gap-2 text-xs text-accent sm:flex">
               <span className="inline-block h-2.5 w-2.5 rotate-45 bg-red" />
               debate evidence engine

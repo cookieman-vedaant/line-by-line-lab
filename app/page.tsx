@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import AuthForm from "@/components/AuthForm";
 import CardCut from "@/components/marketing/CardCut";
+import LandingNav from "@/components/marketing/LandingNav";
 import Scales from "@/components/marketing/Scales";
 import SourceField from "@/components/marketing/SourceField";
 import Tear from "@/components/marketing/Tear";
@@ -111,6 +112,10 @@ function HeroSlotFallback() {
 export default function Landing({ searchParams }: { searchParams: SearchParams }) {
   return (
     <main className="flex w-full flex-1 flex-col">
+      {/* Pinned so Pricing and Docs are one click from anywhere on the page —
+          they used to sit twelve sections down, behind every showpiece. */}
+      <LandingNav />
+
       {/* ---- HERO ---------------------------------------------------------- */}
       <section className="hero-atmos mx-auto w-full max-w-6xl overflow-hidden px-5 pb-10 pt-14 sm:pt-20">
         <div className="grid items-center gap-10 lg:grid-cols-[1.1fr_0.9fr]">

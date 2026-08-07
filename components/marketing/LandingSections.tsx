@@ -178,8 +178,14 @@ function GridTool({ tool }: { tool: (typeof TOOLS)[number] }) {
 
 /** The feature showcase. Find and Coach span full width; the rest pair up. */
 export function Toolkit() {
+  // scroll-mt keeps the heading clear of the sticky nav when jumped to from it —
+  // don't rely on py-20 alone for that.
   return (
-    <section aria-labelledby="toolkit-heading" id="tools" className="mx-auto w-full max-w-5xl px-5 py-20">
+    <section
+      aria-labelledby="toolkit-heading"
+      id="tools"
+      className="mx-auto w-full max-w-5xl scroll-mt-4 px-5 py-20"
+    >
       <Reveal>
         <h2
           id="toolkit-heading"
@@ -211,7 +217,11 @@ export function Toolkit() {
 /** Free vs Pro. Pro is honestly "coming soon" — no fake checkout. */
 export function Pricing() {
   return (
-    <section aria-labelledby="pricing-heading" id="pricing" className="mx-auto w-full max-w-4xl px-5 py-20">
+    <section
+      aria-labelledby="pricing-heading"
+      id="pricing"
+      className="mx-auto w-full max-w-4xl scroll-mt-4 px-5 py-20"
+    >
       <Reveal>
         <h2
           id="pricing-heading"
@@ -320,6 +330,9 @@ export function LandingFooter() {
             </Link>
             <Link href="#tools" className="text-[11px] font-semibold uppercase tracking-wide text-ink/70 hover:text-accent">
               Features
+            </Link>
+            <Link href="/docs" className="text-[11px] font-semibold uppercase tracking-wide text-ink/70 hover:text-accent">
+              Docs
             </Link>
             <Link href="#pricing" className="text-[11px] font-semibold uppercase tracking-wide text-ink/70 hover:text-accent">
               Pricing
