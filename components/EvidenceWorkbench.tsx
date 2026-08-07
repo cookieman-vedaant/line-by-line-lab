@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import ArticleResults from "@/components/ArticleResults";
 import CardCutterPanel from "@/components/CardCutterPanel";
 import CardView from "@/components/CardView";
@@ -8,22 +8,49 @@ import CoachPanel from "@/components/CoachPanel";
 import RehighlighterPanel from "@/components/RehighlighterPanel";
 import RoundLogPanel from "@/components/RoundLogPanel";
 import SearchForm from "@/components/SearchForm";
+import SearchIntro from "@/components/SearchIntro";
+import SearchProgress from "@/components/SearchProgress";
 import WikiPanel from "@/components/WikiPanel";
 import { requestCut, requestSearch } from "@/lib/apiClient";
 import { articlesToContext, cardToContext } from "@/lib/coachContext";
-import type { Article, AssistantContext, Card, CardLength, SearchParams } from "@/types";
+import { nextTabIndex } from "@/lib/tabNav";
+import type {
+  Article,
+  AssistantContext,
+  Card,
+  CardLength,
+  SearchParams,
+  SearchStage,
+} from "@/types";
 
 type SearchState =
   | { status: "idle" }
-  | { status: "searching" }
+  // `stage` stays null until the server reports one — a cached search returns
+  // before there is any phase to show.
+  | { status: "searching"; stage: SearchStage | null }
   | { status: "results"; articles: Article[] }
   | { status: "empty"; notice: string }
   | { status: "error"; message: string };
 
 type Tab = "find" | "cut" | "wiki" | "rehighlight" | "coach" | "record";
 
+// Declared once, in the order they appear, so the tablist markup and the
+// arrow-key order can never drift apart.
+const TABS: readonly { value: Tab; label: string }[] = [
+  { value: "find", label: "Find Articles" },
+  { value: "cut", label: "Cut a Card" },
+  { value: "wiki", label: "Wiki" },
+  { value: "rehighlight", label: "Re-Highlight" },
+  { value: "coach", label: "Coach" },
+  { value: "record", label: "Record" },
+];
+
+const tabId = (t: Tab) => `tool-tab-${t}`;
+const panelId = (t: Tab) => `tool-panel-${t}`;
+
 export default function EvidenceWorkbench() {
   const [tab, setTab] = useState<Tab>("find");
+  const tabRefs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({});
   const [search, setSearch] = useState<SearchState>({ status: "idle" });
   const [lastParams, setLastParams] = useState<SearchParams | null>(null);
   const [cutLength, setCutLength] = useState<CardLength>("Medium");
@@ -38,13 +65,17 @@ export default function EvidenceWorkbench() {
   );
 
   async function handleSearch(params: SearchParams) {
-    setSearch({ status: "searching" });
+    setSearch({ status: "searching", stage: null });
     setLastParams(params);
     setCutLength(params.cardLength ?? "Medium");
     setResult(null);
     setCutError(null);
 
-    const outcome = await requestSearch(params);
+    const outcome = await requestSearch(params, (stage) =>
+      // Guard against a late event from a superseded search overwriting the
+      // state of the one the user is actually waiting on.
+      setSearch((prev) => (prev.status === "searching" ? { status: "searching", stage } : prev)),
+    );
     if (!outcome.ok) {
       setSearch({ status: "error", message: outcome.error });
     } else if (outcome.articles.length === 0) {
@@ -111,12 +142,38 @@ export default function EvidenceWorkbench() {
     setTab("coach");
   }
 
-  const tabButton = (value: Tab, label: string) => (
+  // Roving tabindex: only the selected tab is in the Tab order, and Left/Right
+  // (plus Home/End) move between tools — the WAI-ARIA tabs pattern. Activation
+  // is automatic because every panel is already mounted, so selecting one costs
+  // nothing.
+  function onTabKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
+    const current = TABS.findIndex((t) => t.value === tab);
+    const next = nextTabIndex(event.key, current, TABS.length);
+    if (next === null) return;
+
+    event.preventDefault();
+    const value = TABS[next].value;
+    setTab(value);
+    tabRefs.current[value]?.focus();
+  }
+
+  const tabButton = ({ value, label }: { value: Tab; label: string }) => (
     <button
+      key={value}
       type="button"
+      role="tab"
+      id={tabId(value)}
+      aria-selected={tab === value}
+      aria-controls={panelId(value)}
+      tabIndex={tab === value ? 0 : -1}
+      ref={(el) => {
+        tabRefs.current[value] = el;
+      }}
       onClick={() => setTab(value)}
-      aria-pressed={tab === value}
-      className={`btn-press frame px-5 py-2.5 font-display text-sm font-bold uppercase tracking-wide ${
+      onKeyDown={onTabKeyDown}
+      // Tighter on small screens so six tools fit in two rows instead of three
+      // — the masthead already costs most of a phone's first screen.
+      className={`btn-press frame px-3 py-2 font-display text-xs font-bold uppercase tracking-wide sm:px-5 sm:py-2.5 sm:text-sm ${
         tab === value ? "bg-accent text-paper" : "bg-paper-2 text-ink"
       }`}
     >
@@ -126,22 +183,27 @@ export default function EvidenceWorkbench() {
 
   return (
     <div className="flex flex-col gap-8">
-      <nav aria-label="Tool" className="flex flex-wrap gap-3">
-        {tabButton("find", "Find Articles")}
-        {tabButton("cut", "Cut a Card")}
-        {tabButton("wiki", "Wiki")}
-        {tabButton("rehighlight", "Re-Highlight")}
-        {tabButton("coach", "Coach")}
-        {tabButton("record", "Record")}
-      </nav>
+      <div role="tablist" aria-label="Tool" className="flex flex-wrap gap-2 sm:gap-3">
+        {TABS.map(tabButton)}
+      </div>
 
-      <div className={tab === "record" ? "" : "hidden"}>
+      <div
+        role="tabpanel"
+        id={panelId("record")}
+        aria-labelledby={tabId("record")}
+        className={tab === "record" ? "" : "hidden"}
+      >
         <div className="tab-panel">
           <RoundLogPanel />
         </div>
       </div>
 
-      <div className={tab === "coach" ? "" : "hidden"}>
+      <div
+        role="tabpanel"
+        id={panelId("coach")}
+        aria-labelledby={tabId("coach")}
+        className={tab === "coach" ? "" : "hidden"}
+      >
         <div className="tab-panel">
           <CoachPanel context={coachContext} seed={coachSeed} />
         </div>
@@ -150,7 +212,12 @@ export default function EvidenceWorkbench() {
       {/* Both panels stay mounted (typed text survives a tab switch); the
           hidden one is display:none, so its content replays the tab-in
           animation each time it's shown. */}
-      <div className={tab === "cut" ? "" : "hidden"}>
+      <div
+        role="tabpanel"
+        id={panelId("cut")}
+        aria-labelledby={tabId("cut")}
+        className={tab === "cut" ? "" : "hidden"}
+      >
         <div className="tab-panel">
           <CardCutterPanel
             initialClaim={lastParams?.claim}
@@ -159,27 +226,42 @@ export default function EvidenceWorkbench() {
         </div>
       </div>
 
-      <div className={tab === "wiki" ? "" : "hidden"}>
+      <div
+        role="tabpanel"
+        id={panelId("wiki")}
+        aria-labelledby={tabId("wiki")}
+        className={tab === "wiki" ? "" : "hidden"}
+      >
         <div className="tab-panel">
           <WikiPanel />
         </div>
       </div>
 
-      <div className={tab === "rehighlight" ? "" : "hidden"}>
+      <div
+        role="tabpanel"
+        id={panelId("rehighlight")}
+        aria-labelledby={tabId("rehighlight")}
+        className={tab === "rehighlight" ? "" : "hidden"}
+      >
         <div className="tab-panel">
           <RehighlighterPanel />
         </div>
       </div>
 
-      <div className={tab === "find" ? "" : "hidden"}>
+      <div
+        role="tabpanel"
+        id={panelId("find")}
+        aria-labelledby={tabId("find")}
+        className={tab === "find" ? "" : "hidden"}
+      >
         <div className="tab-panel flex flex-col gap-10">
           <SearchForm onSearch={handleSearch} busy={search.status === "searching"} />
 
-          {search.status === "searching" && (
-            <p className="label-mono animate-pulse text-center text-sm text-accent">
-              ▸ searching scholarly databases…
-            </p>
+          {search.status === "idle" && (
+            <SearchIntro onCutCard={() => setTab("cut")} onSearchWiki={() => setTab("wiki")} />
           )}
+
+          {search.status === "searching" && <SearchProgress stage={search.stage} />}
 
           {search.status === "empty" && (
             <p role="status" className="frame bg-yellow px-4 py-3 text-sm font-medium text-black">
@@ -208,8 +290,8 @@ export default function EvidenceWorkbench() {
           )}
 
           {cuttingUrl && (
-            <p className="label-mono animate-pulse text-center text-sm text-accent">
-              ▸ reading the article and cutting your card…
+            <p role="status" className="label-mono animate-pulse text-center text-sm text-accent">
+              <span aria-hidden>▸ </span>reading the article and cutting your card…
             </p>
           )}
 

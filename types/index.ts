@@ -55,6 +55,18 @@ export interface SearchParams {
   cardLength?: CardLength;
 }
 
+/**
+ * The real, observable phases of a search — see `runSearch` in
+ * `services/articleFinder.ts`. Each is emitted as it BEGINS, so the UI reports
+ * what the server is actually doing rather than animating a guess.
+ *
+ * Query building deliberately isn't a stage: `heuristicQueries` is synchronous
+ * string work that finishes in well under a millisecond, so showing it would be
+ * theatre. A cached search emits nothing at all and returns immediately.
+ */
+export const SEARCH_STAGES = ["retrieve", "rank", "verify"] as const;
+export type SearchStage = (typeof SEARCH_STAGES)[number];
+
 /** A ranked article returned by the Article Finder. Shape from the Tech Design. */
 export interface Article {
   title: string;
@@ -76,6 +88,23 @@ export interface Article {
    */
   accessible?: boolean;
 }
+
+/**
+ * One newline-delimited JSON line from `POST /api/search`.
+ *
+ * The route streams so the browser can report progress while the pipeline is
+ * still running. That commits the response to HTTP 200 the moment the first
+ * byte is sent, so failures *during* the search arrive as an `error` event
+ * rather than a status code. Failures *before* it (auth, rate limit, malformed
+ * body) still use ordinary status codes — nothing has been streamed yet.
+ *
+ * `result` is terminal and always last: zero articles plus a `notice` is the
+ * honest "nothing found" outcome, not an error.
+ */
+export type SearchStreamEvent =
+  | { type: "stage"; stage: SearchStage }
+  | { type: "result"; articles: Article[]; notice?: string }
+  | { type: "error"; error: string };
 
 /**
  * A debate-ready card produced by the Card Cutter.

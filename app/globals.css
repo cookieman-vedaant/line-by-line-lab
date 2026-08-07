@@ -388,6 +388,34 @@ body {
   animation: tab-in 0.4s cubic-bezier(0.2, 0.9, 0.3, 1);
 }
 
+/* The rule on a RUNNING search step, used as an indeterminate progress track.
+   Duration is unknowable (two databases + an AI call + N fetches), so this
+   shows liveness, never a fake percentage. With no motion it stays a solid
+   accent bar — the active step is still identifiable, just not animated. */
+@keyframes stage-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+.stage-sweep {
+  position: relative;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .stage-sweep::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    /* transform-only animation — no layout, no repaint of the track itself. */
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    animation: stage-sweep 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+}
+
 /* ---- Living newsprint + scroll (landing) -------------------------------- */
 
 /* A soft ink/accent wash drifts behind the hero. No motion = a plain surface. */

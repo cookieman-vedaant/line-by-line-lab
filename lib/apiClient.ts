@@ -9,6 +9,8 @@ import type {
   RehighlightResult,
   Round,
   SearchParams,
+  SearchStage,
+  SearchStreamEvent,
   ThemeSpec,
   WikiSearchRequest,
   WikiSearchResult,
@@ -51,25 +53,95 @@ export type SearchOutcome =
   | { ok: true; articles: []; notice: string }
   | { ok: false; error: string };
 
-export async function requestSearch(params: SearchParams): Promise<SearchOutcome> {
+/** One NDJSON line → an event, or null for blank/torn lines. */
+function parseSearchEvent(line: string): SearchStreamEvent | null {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+  try {
+    return JSON.parse(trimmed) as SearchStreamEvent;
+  } catch {
+    // A truncated line is not worth failing an otherwise good search over.
+    return null;
+  }
+}
+
+/** Terminal events → the outcome shape the UI already understands. */
+function searchEventToOutcome(event: SearchStreamEvent): SearchOutcome | null {
+  if (event.type === "error") return { ok: false, error: event.error };
+  if (event.type === "result") {
+    return event.articles.length === 0
+      ? {
+          ok: true,
+          articles: [],
+          notice: event.notice ?? "No reputable sources were found matching your criteria.",
+        }
+      : { ok: true, articles: event.articles };
+  }
+  return null;
+}
+
+/**
+ * `onStage` reports the server's real progress as it happens. It may never fire
+ * — a cached search returns immediately, with no pipeline to narrate — so the
+ * caller must not depend on receiving any stage at all.
+ */
+export async function requestSearch(
+  params: SearchParams,
+  onStage?: (stage: SearchStage) => void,
+): Promise<SearchOutcome> {
   try {
     const res = await fetch("/api/search", {
       method: "POST",
       headers: apiHeaders(),
       body: JSON.stringify(params),
     });
-    const data = await res.json();
+
+    // Rejections that happen before the search starts (auth, rate limit, bad
+    // body) still arrive as a status code with a plain JSON body.
     if (!res.ok) {
-      return { ok: false, error: data.error ?? "Search failed. Please try again." };
+      const data = await res.json().catch(() => null);
+      return { ok: false, error: data?.error ?? "Search failed. Please try again." };
     }
-    if (!data.articles || data.articles.length === 0) {
-      return {
-        ok: true,
-        articles: [],
-        notice: data.notice ?? "No reputable sources were found matching your criteria.",
-      };
+    if (!res.body) return { ok: false, error: "Search failed. Please try again." };
+
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buffer = "";
+    let outcome: SearchOutcome | null = null;
+
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += value;
+
+      // A chunk can carry several lines and can split the last one.
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const event = parseSearchEvent(line);
+        if (!event) continue;
+        if (event.type === "stage") {
+          onStage?.(event.stage);
+          continue;
+        }
+        outcome = searchEventToOutcome(event) ?? outcome;
+      }
     }
-    return { ok: true, articles: data.articles };
+
+    // Whatever is left has no trailing newline.
+    const last = parseSearchEvent(buffer);
+    if (last) {
+      if (last.type === "stage") onStage?.(last.stage);
+      else outcome = searchEventToOutcome(last) ?? outcome;
+    }
+
+    // The stream ended without a terminal event — a dropped connection or a
+    // killed function. Say so rather than rendering an empty result as success.
+    return (
+      outcome ?? {
+        ok: false,
+        error: "The search ended before returning a result. Please try again.",
+      }
+    );
   } catch {
     return { ok: false, error: "Could not reach the server. Is it running?" };
   }

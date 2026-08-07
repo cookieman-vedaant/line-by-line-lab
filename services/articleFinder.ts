@@ -9,7 +9,13 @@ import {
 } from "@/services/academicSearch";
 import { verifyAccessible } from "@/services/articleExtract";
 import { searchWeb } from "@/services/webSearch";
-import type { Article, SearchParams } from "@/types";
+import type { Article, SearchParams, SearchStage } from "@/types";
+
+/**
+ * Notified as each pipeline phase begins. Optional everywhere: a caller that
+ * doesn't care (tests, the Coach) passes nothing and the pipeline is unchanged.
+ */
+export type StageReporter = (stage: SearchStage) => void;
 
 // How many top-ranked candidates to fetch-verify, and how many to return.
 const VERIFY_LIMIT = 10;
@@ -186,14 +192,24 @@ function searchCacheKey(p: SearchParams): string {
   ]);
 }
 
+/**
+ * `onStage` fires only when the search actually runs. A cache hit skips the
+ * pipeline entirely and reports nothing — which is the honest signal, since
+ * there is no work in progress to describe.
+ */
 export async function findArticles(
   params: SearchParams,
   clientKey?: string,
+  onStage?: StageReporter,
 ): Promise<Article[]> {
-  return searchCache.wrap(searchCacheKey(params), () => runSearch(params, clientKey));
+  return searchCache.wrap(searchCacheKey(params), () => runSearch(params, clientKey, onStage));
 }
 
-async function runSearch(params: SearchParams, clientKey?: string): Promise<Article[]> {
+async function runSearch(
+  params: SearchParams,
+  clientKey?: string,
+  onStage?: StageReporter,
+): Promise<Article[]> {
   // 1. Build search queries with NO AI call (see heuristicQueries).
   const queries = heuristicQueries(params.claim);
 
@@ -203,6 +219,7 @@ async function runSearch(params: SearchParams, clientKey?: string): Promise<Arti
   //    social, etc.), then dedupe. Web is capped so it can't crowd out academic
   //    depth. Either source failing degrades gracefully — as long as one returns
   //    something, the search still works.
+  onStage?.("retrieve");
   const [webHits, academicHits] = await Promise.all([
     searchWeb(queries, clientKey),
     searchAcademic(queries, params.publicationAge),
@@ -231,6 +248,7 @@ async function runSearch(params: SearchParams, clientKey?: string): Promise<Arti
     .filter(Boolean)
     .join("\n");
 
+  onStage?.("rank");
   let rankingRaw: unknown;
   try {
     rankingRaw = await generateJson({
@@ -241,6 +259,7 @@ async function runSearch(params: SearchParams, clientKey?: string): Promise<Arti
   } catch (err) {
     if (err instanceof RateLimitedError) {
       console.warn("articleFinder: ranker rate-limited; using heuristic ranking");
+      onStage?.("verify");
       return verifyAndFilter(heuristicRanking(shortlist));
     }
     throw err;
@@ -261,5 +280,6 @@ async function runSearch(params: SearchParams, clientKey?: string): Promise<Arti
   }
 
   // Only surface sources the debater can actually open and cut from.
+  onStage?.("verify");
   return verifyAndFilter(articles);
 }

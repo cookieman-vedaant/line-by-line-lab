@@ -5,7 +5,13 @@ import { botBlock } from "@/lib/botCheck";
 import { MissingApiKeyError, RateLimitedError } from "@/lib/gemini";
 import { clientKeyFromRequest } from "@/lib/requestClient";
 import { NoSourcesFoundError, findArticles } from "@/services/articleFinder";
-import { CARD_LENGTHS, EVIDENCE_TYPES, PUBLICATION_AGES, SOURCE_TYPES } from "@/types";
+import {
+  CARD_LENGTHS,
+  EVIDENCE_TYPES,
+  PUBLICATION_AGES,
+  SOURCE_TYPES,
+  type SearchStreamEvent,
+} from "@/types";
 
 // Search fans out to two databases + two AI calls; don't cut it off early.
 export const maxDuration = 60;
@@ -47,25 +53,74 @@ export async function POST(req: Request) {
     );
   }
 
-  try {
-    const articles = await findArticles(parsed.data, clientKeyFromRequest(req));
-    return NextResponse.json({ articles });
-  } catch (err) {
-    // An honest empty result, not a server failure.
-    if (err instanceof NoSourcesFoundError) {
-      return NextResponse.json({ articles: [], notice: err.message });
-    }
-    if (err instanceof RateLimitedError) {
-      return NextResponse.json({ error: err.message }, { status: 429 });
-    }
-    if (err instanceof MissingApiKeyError) {
-      return NextResponse.json({ error: err.message }, { status: 500 });
-    }
-    // Everything else: user-safe message; developer detail stays server-side.
-    console.error("search failed", err);
-    return NextResponse.json(
-      { error: "Something went wrong while searching. Please try again." },
-      { status: 500 },
-    );
+  // Everything above this line can still answer with a status code, because
+  // nothing has been written yet. Everything below is streamed.
+  const clientKey = clientKeyFromRequest(req);
+  const encoder = new TextEncoder();
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      // The client can disconnect mid-search (closed tab, navigation). Once it
+      // has, enqueue throws — so latch the stream shut rather than letting the
+      // pipeline's remaining stage callbacks throw one by one.
+      let open = true;
+      const send = (event: SearchStreamEvent) => {
+        if (!open) return;
+        try {
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        } catch {
+          open = false;
+        }
+      };
+
+      try {
+        const articles = await findArticles(parsed.data, clientKey, (stage) =>
+          send({ type: "stage", stage }),
+        );
+        send({ type: "result", articles });
+      } catch (err) {
+        send(searchErrorEvent(err));
+      } finally {
+        if (open) {
+          try {
+            controller.close();
+          } catch {
+            // Already closed by a client disconnect; nothing to do.
+          }
+        }
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      // Progress is worthless if an intermediary holds the bytes back.
+      "Cache-Control": "no-store, no-transform",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}
+
+/**
+ * Map a pipeline failure onto a terminal stream event, preserving the exact
+ * user-facing messages the pre-streaming route returned.
+ *
+ * Note the status codes this replaces: a rate limit used to surface as HTTP 429
+ * and a missing key as 500. Both are now `error` events on a 200 response,
+ * because the headers were already sent. The UI is unaffected — it only ever
+ * displayed the message — but anything added later that branches on status
+ * needs to read the event instead.
+ */
+function searchErrorEvent(err: unknown): SearchStreamEvent {
+  // An honest empty result, not a server failure.
+  if (err instanceof NoSourcesFoundError) {
+    return { type: "result", articles: [], notice: err.message };
   }
+  if (err instanceof RateLimitedError || err instanceof MissingApiKeyError) {
+    return { type: "error", error: err.message };
+  }
+  // Everything else: user-safe message; developer detail stays server-side.
+  console.error("search failed", err);
+  return { type: "error", error: "Something went wrong while searching. Please try again." };
 }
