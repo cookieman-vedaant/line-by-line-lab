@@ -1,11 +1,11 @@
 "use client";
 
-import { Turnstile } from "@marsidev/react-turnstile";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { CAPTCHA_FAILED_MESSAGE, useCaptcha } from "@/components/useCaptcha";
 import { checkAuthAttempt } from "@/lib/apiClient";
-import { turnstileSiteKey } from "@/lib/humanGate";
+import { MIN_PASSWORD, PASSWORD_HINT } from "@/lib/passwordPolicy";
 import { safeNext } from "@/lib/safeNext";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
@@ -17,12 +17,14 @@ const labelClasses = "label-mono mb-2 block text-xs text-ink";
 type Mode = "signin" | "signup" | "reset";
 
 /**
- * Must stay >= Supabase's `password_min_length` (set to 8 in the project's auth
- * config). If the client allows a shorter password than the server accepts, the
- * user gets a rejection from Supabase for a rule our own form told them they'd
- * satisfied — so these two numbers have to move together.
+ * Where a confirmation link should land. Deliberately carries NO query of its
+ * own: the email template appends `?token_hash=…&type=signup`, and /auth/confirm
+ * already defaults its destination to the Lab when no `next` is supplied. A
+ * `?next=` here would force the template to guess between `?` and `&`.
  */
-const MIN_PASSWORD = 8;
+function confirmRedirect(): string {
+  return `${window.location.origin}/auth/confirm`;
+}
 
 /**
  * Email + password sign-in / sign-up, plus a "forgot password" flow. Uses the
@@ -49,18 +51,6 @@ export default function AuthForm({ next }: { next?: string }) {
   const [canResend, setCanResend] = useState(false);
   const [resending, setResending] = useState(false);
 
-  // Turnstile anti-brute-force gate (no-op when no site key is configured). A
-  // fresh, single-use token is required for each sign-in / sign-up / reset
-  // attempt, so the endpoints can't be scripted or brute-forced.
-  const siteKey = turnstileSiteKey();
-  const [token, setToken] = useState<string | null>(null);
-  const [captchaNonce, setCaptchaNonce] = useState(0);
-
-  function resetCaptcha() {
-    setToken(null);
-    setCaptchaNonce((n) => n + 1); // remount the widget → new token for the next try
-  }
-
   /**
    * The Turnstile token is handed to SUPABASE, not to our own /api/verify-human.
    *
@@ -77,19 +67,7 @@ export default function AuthForm({ next }: { next?: string }) {
    * endpoints is still minted by <HumanGate> on /lab, which runs its own
    * challenge — no coverage is lost.
    */
-  function captchaOptions(): { captchaToken?: string } {
-    return siteKey && token ? { captchaToken: token } : {};
-  }
-
-  /** Block the attempt early if the gate is on but unsolved. */
-  function ensureSolved(): boolean {
-    if (!siteKey) return true;
-    if (!token) {
-      setError("Please complete the human check below.");
-      return false;
-    }
-    return true;
-  }
+  const captcha = useCaptcha();
 
   function switchMode(m: Mode) {
     setMode(m);
@@ -110,35 +88,39 @@ export default function AuthForm({ next }: { next?: string }) {
       setError("Enter your email first, then resend.");
       return;
     }
-    // Resend also goes browser → Supabase, so with CAPTCHA on it needs its own
-    // unspent token, exactly like the main form.
-    if (!ensureSolved()) return;
 
     setResending(true);
+    try {
+      // Ask our own limiter first. The resend below goes straight from this
+      // browser to Supabase, so this preflight is the only place we can cap how
+      // many confirmation emails one address (or one network) can trigger.
+      const allowed = await checkAuthAttempt("resend", email.trim());
+      if (!allowed.ok) return setError(allowed.error);
 
-    // Ask our own limiter first. The resend below goes straight from this
-    // browser to Supabase, so this preflight is the only place we can cap how
-    // many confirmation emails one address (or one network) can trigger.
-    const allowed = await checkAuthAttempt("resend", email.trim());
-    if (!allowed.ok) {
+      // Resend also goes browser → Supabase, so with CAPTCHA on it needs its own
+      // unspent token, exactly like the main form. Awaited rather than read from
+      // state: the widget was remounted moments ago by the attempt that revealed
+      // this button, so it is usually still solving right when it's clicked.
+      let captchaToken: string | undefined;
+      try {
+        captchaToken = await captcha.token();
+      } catch {
+        return setError(CAPTCHA_FAILED_MESSAGE);
+      }
+
+      const supabase = createSupabaseBrowserClient();
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: email.trim(),
+        options: { emailRedirectTo: confirmRedirect(), captchaToken },
+      });
+      if (error) return setError(error.message);
+      setNotice("New confirmation link sent — you can open it on any device.");
+    } finally {
       setResending(false);
-      return setError(allowed.error);
+      // The token is spent either way — force a fresh solve before the next try.
+      captcha.reset();
     }
-
-    const supabase = createSupabaseBrowserClient();
-    const { error } = await supabase.auth.resend({
-      type: "signup",
-      email: email.trim(),
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/confirm?next=%2Flab`,
-        ...captchaOptions(),
-      },
-    });
-    setResending(false);
-    // The token is spent either way — force a fresh solve before the next try.
-    resetCaptcha();
-    if (error) return setError(error.message);
-    setNotice("New confirmation link sent. Open it on this device if you can.");
   }
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -158,35 +140,39 @@ export default function AuthForm({ next }: { next?: string }) {
     }
 
     setBusy(true);
-    if (!ensureSolved()) {
-      setBusy(false);
-      return;
-    }
-
-    // Rate-limit the two modes that make Supabase SEND AN EMAIL. Sign-in is
-    // excluded on purpose: it sends nothing, and throttling it per-email would
-    // hand an attacker a way to lock a known victim out of their own account.
-    if (mode === "signup" || mode === "reset") {
-      const allowed = await checkAuthAttempt(mode, email.trim());
-      if (!allowed.ok) {
-        setBusy(false);
-        resetCaptcha();
-        return setError(allowed.error);
-      }
-    }
 
     const supabase = createSupabaseBrowserClient();
     const dest = safeNext(next);
     try {
+      // Rate-limit the two modes that make Supabase SEND AN EMAIL. Sign-in is
+      // excluded on purpose: it sends nothing, and throttling it per-email would
+      // hand an attacker a way to lock a known victim out of their own account.
+      if (mode === "signup" || mode === "reset") {
+        const allowed = await checkAuthAttempt(mode, email.trim());
+        if (!allowed.ok) return setError(allowed.error);
+      }
+
+      // Wait for the challenge rather than refusing when it hasn't finished. The
+      // button used to be disabled until a token existed, which meant a Turnstile
+      // script that never loaded — a blocked domain, a flaky phone connection —
+      // left the user with a permanently dead Sign in button and no explanation.
+      let captchaToken: string | undefined;
+      try {
+        captchaToken = await captcha.token();
+      } catch {
+        return setError(CAPTCHA_FAILED_MESSAGE);
+      }
+
       if (mode === "reset") {
         const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
           // Land the recovery link DIRECTLY on the reset page (a client page). The
           // recovery token comes back in the URL #hash, which the server route
           // handler /auth/callback can't read — so routing through it bounced the
-          // user back to login. The client page reads the token itself (hash OR a
-          // PKCE ?code) and requires a new password before letting them proceed.
+          // user back to login. The client page reads the token itself (a
+          // token_hash, a PKCE ?code, or a hash) and requires a new password
+          // before letting them proceed.
           redirectTo: `${window.location.origin}/reset-password`,
-          ...captchaOptions(),
+          captchaToken,
         });
         if (error) return setError(error.message);
         // Generic message either way — never reveal whether an account exists.
@@ -202,10 +188,7 @@ export default function AuthForm({ next }: { next?: string }) {
           // shapes Supabase sends the credential in lives in the URL fragment,
           // which a route handler can never see. Requires this origin to be in
           // Supabase's Redirect URLs, or it falls back to the Site URL.
-          options: {
-            emailRedirectTo: `${window.location.origin}/auth/confirm?next=%2Flab`,
-            ...captchaOptions(),
-          },
+          options: { emailRedirectTo: confirmRedirect(), captchaToken },
         });
         if (error) return setError(error.message);
 
@@ -238,7 +221,7 @@ export default function AuthForm({ next }: { next?: string }) {
         const { error } = await supabase.auth.signInWithPassword({
           email: email.trim(),
           password,
-          options: captchaOptions(),
+          options: { captchaToken },
         });
         if (error) {
           // An unconfirmed account is a fixable state, not a bad password. Say so
@@ -254,7 +237,7 @@ export default function AuthForm({ next }: { next?: string }) {
       }
     } finally {
       setBusy(false);
-      resetCaptcha(); // token is single-use — a retry needs a fresh solve
+      captcha.reset(); // token is single-use — a retry needs a fresh solve
     }
   }
 
@@ -315,7 +298,7 @@ export default function AuthForm({ next }: { next?: string }) {
               autoComplete={mode === "signup" ? "new-password" : "current-password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder={`at least ${MIN_PASSWORD} characters`}
+              placeholder={PASSWORD_HINT}
               className={inputClasses}
             />
           </div>
@@ -353,25 +336,15 @@ export default function AuthForm({ next }: { next?: string }) {
           </button>
         )}
 
-        {siteKey && (
-          <div className="flex justify-center">
-            <Turnstile
-              key={captchaNonce}
-              siteKey={siteKey}
-              onSuccess={setToken}
-              onError={() => {
-                setToken(null);
-                setError("The check couldn't load. Refresh and try again.");
-              }}
-              onExpire={() => setToken(null)}
-              options={{ theme: "auto" }}
-            />
-          </div>
-        )}
+        {captcha.widget}
 
+        {/* Disabled only while a request is in flight. It must NOT wait on the
+            captcha: the submit handler awaits the token itself, so a challenge
+            that is slow (or never loads at all) produces a real error message
+            instead of a button that can never be pressed. */}
         <button
           type="submit"
-          disabled={busy || (!!siteKey && !token)}
+          disabled={busy}
           className="btn-press frame bg-accent px-6 py-3 font-display text-base font-bold
             uppercase tracking-wide text-paper disabled:opacity-60"
         >

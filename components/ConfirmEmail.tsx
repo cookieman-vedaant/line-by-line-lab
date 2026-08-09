@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CAPTCHA_FAILED_MESSAGE, useCaptcha } from "@/components/useCaptcha";
 import { checkAuthAttempt } from "@/lib/apiClient";
 import { safeNext } from "@/lib/safeNext";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -12,7 +13,17 @@ const inputClasses =
   "placeholder:text-ink/40 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/35";
 const cardClasses = "frame shadow-hard w-full max-w-sm bg-paper-2 p-6";
 
-type Phase = "working" | "ok" | "failed";
+/**
+ * "confirmed-only" is the cross-device case and it is a SUCCESS, not a failure.
+ * A `?code=` link has already been through Supabase's /verify endpoint by the
+ * time it reaches us, which is what marks the address confirmed; the `code` is
+ * only the second half, an offer of a session. Exchanging it needs the PKCE
+ * verifier held by the browser that signed up, so opening the mail on a phone
+ * can never complete it — but the account is confirmed all the same. Reporting
+ * that as "that link didn't go through" was the bug: it sent people to a resend
+ * form for a confirmation they had already completed.
+ */
+type Phase = "working" | "ok" | "confirmed-only" | "failed";
 
 /**
  * Where an email-confirmation link lands.
@@ -43,6 +54,7 @@ export default function ConfirmEmail() {
   const [resending, setResending] = useState(false);
   const [resent, setResent] = useState(false);
   const [resendError, setResendError] = useState<string | null>(null);
+  const captcha = useCaptcha();
   const ran = useRef(false);
 
   const succeed = useCallback(
@@ -100,10 +112,10 @@ export default function ConfirmEmail() {
       if (code) {
         const { error } = await supabase.auth.exchangeCodeForSession(code);
         if (!error) return succeed(next);
-        setDetail(
-          `${error.message} — this kind of link has to be opened in the same browser you signed up in.`,
-        );
-        setPhase("failed");
+        // The address IS confirmed at this point — see the Phase note above.
+        // All that failed is the automatic sign-in, so ask for the password
+        // rather than for another confirmation email.
+        setPhase("confirmed-only");
         return;
       }
 
@@ -147,25 +159,37 @@ export default function ConfirmEmail() {
       return;
     }
     setResending(true);
+    try {
+      // Same preflight as AuthForm's resend — this is the second entry point to
+      // the same email-sending call, and an uncapped one would make the other
+      // cap pointless.
+      const allowed = await checkAuthAttempt("resend", email.trim());
+      if (!allowed.ok) return setResendError(allowed.error);
 
-    // Same preflight as AuthForm's resend — this is the second entry point to
-    // the same email-sending call, and an uncapped one would make the other
-    // cap pointless.
-    const allowed = await checkAuthAttempt("resend", email.trim());
-    if (!allowed.ok) {
+      // Supabase CAPTCHA protection is ON, and resend goes browser → Supabase
+      // without touching our server, so the token has to be attached HERE. It
+      // wasn't, and this page renders no challenge at all — so every resend from
+      // the one screen that exists to recover a failed confirmation was rejected
+      // with a captcha error. That is the whole bug.
+      let captchaToken: string | undefined;
+      try {
+        captchaToken = await captcha.token();
+      } catch {
+        return setResendError(CAPTCHA_FAILED_MESSAGE);
+      }
+
+      const supabase = createSupabaseBrowserClient();
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: email.trim(),
+        options: { emailRedirectTo: `${window.location.origin}/auth/confirm`, captchaToken },
+      });
+      if (error) return setResendError(error.message);
+      setResent(true);
+    } finally {
       setResending(false);
-      return setResendError(allowed.error);
+      captcha.reset(); // single-use, spent either way
     }
-
-    const supabase = createSupabaseBrowserClient();
-    const { error } = await supabase.auth.resend({
-      type: "signup",
-      email: email.trim(),
-      options: { emailRedirectTo: `${window.location.origin}/auth/confirm?next=%2Flab` },
-    });
-    setResending(false);
-    if (error) return setResendError(error.message);
-    setResent(true);
   }
 
   if (phase === "working" || phase === "ok") {
@@ -175,6 +199,26 @@ export default function ConfirmEmail() {
           {phase === "ok" ? "Confirmed. Taking you in…" : "Confirming your email…"}
         </p>
         <p className="mt-1 text-xs font-medium text-ink/70">This only takes a second.</p>
+      </div>
+    );
+  }
+
+  // Confirmed, but on a device that can't finish the sign-in itself. One step
+  // left, and it's the ordinary one — so say so plainly and point at it.
+  if (phase === "confirmed-only") {
+    return (
+      <div className={cardClasses}>
+        <p className="font-display text-lg font-bold">Email confirmed ✓</p>
+        <p className="mt-2 text-sm font-medium leading-snug text-ink/70">
+          Your account is ready. You opened this link on a different device or browser than you
+          signed up on, so sign in with your password to finish.
+        </p>
+        <Link
+          href="/"
+          className="btn-press frame shadow-hard mt-4 inline-flex items-center justify-center bg-accent px-5 py-3 font-display text-sm font-bold uppercase tracking-wide text-paper"
+        >
+          Sign in →
+        </Link>
       </div>
     );
   }
@@ -191,7 +235,7 @@ export default function ConfirmEmail() {
 
       {resent ? (
         <p role="status" className="frame mt-4 bg-accent/10 px-3 py-2 text-xs font-semibold">
-          New confirmation email sent. Open it on this device if you can.
+          New confirmation email sent — you can open it on any device.
         </p>
       ) : (
         <form onSubmit={onResend} className="mt-4 flex flex-col gap-3">
@@ -214,6 +258,7 @@ export default function ConfirmEmail() {
               {resendError}
             </p>
           )}
+          {captcha.widget}
           <button
             type="submit"
             disabled={resending}

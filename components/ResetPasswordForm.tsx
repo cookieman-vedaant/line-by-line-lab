@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { PASSWORD_HINT, passwordProblem } from "@/lib/passwordPolicy";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 const inputClasses =
@@ -12,13 +13,20 @@ const labelClasses = "label-mono mb-2 block text-xs text-ink";
 const cardClasses = "frame shadow-hard w-full max-w-sm bg-paper-2 p-6";
 
 /**
- * Set a new password. Reached from a password-reset email. The link either
- *  - lands on /auth/callback (which sets the recovery session cookie) then here, or
- *  - lands here directly with the recovery token in the URL.
- * Either way the browser client establishes the recovery session (it processes a
- * token in the URL on load and fires PASSWORD_RECOVERY), and that session is what
- * lets updateUser change the password. We detect it on the client so both routes
- * work; no valid session → a clear "invalid/expired" message.
+ * Set a new password. Reached from a password-reset email, which can deliver the
+ * credential in three shapes:
+ *
+ *   ?token_hash=&type=recovery → verifyOtp. The ONLY shape that works when the
+ *                                email is opened somewhere other than the
+ *                                browser that asked for the reset — which on a
+ *                                phone is the normal case, not the edge case.
+ *   ?code=                     → PKCE. Needs the verifier cookie held by the
+ *                                requesting browser; the client exchanges it
+ *                                automatically via detectSessionInUrl.
+ *   #access_token=             → picked up by the client on load.
+ *
+ * Whichever lands, the result is a recovery session, and that session is what
+ * lets updateUser change the password. No session → "invalid/expired".
  */
 export default function ResetPasswordForm() {
   const router = useRouter();
@@ -28,8 +36,12 @@ export default function ResetPasswordForm() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const ran = useRef(false);
 
   useEffect(() => {
+    if (ran.current) return; // StrictMode double-invoke would spend the token twice
+    ran.current = true;
+
     const supabase = createSupabaseBrowserClient();
     let settled = false;
     const markReady = () => {
@@ -46,6 +58,24 @@ export default function ResetPasswordForm() {
       if (data.session) markReady();
     });
 
+    // The device-independent shape. Handled explicitly because nothing else
+    // does: detectSessionInUrl covers `?code=` and the hash, but a token_hash
+    // has to be redeemed by hand.
+    const params = new URLSearchParams(window.location.search);
+    const tokenHash = params.get("token_hash");
+    if (tokenHash) {
+      void supabase.auth
+        .verifyOtp({ type: "recovery", token_hash: tokenHash })
+        .then(({ error }) => {
+          if (!error) {
+            // Drop the single-use token from the address bar so a back button
+            // or a shared URL can't replay it.
+            window.history.replaceState(null, "", window.location.pathname);
+            markReady();
+          }
+        });
+    }
+
     // No session shortly after load → the link was bad, expired, or opened in a
     // different browser than it was requested from.
     const timer = setTimeout(() => {
@@ -61,12 +91,12 @@ export default function ResetPasswordForm() {
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
-    if (password.length < 6) {
-      setError("Choose a password of at least 6 characters.");
-      return;
-    }
-    if (password !== confirm) {
-      setError("The two passwords don't match.");
+    // Shared with the sign-up form and kept >= Supabase's password_min_length.
+    // This form allowed 6 while the server demanded 8, so a 6- or 7-character
+    // reset sailed past our own validation and was rejected at the last step.
+    const problem = passwordProblem(password, confirm);
+    if (problem) {
+      setError(problem);
       return;
     }
     setBusy(true);
@@ -124,7 +154,7 @@ export default function ResetPasswordForm() {
             autoComplete="new-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="at least 6 characters"
+            placeholder={PASSWORD_HINT}
             className={inputClasses}
           />
         </div>

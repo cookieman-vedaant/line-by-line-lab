@@ -1,5 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
+import { isAuthRetryableFetchError } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
+import { gateDecision, isProtectedPath, type Revalidation } from "@/lib/sessionGate";
 
 /**
  * How long to wait for session revalidation before giving up for THIS request.
@@ -10,10 +12,8 @@ import { NextResponse, type NextRequest } from "next/server";
  */
 const AUTH_REVALIDATE_TIMEOUT_MS = 3000;
 
-/** App routes that require a signed-in user. Extend this list as the app grows. */
-function isProtectedPath(pathname: string): boolean {
-  return pathname === "/lab" || pathname.startsWith("/lab/");
-}
+/** Sentinel for the timeout leg of the race, so it can't be confused with a user. */
+const TIMED_OUT = Symbol("auth-revalidate-timeout");
 
 /**
  * Does this request carry a Supabase session at all? @supabase/ssr stores the
@@ -86,21 +86,37 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
   // But BOUND it. This middleware runs on every page request, so an unbounded
   // getUser() against a briefly-overloaded database would hang the ENTIRE app —
   // the marketing home and the sign-in page included — until it finally answered.
-  // (That is exactly what took the app down during a heavy backfill.) If
-  // revalidation doesn't return within AUTH_REVALIDATE_TIMEOUT_MS, we stop waiting
-  // and treat the session as unverified for THIS request only. The degradation is
-  // deliberately safe: a protected route then redirects to sign-in (fail closed),
-  // a public route just renders, and the refresh happens on the next request. A
-  // slow DB becomes "signed out for a moment," never "nothing loads."
-  const user = await Promise.race([
-    supabase.auth
-      .getUser()
-      .then((r) => r.data.user)
-      .catch(() => null),
-    new Promise<null>((resolve) => setTimeout(() => resolve(null), AUTH_REVALIDATE_TIMEOUT_MS)),
-  ]);
+  // (That is exactly what took the app down during a heavy backfill.)
+  //
+  // The three outcomes are kept DISTINCT. Collapsing "timed out" into "no user"
+  // is what made a slow moment look like being logged out: the request already
+  // carries a session cookie, so answering "you're signed out" is a guess, and
+  // the wrong one. See lib/sessionGate.ts for why "unknown" is safe to allow.
+  let revalidation: Revalidation;
+  try {
+    const outcome = await Promise.race([
+      supabase.auth.getUser(),
+      new Promise<typeof TIMED_OUT>((resolve) =>
+        setTimeout(() => resolve(TIMED_OUT), AUTH_REVALIDATE_TIMEOUT_MS),
+      ),
+    ]);
+    if (outcome === TIMED_OUT) {
+      revalidation = "unknown";
+    } else if (outcome.data.user) {
+      revalidation = "signed-in";
+    } else if (isAuthRetryableFetchError(outcome.error)) {
+      // supabase-js RETURNS transport failures rather than throwing them, so
+      // without this check a DNS blip or a 503 from the auth service reads as
+      // "this user is signed out" and evicts them from the Lab.
+      revalidation = "unknown";
+    } else {
+      revalidation = "signed-out";
+    }
+  } catch {
+    revalidation = "unknown";
+  }
 
-  if (isProtectedPath(request.nextUrl.pathname) && !user) {
+  if (gateDecision(isProtectedPath(request.nextUrl.pathname), revalidation) === "redirect-to-signin") {
     const url = request.nextUrl.clone();
     url.pathname = "/";
     url.searchParams.set("next", request.nextUrl.pathname);
