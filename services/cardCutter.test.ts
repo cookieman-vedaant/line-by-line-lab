@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   appendSourceUrl,
   fitRangeToBudget,
+  resolveUnderlines,
   splitIntoSections,
   splitParagraphs,
+  splitSentences,
 } from "./cardCutter";
 
 describe("splitParagraphs", () => {
@@ -115,5 +117,97 @@ describe("fitRangeToBudget", () => {
     expect(s).toBeLessThan(10);
     expect(e).toBeLessThan(10);
     expect(e).toBeGreaterThanOrEqual(s);
+  });
+});
+
+/*
+ * Sentences are the unit the marker now works in: it underlines by NUMBER
+ * rather than copying text back, which is what took real long-article cards
+ * from 3-6% underlined to 20-43%. A wrong split only moves where an underline
+ * starts or stops, so the splitter is deliberately conservative — merging two
+ * sentences is much cheaper than slicing "U.S. policy" in half.
+ */
+describe("splitSentences", () => {
+  it("splits ordinary prose on terminal punctuation", () => {
+    expect(splitSentences("One thing. Two things! Three things?")).toEqual([
+      "One thing.",
+      "Two things!",
+      "Three things?",
+    ]);
+  });
+
+  it("does not split on abbreviations or initials", () => {
+    expect(splitSentences("U.S. policy shifted. Dr. Smith agreed.")).toEqual([
+      "U.S. policy shifted.",
+      "Dr. Smith agreed.",
+    ]);
+    expect(splitSentences("See Fig. 3 for the trend.")).toEqual(["See Fig. 3 for the trend."]);
+    expect(splitSentences("Written by J. R. Hobbes in 1988.")).toEqual([
+      "Written by J. R. Hobbes in 1988.",
+    ]);
+  });
+
+  it("keeps a closing quote or bracket with its sentence", () => {
+    expect(splitSentences('He said "it ends." Then he left.')).toEqual([
+      'He said "it ends."',
+      "Then he left.",
+    ]);
+  });
+
+  // Paragraphs are split first, so a heading with no terminal punctuation can't
+  // absorb the sentence after it — which would underline a heading and its
+  // following claim as one indivisible unit.
+  it("never merges across a paragraph break", () => {
+    expect(splitSentences("Overview\n\nThe risk is real.")).toEqual([
+      "Overview",
+      "The risk is real.",
+    ]);
+  });
+
+  it("drops empty fragments and trims", () => {
+    expect(splitSentences("  A sentence.   \n\n  \n\n Another.  ")).toEqual([
+      "A sentence.",
+      "Another.",
+    ]);
+  });
+
+  it("returns every sentence of the passage, in order", () => {
+    const sentences = splitSentences("First. Second. Third.\n\nFourth.");
+    expect(sentences).toHaveLength(4);
+    expect(sentences[0]).toBe("First.");
+    expect(sentences[3]).toBe("Fourth.");
+  });
+});
+
+describe("resolveUnderlines", () => {
+  const sentences = ["Zero.", "One.", "Two.", "Three."];
+
+  it("maps indices to the real sentences, in the order given", () => {
+    expect(resolveUnderlines(sentences, [0, 2])).toEqual(["Zero.", "Two."]);
+  });
+
+  /*
+   * A hallucinated index is a guess about text that isn't there. Dropping it is
+   * right; CLAMPING it would underline a real sentence the model never chose,
+   * quietly attributing an emphasis decision to it that it never made.
+   */
+  it("drops out-of-range and non-integer indices rather than clamping", () => {
+    expect(resolveUnderlines(sentences, [-1, 4, 99, 1.5, 2])).toEqual(["Two."]);
+  });
+
+  it("collapses duplicate indices", () => {
+    expect(resolveUnderlines(sentences, [1, 1, 1])).toEqual(["One."]);
+  });
+
+  it("still honours legacy verbatim strings so an old-format reply isn't lost", () => {
+    expect(resolveUnderlines(sentences, [0], ["Some copied text."])).toEqual([
+      "Zero.",
+      "Some copied text.",
+    ]);
+  });
+
+  it("returns nothing when the model selected nothing", () => {
+    expect(resolveUnderlines(sentences, [])).toEqual([]);
+    expect(resolveUnderlines([], [0, 1])).toEqual([]);
   });
 });

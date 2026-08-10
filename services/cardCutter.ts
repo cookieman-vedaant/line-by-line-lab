@@ -32,6 +32,10 @@ const MAX_ARTICLE_CHARS = 120000;
 // long passage into contiguous sections and mark each one, so emphasis is dense
 // throughout. A passage at/under one section's budget stays a SINGLE call —
 // byte-for-byte the old behavior, so normal-length cards never change.
+// Measured, don't "tune" these blind: shrinking to 600/14 made coverage WORSE
+// (39%->32% and 20%->15% on the two long articles above) while costing more AI
+// calls. The model picks a best-few per section largely regardless of how big
+// the section is, so more sections mostly means more separate best-fews.
 const SECTION_TARGET_WORDS = 900; // ~a screen of prose — the model marks it densely
 const MAX_MARKER_SECTIONS = 8; // bound the AI calls (latency + free-tier budget) per cut
 
@@ -41,9 +45,10 @@ const MAX_MARKER_SECTIONS = 8; // bound the AI calls (latency + free-tier budget
  * 2. SELECT: the AI picks a contiguous paragraph range matching the card
  *    length; we clamp it mechanically to the length's word budget.
  *    The body is then assembled from the REAL article paragraphs.
- * 3. MARK: the AI returns exact substrings to underline/highlight plus the
- *    tag and cite; we locate each substring in the real text and wrap it.
- *    Substrings that don't match are skipped — never invented.
+ * 3. MARK: the passage goes to the AI as NUMBERED SENTENCES. It returns the
+ *    numbers to underline, plus exact substrings to highlight/bold and the
+ *    tag and cite. Numbers are resolved back to the real sentences; substrings
+ *    are located in the real text. Neither path can invent wording.
  */
 
 /** Word-budget fraction of the article for each card length. */
@@ -58,6 +63,41 @@ export function splitParagraphs(text: string): string[] {
     .split(/\n+/)
     .map((p) => p.trim())
     .filter((p) => p.length > 0);
+}
+
+/** Trailing tokens that end in a period WITHOUT ending the sentence. */
+const ABBREVIATION_END =
+  /(?:^|\s)(?:[A-Z]|Dr|Mr|Mrs|Ms|Prof|Sr|Jr|St|vs|etc|eg|ie|cf|al|Fig|No|Vol|pp|Ch|Sec|Inc|Ltd|Co|Approx|Est|Ref)\.$|(?:\b[A-Z]\.){2,}$/;
+
+/**
+ * Split one paragraph into sentences. Deliberately conservative: a wrong split
+ * only changes where an underline starts or stops, so merging two sentences is
+ * far cheaper than slicing "U.S. policy" in half.
+ */
+function splitParagraphSentences(paragraph: string): string[] {
+  const rough = paragraph.split(/(?<=[.!?][")'”’\]]?)\s+/);
+  const out: string[] = [];
+  for (const piece of rough) {
+    const prev = out[out.length - 1];
+    // Re-join when the previous piece ended on an abbreviation or initial, or
+    // when this one opens mid-sentence (lowercase, a digit, or punctuation) —
+    // both mean the period was not a sentence boundary.
+    if (prev !== undefined && (ABBREVIATION_END.test(prev) || /^[a-z0-9,;:)\]]/.test(piece))) {
+      out[out.length - 1] = `${prev} ${piece}`;
+    } else {
+      out.push(piece);
+    }
+  }
+  return out.map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
+/**
+ * The passage as a flat, ordered list of sentences — the unit the marker now
+ * works in. Split per paragraph first so a paragraph that doesn't end in
+ * punctuation (a heading, a list item) can't swallow the one after it.
+ */
+export function splitSentences(text: string): string[] {
+  return splitParagraphs(text).flatMap(splitParagraphSentences);
 }
 
 const countWords = (s: string) => s.split(/\s+/).filter(Boolean).length;
@@ -166,7 +206,25 @@ const markerSchema = z.object({
   tag: z.string().min(1),
   cite: z.string().min(1),
   citeDetails: z.string().min(1),
-  underlines: z.array(z.string()).max(300),
+  /**
+   * Sentence NUMBERS to underline, not the sentences themselves.
+   *
+   * This is the whole reason cards stopped being under-marked. Asking the model
+   * to COPY the read-aloud text back meant emitting most of the passage as JSON
+   * strings — fighting every model's bias toward short answers, and costing
+   * ~20 output tokens per sentence. Measured on real long articles it produced
+   * 3-6% of the card underlined however firmly the prompt asked for more.
+   * An index costs ~3 tokens, so marking 80% of a passage is now cheap, and
+   * "which sentences" is a judgement the model is good at.
+   *
+   * It also removes a whole failure mode: an index either resolves or is
+   * discarded, so an underline can never be silently lost to a copy that
+   * differed by a quote character.
+   */
+  underline: z.array(z.number().int().min(0)).max(4000).optional().default([]),
+  /** Legacy verbatim form. Kept so a model that ignores the numbering still
+   *  contributes something rather than producing a completely unmarked card. */
+  underlines: z.array(z.string()).max(300).optional().default([]),
   highlights: z.array(z.string()).max(400),
   // Optional so an older/underspecified model response still parses — a card
   // with no bolds is valid, just less emphasized.
@@ -175,29 +233,41 @@ const markerSchema = z.object({
 
 const MARKER_SYSTEM = `You are the emphasis marker inside a debate card-cutting tool (Lincoln-Douglas). You receive a claim and a passage extracted VERBATIM from an article. You do NOT rewrite anything — you return metadata that the app applies to the original text.
 
+The passage arrives as NUMBERED SENTENCES. You underline by NUMBER — you never copy the read-aloud text back.
+
 Return ONLY JSON:
-{"tag": "...", "cite": "...", "citeDetails": "...", "underlines": ["...", ...], "highlights": ["...", ...], "bolds": ["...", ...]}
+{"tag": "...", "cite": "...", "citeDetails": "...", "underline": [0, 1, 2, ...], "highlights": ["...", ...], "bolds": ["...", ...]}
 
 There are THREE layers of emphasis, exactly like a hand-cut debate card:
-  1. plain text — context that is kept but NOT read aloud (most of the passage stays plain).
-  2. underline — the sentences/clauses the debater READS ALOUD.
-  3. highlight — the key warrant phrases INSIDE the underlined text that the debater's voice STRESSES (coherent phrases, never lone keywords).
+  1. plain text — the LEFTOVERS: material that does not bear on the claim at all. Kept so the card stays honest about its source, never read aloud.
+  2. underline — everything that DOES bear on the claim, directly OR indirectly. On a passage chosen for this claim, this is normally the MAJORITY of the text.
+  3. highlight — the small set of key warrant phrases INSIDE the underlined text that the debater's voice STRESSES (coherent phrases, never lone keywords).
 
 Work through the passage from beginning to end so emphasis is distributed throughout, not clustered at the top.
 
-- underlines: the read-aloud text — full clauses/sentences COPIED EXACTLY from the passage. Underline the COMPLETE chain of reasoning that supports the claim, NOT only the sentences that restate it. Think like a skilled debater building a fully-warranted card, and underline a sentence if it does ANY of these for the claim:
+- underline: the NUMBERS of the sentences the debater reads aloud. Listing a number is cheap — there is no cost to being thorough, and a long list is EXPECTED. BE INCLUSIVE. This passage was already selected BECAUSE it supports the claim, so the default for any given sentence is that it gets underlined; leaving it out is the exception you have to justify.
+  Ask of each sentence: "could a debater use this to make the claim more convincing, better warranted, or more nuanced?" If yes — even INDIRECTLY — underline it. Underline a sentence if it does ANY of these:
     • states or restates the claim;
     • gives the WHY or HOW — the causal mechanism, logic, or warrant behind it;
-    • establishes a definition, premise, or assumption the argument depends on;
-    • supplies supporting evidence, data, an authority, or a concrete example;
-    • draws out an implication, consequence, or stake that follows from it.
-  A sentence does NOT need to contain the claim's exact words to be worth underlining — capture the surrounding reasoning that a judge needs to understand not just WHAT is claimed but WHY it is true and what follows.
-  BALANCE — avoid BOTH failure modes (this is critical): underline the READ-ALOUD CORE (the claim plus the load-bearing warrant, mechanism, evidence, and impact sentences a debater actually reads in-round) and leave the rest PLAIN (pure setup, scene-setting, throat-clearing transitions, tangents, citations, asides, and repetition).
-    (1) TOO MUCH: if you find yourself underlining nearly EVERY sentence — or the whole passage — you are underlining too much. Pull back to the sentences that genuinely carry the argument and leave the connective/background text plain. A card with everything underlined is as useless as one with nothing underlined.
-    (2) TOO LITTLE: if a judge could NOT follow WHY the claim is true from the underlined sentences alone, you are underlining too little — add the warrant/mechanism sentences that prove it.
-  The right amount SCALES with passage length: a longer passage keeps substantial plain context between the read-aloud sentences (you are selecting the spine of the argument, not shading the page). A debater reading only the underlined text should hear a complete, self-contained, well-warranted argument — not the entire article, and not a bare list of claim restatements. Each string stays within one paragraph.
+    • establishes a definition, premise, scope condition, or assumption the argument depends on;
+    • supplies supporting evidence, data, a study, an authority, or a concrete example;
+    • draws out an implication, consequence, stake, magnitude, or timeframe;
+    • qualifies, bounds, or adds nuance to the claim (qualified claims are HARDER to answer, so this text is valuable, not disposable);
+    • states a rival position the author then rebuts, or the rebuttal itself;
+    • supplies the background a judge needs for any of the above to land.
+  A sentence does NOT need to contain the claim's words to be worth underlining. Indirect relevance still counts.
 
-- highlights: the load-bearing warrant phrases WITHIN the underlined sentences — the words the debater stresses. Follow these rules strictly:
+  WHAT STAYS PLAIN — this is the SHORT list, not the long one:
+    • material genuinely about a different subject;
+    • navigation and meta-text ("this article argues", "see section 3"), author bios, acknowledgements, funding notes, reference lists;
+    • a point repeated verbatim that you already underlined elsewhere;
+    • pure connective throat-clearing carrying no content of its own.
+
+  CALIBRATION — read this twice: on a passage chosen for this claim, expect to list WELL OVER HALF of the sentence numbers, commonly 60-85% of them. UNDER-marking is by far the more common and more damaging failure: it hands the debater a card they must re-mark by hand, which defeats the entire tool. If your list covers less than half of a passage that is on-topic throughout, you have under-marked — go back and add the mechanism, evidence, implication and qualification sentences you skipped.
+  LENGTH IS NOT A REASON TO UNDERLINE LESS. A long passage that is on-topic throughout should be underlined throughout; do not "ration" emphasis to keep a long card looking sparse. Do not stop early to keep the list short — a 400-sentence passage may well need 300 numbers. The only thing to avoid at the other extreme is listing sentences that genuinely have nothing to do with the claim.
+  Give the numbers in ascending order.
+
+- highlights: the load-bearing warrant phrases WITHIN the underlined sentences — the words the debater stresses. Highlighting is the SELECTIVE layer and it does NOT grow just because underlining did: aim for roughly one highlight per two or three underlined sentences, concentrated on the reasoning that proves the claim. Underlining most of a passage while highlighting most of it too would collapse the two layers into one and make the card unreadable. Follow these rules strictly:
   • A highlight is a COHERENT, self-contained phrase that still makes sense read on its own — usually a short clause of about 3 to 10 words that keeps the key term TOGETHER with the words that state the point about it (subject + what is said about it). Example shape: "is the single strongest predictor of support", not "predictor".
   • NEVER highlight a bare topic word or buzzword by itself ("nationalism", "reality", "emissions", "one", "truth"). If the crucial term is a single word, extend the highlight to include the surrounding words that give it meaning. A highlight that is just a keyword with no context is WRONG.
   • Highlight each idea ONCE. NEVER highlight the same word or phrase more than once, even if the term recurs many times — choose the ONE sentence where it most clearly proves the claim and highlight it only there. Repeating the same buzzword is WRONG.
@@ -236,9 +306,13 @@ Finding the author (name the PERSON who wrote it, never the website):
 - NEVER invent, guess, or infer an author from the topic. Only if NO human author is stated anywhere (metadata or cite context) may you cite by the publication (e.g. "Reuters 25").
 - Same rule for dates and credentials: use only what the metadata or cite context actually states.
 
-Strings that don't match the passage exactly get silently dropped, so copy underlines/highlights/bolds with care — including punctuation and capitalization.`;
+Highlights and bolds are still VERBATIM copies (they are short, and they must land inside the right words) — copy them exactly, including punctuation and capitalization, or they are silently dropped. Underlines are numbers, so they cannot be dropped this way.`;
 
-function buildMarkerPrompt(claim: string, article: ExtractedArticle, passage: string): string {
+function buildMarkerPrompt(
+  claim: string,
+  article: ExtractedArticle,
+  sentences: string[],
+): string {
   // Bylines usually live at the very top or bottom of the article, which the
   // selected passage may exclude — give the model the head + tail for the cite.
   const head = article.text.slice(0, 800);
@@ -250,12 +324,42 @@ function buildMarkerPrompt(claim: string, article: ExtractedArticle, passage: st
     `Known metadata — title: ${article.title || "unknown"}; author: ${article.author || "unknown"}; publication: ${article.publication || "unknown"}; date: ${article.date || "unknown"}.`,
     "--- CITE CONTEXT (article start/end — for finding the author/date only, do NOT quote from here) ---",
     citeContext,
-    "--- PASSAGE (verbatim from the article — underline/highlight ONLY from here) ---",
-    passage,
+    `--- PASSAGE (${sentences.length} numbered sentences, verbatim from the article — underline by NUMBER; highlight/bold ONLY from here) ---`,
+    sentences.map((s, i) => `[${i}] ${s}`).join("\n"),
   ].join("\n");
 }
 
 type MarkerData = z.infer<typeof markerSchema>;
+
+/** A marked section: the model's output plus its underlines resolved to real text. */
+interface MarkedSection {
+  data: MarkerData;
+  /** Exact sentence strings to underline, taken from the passage itself. */
+  underlines: string[];
+}
+
+/**
+ * Turn the model's sentence numbers into the actual sentences.
+ *
+ * Out-of-range numbers are dropped rather than clamped: a hallucinated index is
+ * a guess about text that isn't there, and clamping it would underline a real
+ * sentence the model never chose. Duplicates collapse. Any legacy verbatim
+ * strings ride along, so a model that ignored the numbering still contributes.
+ */
+export function resolveUnderlines(
+  sentences: string[],
+  indices: number[],
+  legacy: string[] = [],
+): string[] {
+  const seen = new Set<number>();
+  const picked: string[] = [];
+  for (const i of indices) {
+    if (!Number.isInteger(i) || i < 0 || i >= sentences.length || seen.has(i)) continue;
+    seen.add(i);
+    picked.push(sentences[i]);
+  }
+  return [...picked, ...legacy];
+}
 
 /**
  * One marker call over a passage (or one section of it): the quality-critical
@@ -270,8 +374,9 @@ async function markPassageSection(
   claim: string,
   article: ExtractedArticle,
   section: string,
-): Promise<MarkerData> {
-  const prompt = buildMarkerPrompt(claim, article, section);
+): Promise<MarkedSection> {
+  const sentences = splitSentences(section);
+  const prompt = buildMarkerPrompt(claim, article, sentences);
   let raw: unknown;
   try {
     raw = await generateJson({
@@ -299,7 +404,10 @@ async function markPassageSection(
     console.error("cardCutter: unparseable marker output");
     throw new Error("Card cutting finished but returned an unreadable result. Please try again.");
   }
-  return parsed.data;
+  return {
+    data: parsed.data,
+    underlines: resolveUnderlines(sentences, parsed.data.underline, parsed.data.underlines),
+  };
 }
 
 /** Resolve the cut source into clean article text + metadata. */
@@ -445,10 +553,11 @@ async function runCut(req: CutRequest): Promise<Card> {
   const bolds: string[] = [];
 
   if (sections.length <= 1) {
-    head = await markPassageSection(req.claim, article, sections[0] ?? passage);
-    underlines.push(...head.underlines);
-    bolds.push(...head.bolds);
-    highlights.push(...head.highlights);
+    const only = await markPassageSection(req.claim, article, sections[0] ?? passage);
+    head = only.data;
+    underlines.push(...only.underlines);
+    bolds.push(...only.data.bolds);
+    highlights.push(...only.data.highlights);
   } else {
     // Section 0 owns the tag/cite (it holds the article's opening) and MUST
     // succeed. The rest are best-effort in parallel: one busy/failed section
@@ -468,12 +577,12 @@ async function runCut(req: CutRequest): Promise<Card> {
     if (!first) {
       throw new Error("Card cutting couldn't mark the opening section. Please try again.");
     }
-    head = first;
+    head = first.data;
     for (const m of marked) {
       if (!m) continue;
       underlines.push(...m.underlines);
-      bolds.push(...m.bolds);
-      highlights.push(...m.highlights);
+      bolds.push(...m.data.bolds);
+      highlights.push(...m.data.highlights);
     }
   }
 
