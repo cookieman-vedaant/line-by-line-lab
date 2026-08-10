@@ -29,7 +29,22 @@ export const CARD_FONTS = [
 ] as const;
 export type CardFont = (typeof CARD_FONTS)[number];
 
-export const MUTED_HEX = "#808080";
+/**
+ * Every glyph in a card is BLACK. Not "mostly black" — the cite, the bracketed
+ * citation details, and the small unread context are all pure black, exactly
+ * like the read-aloud text.
+ *
+ * This is not a style preference, it's the card format. What separates the
+ * layers is SIZE, UNDERLINE, HIGHLIGHT and WEIGHT — never colour. An earlier
+ * version greyed the 8pt context and the citation details, which made the cite
+ * (the part a judge is most likely to be asked to look at) the faintest thing on
+ * the page and printed badly in greyscale. Do not reintroduce a muted ink to
+ * signal "you don't read this aloud"; the smaller point size already says it.
+ *
+ * Highlighting is a separate axis entirely — a background fill, not a text
+ * colour. Don't conflate the two.
+ */
+export const CARD_INK_HEX = "#000000";
 
 export interface Run {
   text: string;
@@ -77,13 +92,13 @@ export function citeHtml(cite: string): string {
 }
 
 export function detailsHtml(details: string): string {
-  return span(`[${stripDelimiters(details)}]`, `font-size:${READ_PT}pt;color:${MUTED_HEX}`);
+  return span(`[${stripDelimiters(details)}]`, `font-size:${READ_PT}pt;color:${CARD_INK_HEX}`);
 }
 
 /**
  * One body paragraph. The three-layer format, plus bold as an emphasis axis:
  *
- *   plain                          8pt grey — context you don't read aloud
+ *   plain                          8pt — context you don't read aloud
  *   underline                      11pt underlined — read aloud
  *   underline + highlight          11pt underlined + cyan — read aloud, stressed
  *   underline + bold               11pt underlined, bold — critical context
@@ -109,7 +124,9 @@ export function bodyParagraphHtml(paragraph: string, highlightHex: string): stri
       if (n.kind === "underline") {
         return span(n.text, `font-size:${READ_PT}pt;text-decoration:underline${weight}`);
       }
-      return span(n.text, `font-size:${CONTEXT_PT}pt;color:${MUTED_HEX}`);
+      // Smaller, but the SAME black as everything else — size alone marks it as
+      // context. See CARD_INK_HEX.
+      return span(n.text, `font-size:${CONTEXT_PT}pt;color:${CARD_INK_HEX}`);
     })
     .join("");
 }

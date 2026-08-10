@@ -1,4 +1,4 @@
-import { CONTEXT_PT, MUTED_HEX } from "@/lib/cardRich";
+import { CARD_INK_HEX } from "@/lib/cardRich";
 
 /**
  * Editing commands for the card surface.
@@ -56,9 +56,12 @@ export function queryActive(command: string): boolean {
  * earlier edit keeps its own size and the change appears to do nothing to part
  * of the selection.
  *
- * Size also carries the card's own convention: shrunk text is context and reads
- * grey, read-aloud text is black. Applying a size sets the matching colour so
- * the card stays legible as a card.
+ * Colour is set explicitly to black, at EVERY size. Shrinking text used to also
+ * grey it, on the theory that context reads muted — but a card is black ink on
+ * white, and size alone marks what you don't read aloud (see CARD_INK_HEX).
+ * Setting it explicitly rather than leaving it unset matters: the selection may
+ * already sit inside a grey span from an older card, and only an explicit value
+ * overrides that.
  */
 export function setSizePt(pt: number): void {
   const sel = window.getSelection();
@@ -67,7 +70,7 @@ export function setSizePt(pt: number): void {
   const range = sel.getRangeAt(0);
   const wrapper = document.createElement("span");
   wrapper.style.fontSize = `${pt}pt`;
-  wrapper.style.color = pt <= CONTEXT_PT ? MUTED_HEX : "#000000";
+  wrapper.style.color = CARD_INK_HEX;
 
   try {
     wrapper.appendChild(range.extractContents());

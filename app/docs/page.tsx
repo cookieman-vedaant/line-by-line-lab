@@ -49,7 +49,7 @@ const NAV: readonly { group: string; items: readonly { id: string; title: string
     group: "Cutting it",
     items: [
       { id: "cut", title: "Cut a Card" },
-      { id: "history", title: "My Cards" },
+      { id: "history", title: "My Cards — your library" },
       { id: "cards", title: "Working with cards" },
     ],
   },
@@ -204,7 +204,7 @@ export default function Docs() {
             what it can do.
           </h1>
           <p className="mt-5 max-w-2xl text-lg font-medium leading-snug">
-            Eight tools. What each one takes, what it gives back, and where it stops.
+            Seven tools. What each one takes, what it gives back, and where it stops.
           </p>
           <div className="masthead-rule mt-8 h-[3px] w-full bg-ink" />
         </header>
@@ -386,17 +386,15 @@ export default function Docs() {
               </Note>
             </Tool>
 
-            <Tool
-              id="history"
-              name="My Cards"
-              tag={
-                <>
-                  Every card you have ever cut, <Hi>saved to your account automatically</Hi> —
-                  from either tool, on every device.
-                </>
-              }
-              cite="lab › my cards · nothing to set up"
-            >
+            {/* Plain, not a Tool card. The carded treatment on this page means
+                "a tool you can open and do work with"; your library is a record
+                of work already done, and it sits above the tool row in the Lab
+                for the same reason. */}
+            <Plain id="history" title="My Cards — your library">
+              <p>
+                Every card you have ever cut, saved to your account automatically — from either
+                tool, on every device. There is nothing to set up and no Save button.
+              </p>
               <Block label="What lands here">
                 <Bullets
                   items={[
@@ -422,7 +420,7 @@ export default function Docs() {
                 actually produced. Editing an open card changes your copy for export, never the
                 record. Deleting your account deletes all of it.
               </Note>
-            </Tool>
+            </Plain>
 
             <Plain id="cards" title="Working with cards">
               <p>

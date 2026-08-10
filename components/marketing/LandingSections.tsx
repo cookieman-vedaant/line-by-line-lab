@@ -191,11 +191,11 @@ export function Toolkit() {
           id="toolkit-heading"
           className="max-w-3xl font-display text-4xl font-extrabold leading-[0.95] tracking-tight sm:text-6xl"
         >
-          Eight tools. <span className="text-accent">One workflow.</span>
+          Seven tools. <span className="text-accent">One workflow.</span>
         </h2>
         <p className="mt-5 max-w-xl text-lg font-medium text-ink/70">
-          Everything a round demands: research, disclosed prep, cards, your card library, opponent
-          prep, coaching, and your own record, in one workspace.
+          Everything a round demands: research, disclosed prep, cards, opponent prep, coaching, and
+          your own record, in one workspace.
         </p>
       </Reveal>
 

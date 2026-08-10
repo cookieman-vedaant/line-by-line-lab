@@ -50,6 +50,9 @@ export default function HistoryPanel({
   const [openId, setOpenId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const loadedOnce = useRef(false);
+  /** The cut count this list already reflects. Differs from `refreshKey` exactly
+   *  when a card was cut since the last load — including while closed. */
+  const seenRefresh = useRef(refreshKey);
 
   /**
    * Fetch page one.
@@ -83,17 +86,30 @@ export default function HistoryPanel({
     });
   }, []);
 
-  // First reveal → load. Every panel stays mounted, so this is what keeps the
-  // query off the Lab's critical path for people who never open the tab.
+  /**
+   * One effect for both "the library was opened" and "a card was cut".
+   *
+   * Everything is gated on `active`, which is what keeps the query off the Lab's
+   * critical path: this component stays mounted while the library is closed, so
+   * an ungated fetch would pull a page of card bodies on every Lab load for
+   * people who never open it.
+   *
+   * `seenRefresh` carries a pending refresh across a closed period instead of
+   * fetching in the background — cut ten cards in a row with the library shut
+   * and it costs zero requests, then exactly one when you open it.
+   */
   useEffect(() => {
-    if (active && !loadedOnce.current) void loadFirstPage("initial");
-  }, [active, loadFirstPage]);
-
-  // A card was cut somewhere → pull the new one in, but only if this panel has
-  // been opened at all; there is nothing to keep fresh otherwise.
-  useEffect(() => {
-    if (refreshKey > 0 && loadedOnce.current) void loadFirstPage("refresh");
-  }, [refreshKey, loadFirstPage]);
+    if (!active) return;
+    if (!loadedOnce.current) {
+      seenRefresh.current = refreshKey;
+      void loadFirstPage("initial");
+      return;
+    }
+    if (seenRefresh.current !== refreshKey) {
+      seenRefresh.current = refreshKey;
+      void loadFirstPage("refresh");
+    }
+  }, [active, refreshKey, loadFirstPage]);
 
   async function loadMore() {
     if (!cursor) return;
@@ -175,10 +191,13 @@ export default function HistoryPanel({
       )}
 
       {cards.length > 0 && (
+        // Precise about what the number covers: the filter only sees cards that
+        // have actually been loaded, so claiming a bare total would be a lie the
+        // moment a library runs past one page.
         <p className="label-mono text-xs text-ink/60">
-          {shown.length}
-          {filtering ? ` of ${cards.length}` : ""} card{shown.length === 1 ? "" : "s"}
-          {cursor && !filtering ? " loaded" : ""}
+          {filtering
+            ? `${shown.length} of ${cards.length} loaded card${cards.length === 1 ? "" : "s"} match`
+            : `${cards.length} card${cards.length === 1 ? "" : "s"}${cursor ? " loaded so far" : ""}`}
         </p>
       )}
 
@@ -265,7 +284,7 @@ function HistoryRow({
           type="button"
           onClick={onDelete}
           disabled={deleting}
-          className="label-mono btn-press frame shrink-0 bg-paper px-2.5 py-1.5 text-[10px] font-bold text-ink hover:text-red disabled:opacity-60"
+          className="label-mono btn-press frame shrink-0 bg-paper px-3 py-2 text-[10px] font-bold text-ink hover:text-red disabled:opacity-60"
         >
           {deleting ? "…" : "Delete"}
         </button>

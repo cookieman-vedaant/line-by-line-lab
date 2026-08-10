@@ -33,15 +33,20 @@ type SearchState =
   | { status: "empty"; notice: string }
   | { status: "error"; message: string };
 
-type Tab = "find" | "cut" | "history" | "wiki" | "rehighlight" | "coach" | "record";
+type Tab = "find" | "cut" | "wiki" | "rehighlight" | "coach" | "record";
 
-// Declared once, in the order they appear, so the tablist markup and the
-// arrow-key order can never drift apart. History sits directly after Cut a Card
-// because that is what it is: where your cuts end up.
+/**
+ * The tools, and ONLY the tools. Declared once, in the order they appear, so the
+ * tablist markup and the arrow-key order can never drift apart.
+ *
+ * My Cards is deliberately NOT here. This row is for things that do work —
+ * things you open to produce something. Your card library is a record of work
+ * already done, so it sits above the row as its own control rather than
+ * competing for attention with six verbs.
+ */
 const TABS: readonly { value: Tab; label: string }[] = [
   { value: "find", label: "Find Articles" },
   { value: "cut", label: "Cut a Card" },
-  { value: "history", label: "My Cards" },
   { value: "wiki", label: "Wiki" },
   { value: "rehighlight", label: "Re-Highlight" },
   { value: "coach", label: "Coach" },
@@ -70,6 +75,8 @@ export default function EvidenceWorkbench() {
   // account's history by the time we get here, so this is only the nudge that
   // tells the My Cards tab its list is one card out of date.
   const [cutCount, setCutCount] = useState(0);
+  // The card library, opened from above the tool row rather than from it.
+  const [libraryOpen, setLibraryOpen] = useState(false);
 
   /** Single place both cut paths report through, so neither can forget one half. */
   function noteCut(card: Card, source: string) {
@@ -196,9 +203,36 @@ export default function EvidenceWorkbench() {
 
   return (
     <div className="flex flex-col gap-8">
-      <div role="tablist" aria-label="Tool" className="flex flex-wrap gap-2 sm:gap-3">
-        {TABS.map(tabButton)}
+      {/* Your card library, above the tools and separate from them. A disclosure
+          button, NOT a seventh tab: the tab row is the list of things you can do,
+          and this is the record of what you've already done. */}
+      <div className="flex items-center justify-between gap-3 border-b-2 border-ink/15 pb-4">
+        <button
+          type="button"
+          onClick={() => setLibraryOpen((open) => !open)}
+          aria-expanded={libraryOpen}
+          aria-controls="card-library"
+          className={`btn-press frame inline-flex items-center gap-2 px-4 py-2 font-display text-xs font-bold uppercase tracking-wide sm:text-sm ${
+            libraryOpen ? "bg-ink text-paper" : "bg-paper-2 text-ink"
+          }`}
+        >
+          <span aria-hidden>▤</span> My Cards
+        </button>
+        <p className="label-mono hidden text-[10px] text-ink/50 sm:block">
+          {libraryOpen ? "every card you've cut" : "saved automatically as you cut"}
+        </p>
       </div>
+
+      <div id="card-library" className={libraryOpen ? "tab-panel" : "hidden"}>
+        <HistoryPanel active={libraryOpen} refreshKey={cutCount} />
+      </div>
+
+      {/* The tools. Hidden rather than unmounted while the library is open, so
+          search results and half-typed text are still there on the way back. */}
+      <div className={libraryOpen ? "hidden" : "flex flex-col gap-8"}>
+        <div role="tablist" aria-label="Tool" className="flex flex-wrap gap-2 sm:gap-3">
+          {TABS.map(tabButton)}
+        </div>
 
       <div
         role="tabpanel"
@@ -233,19 +267,6 @@ export default function EvidenceWorkbench() {
       >
         <div className="tab-panel">
           <CardCutterPanel initialClaim={lastParams?.claim} onCardCut={noteCut} />
-        </div>
-      </div>
-
-      <div
-        role="tabpanel"
-        id={panelId("history")}
-        aria-labelledby={tabId("history")}
-        className={tab === "history" ? "" : "hidden"}
-      >
-        <div className="tab-panel">
-          {/* `active` matters: every panel is mounted, so without it this would
-              fetch a page of card bodies on every Lab load, for everyone. */}
-          <HistoryPanel active={tab === "history"} refreshKey={cutCount} />
         </div>
       </div>
 
@@ -334,6 +355,7 @@ export default function EvidenceWorkbench() {
             </div>
           )}
         </div>
+      </div>
       </div>
     </div>
   );

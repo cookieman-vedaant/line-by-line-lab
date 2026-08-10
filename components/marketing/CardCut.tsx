@@ -104,8 +104,9 @@ export default function CardCut() {
           </h3>
 
           <p className="cut-cite mt-2 leading-snug" style={{ fontSize: "11pt" }}>
-            <span className="font-bold">{CITE}</span>{" "}
-            <span style={{ color: "#808080" }}>[{DETAILS}]</span>
+            {/* Black, like every other glyph on a real card — this mock has to
+                depict the format the Card Cutter actually produces. */}
+            <span className="font-bold">{CITE}</span> <span>[{DETAILS}]</span>
           </p>
 
           <div

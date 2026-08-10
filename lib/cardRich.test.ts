@@ -7,7 +7,14 @@ import {
   UNDERLINE_CLOSE,
   UNDERLINE_OPEN,
 } from "./cardMarkup";
-import { bodyParagraphHtml, CONTEXT_PT, READ_PT } from "./cardRich";
+import {
+  bodyParagraphHtml,
+  CARD_INK_HEX,
+  CONTEXT_PT,
+  detailsHtml,
+  READ_PT,
+  sheetHtml,
+} from "./cardRich";
 
 const CYAN = "#00FFFF";
 const u = (s: string) => `${UNDERLINE_OPEN}${s}${UNDERLINE_CLOSE}`;
@@ -64,7 +71,7 @@ describe("bodyParagraphHtml", () => {
     expect(new Set([plainU, boldU, plainH, boldH]).size).toBe(4);
   });
 
-  it("renders un-emphasized text as small grey context, never bold", () => {
+  it("renders un-emphasized text as small context, never bold", () => {
     const css = spanFor(bodyParagraphHtml("ctx", CYAN), "ctx");
     expect(css).toContain(`font-size:${CONTEXT_PT}pt`);
     expect(isBold(css)).toBe(false);
@@ -73,7 +80,7 @@ describe("bodyParagraphHtml", () => {
 
   it("never bolds text that is not underlined", () => {
     // A stray bold span over plain text: the parser drops it, so the rendered
-    // context text must still be plain 8pt grey.
+    // context text must still be plain 8pt.
     const css = spanFor(bodyParagraphHtml(b("stray"), CYAN), "stray");
     expect(isBold(css)).toBe(false);
     expect(css).toContain(`font-size:${CONTEXT_PT}pt`);
@@ -81,5 +88,61 @@ describe("bodyParagraphHtml", () => {
 
   it("escapes HTML in the source text", () => {
     expect(bodyParagraphHtml(u("a <b> & c"), CYAN)).toContain("a &lt;b&gt; &amp; c");
+  });
+});
+
+/*
+ * A card is black ink on white. Every glyph — the tag, the cite, the bracketed
+ * citation details, the small unread context — is pure black; what separates
+ * the layers is size, underline, highlight and weight, never colour.
+ *
+ * This is pinned by tests because it regressed once already: the details and
+ * the 8pt context were rendered #808080, which made the cite the faintest thing
+ * on the page and printed badly in greyscale. Highlighting is a BACKGROUND
+ * fill and is unaffected by any of this.
+ */
+describe("card ink is black everywhere", () => {
+  // The lookbehind is load-bearing: without it this also matches
+  // `background-color:#00FFFF` and fails on a perfectly correct highlight. Text
+  // colour and highlight fill are separate axes and this regex must not conflate
+  // them — which is the same mistake the rendering itself has to avoid.
+  const anyNonBlackInk = /(?<!background-)color:\s*#(?!000000\b)[0-9a-f]{6}/i;
+
+  it("declares black, not a muted grey", () => {
+    expect(CARD_INK_HEX.toLowerCase()).toBe("#000000");
+  });
+
+  it("renders the bracketed citation details in black", () => {
+    const html = detailsHtml("Spratt, Existential risk, BTN, 2019");
+    expect(html).toContain(`color:${CARD_INK_HEX}`);
+    expect(html).not.toMatch(anyNonBlackInk);
+  });
+
+  it("renders small unread context in black, distinguished only by size", () => {
+    const css = spanFor(bodyParagraphHtml("ctx", CYAN), "ctx");
+    expect(css).toContain(`color:${CARD_INK_HEX}`);
+    expect(css).toContain(`font-size:${CONTEXT_PT}pt`);
+    expect(css).not.toMatch(anyNonBlackInk);
+  });
+
+  it("uses no non-black text colour anywhere in a full sheet", () => {
+    const html = sheetHtml(
+      {
+        tag: `Warming ${u("causes extinction")}`,
+        cite: "Spratt 19",
+        citeDetails: "Spratt, Existential risk, BTN, 2019",
+        body: `Context before. ${u("The read-aloud part")} and ${h("the key warrant")}.`,
+      },
+      CYAN,
+    );
+    expect(html).not.toMatch(anyNonBlackInk);
+    // The highlight fill is a background, and must survive the black-ink rule.
+    expect(html).toContain(`background-color:${CYAN}`);
+  });
+
+  it("keeps read-aloud text at the larger size so the layers stay distinct", () => {
+    const html = bodyParagraphHtml(`ctx ${u("read")}`, CYAN);
+    expect(spanFor(html, "read")).toContain(`font-size:${READ_PT}pt`);
+    expect(spanFor(html, "ctx ")).toContain(`font-size:${CONTEXT_PT}pt`);
   });
 });
