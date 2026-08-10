@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  BOLD_OPEN,
   HIGHLIGHT_CLOSE,
   HIGHLIGHT_OPEN,
   parseCardMarkup,
+  stripDelimiters,
   UNDERLINE_CLOSE,
   UNDERLINE_OPEN,
 } from "./cardMarkup";
-import { applyEmphasis } from "./emphasis";
+import { applyEmphasis, applyEmphasisSpans } from "./emphasis";
 
 const TEXT =
   "Avidya is a Sanskrit word most commonly defined as ignorance. It is spiritual ignorance.\n\nThe Advaita Vedanta school of Hinduism can be traced to the Upanisads.";
@@ -128,5 +130,63 @@ describe("applyEmphasis", () => {
     const { missed, applied } = applyEmphasis(source, [], ["one"]);
     expect(applied).toBe(0);
     expect(missed).toBe(1);
+  });
+});
+
+/*
+ * The span form exists because the card cutter marks SUB-SENTENCE fragments now,
+ * and a fragment like "Avidya is" occurs many times in one passage — a substring
+ * search cannot know which occurrence the model meant. The caller resolves each
+ * fragment against its own sentence and passes offsets instead.
+ */
+describe("applyEmphasisSpans", () => {
+  const source = "Avidya is ignorance. Avidya is spiritual ignorance.";
+  const spanOf = (needle: string, from = 0): [number, number] => {
+    const at = source.indexOf(needle, from);
+    return [at, at + needle.length];
+  };
+
+  /*
+   * The no-fabrication guarantee, which this whole mechanism has to preserve:
+   * marking may only INSERT delimiters. If stripping them didn't return the
+   * source exactly, the card would no longer be the author's words.
+   */
+  it("never alters the underlying text — only wraps it", () => {
+    const body = applyEmphasisSpans(
+      source,
+      [spanOf("Avidya is"), spanOf("spiritual ignorance")],
+      [spanOf("spiritual ignorance")],
+      [spanOf("ignorance")],
+    );
+    expect(stripDelimiters(body)).toBe(source);
+  });
+
+  it("marks the exact occurrence it was given, not the first match", () => {
+    const second = spanOf("Avidya is", 5); // the one opening sentence two
+    const body = applyEmphasisSpans(source, [second], [], []);
+    const opened = body.indexOf(UNDERLINE_OPEN);
+    expect(body.slice(0, opened)).toContain("Avidya is ignorance.");
+  });
+
+  /*
+   * Highlighted text is by definition text the debater reads aloud, so a
+   * highlight the model forgot to also underline must still come out as read
+   * text rather than a stranded highlight in unread plain type.
+   */
+  it("treats a highlight as implying an underline", () => {
+    const body = applyEmphasisSpans(source, [], [spanOf("ignorance")], []);
+    const nodes = parseCardMarkup(body);
+    expect(nodes.some((n) => n.kind === "highlight")).toBe(true);
+    expect(stripDelimiters(body)).toBe(source);
+  });
+
+  it("drops bold that lands outside every marked span", () => {
+    const body = applyEmphasisSpans(source, [spanOf("Avidya is")], [], [spanOf("spiritual")]);
+    expect(body).not.toContain(BOLD_OPEN);
+  });
+
+  it("clamps spans that run past the text instead of throwing", () => {
+    const body = applyEmphasisSpans(source, [[-5, source.length + 40]], [], []);
+    expect(stripDelimiters(body)).toBe(source);
   });
 });

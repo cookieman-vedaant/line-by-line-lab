@@ -45,6 +45,16 @@ function isBoundaryClean(text: string, start: number, end: number): boolean {
   return !cutsLeft && !cutsRight;
 }
 
+/**
+ * Build a reusable finder over `text`. The normalized index is the expensive
+ * part, so callers resolving many fragments against the same passage build it
+ * once.
+ */
+export function createLocator(text: string): (needle: string) => Array<[number, number]> {
+  const index = buildNormalizedIndex(text);
+  return (needle: string) => locateSpans(index, text, needle);
+}
+
 /** Find every word-boundary-clean raw-offset span of `needle` in the text. */
 function locateSpans(
   index: ReturnType<typeof buildNormalizedIndex>,
@@ -162,7 +172,57 @@ export function applyEmphasis(
     }
   }
 
-  // Emit text with markers, closing/reopening at line breaks.
+  return { body: renderMarked(text, marks, boldMarks), missed, applied };
+}
+
+/**
+ * Apply emphasis from already-resolved character SPANS rather than substrings to
+ * search for.
+ *
+ * The card cutter needs this because it marks sub-sentence fragments now, and a
+ * fragment like "Avidya is" occurs a dozen times in the same passage — there is
+ * no way for a substring search to know which one the model meant. The caller
+ * resolves each fragment against the specific sentence it belongs to and passes
+ * the resulting offsets here, so the ambiguity never arises.
+ *
+ * The hierarchy is enforced structurally, not trusted:
+ *   - a highlight span also underlines, because highlighted text is by
+ *     definition text the debater reads aloud;
+ *   - bold only lands where something is already emphasized.
+ * That way a model that highlights a phrase it forgot to underline still
+ * produces a correct card instead of a stranded highlight in unread text.
+ */
+export function applyEmphasisSpans(
+  text: string,
+  underline: ReadonlyArray<readonly [number, number]>,
+  highlight: ReadonlyArray<readonly [number, number]>,
+  bold: ReadonlyArray<readonly [number, number]> = [],
+): string {
+  text = stripDelimiters(text);
+  const marks = new Uint8Array(text.length);
+  const boldMarks = new Uint8Array(text.length);
+
+  const paint = (spans: ReadonlyArray<readonly [number, number]>, level: number) => {
+    for (const [start, end] of spans) {
+      const from = Math.max(0, start);
+      const to = Math.min(text.length, end);
+      for (let i = from; i < to; i++) if (marks[i] < level) marks[i] = level;
+    }
+  };
+  paint(underline, UNDERLINE);
+  paint(highlight, HIGHLIGHT); // implies underline — HIGHLIGHT is the higher level
+
+  for (const [start, end] of bold) {
+    const from = Math.max(0, start);
+    const to = Math.min(text.length, end);
+    for (let i = from; i < to; i++) if (marks[i] !== PLAIN) boldMarks[i] = 1;
+  }
+
+  return renderMarked(text, marks, boldMarks);
+}
+
+/** Emit `text` with delimiters around each marked run. */
+function renderMarked(text: string, marks: Uint8Array, boldMarks: Uint8Array): string {
   const out: string[] = [];
   let current = PLAIN;
   let boldOn = false;
@@ -210,5 +270,5 @@ export function applyEmphasis(
   }
   close();
 
-  return { body: out.join(""), missed, applied };
+  return out.join("");
 }

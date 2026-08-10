@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   appendSourceUrl,
   fitRangeToBudget,
-  resolveUnderlines,
+  resolveMarks,
   splitIntoSections,
   splitParagraphs,
   splitSentences,
@@ -179,35 +179,90 @@ describe("splitSentences", () => {
   });
 });
 
-describe("resolveUnderlines", () => {
-  const sentences = ["Zero.", "One.", "Two.", "Three."];
+/*
+ * Marking is SUB-SENTENCE, which is what a real hand-cut card looks like: from
+ * "Avidya is a Sanskrit word most commonly defined as ignorance." a debater
+ * underlines "Avidya is" and "ignorance" and leaves the rest small. Two earlier
+ * designs failed here — copying read-aloud text back verbatim produced almost
+ * no marks, and selecting whole sentences by number produced cards with
+ * everything underlined and nothing usefully stressed.
+ *
+ * Scoping each fragment to the sentence the model named is what makes this
+ * possible: "Avidya is" occurs all over a passage, and a bare substring search
+ * cannot tell which one was meant.
+ */
+describe("resolveMarks", () => {
+  const section =
+    "Avidya is a Sanskrit word most commonly defined as ignorance. " +
+    "This can be misleading if we think of ignorance as a lack of knowledge. " +
+    "Avidya is our mistaken belief that these things make up reality.";
+  const sentences = splitSentences(section);
+  const textOf = (span: [number, number]) => section.slice(span[0], span[1]);
 
-  it("maps indices to the real sentences, in the order given", () => {
-    expect(resolveUnderlines(sentences, [0, 2])).toEqual(["Zero.", "Two."]);
+  it("resolves fragments to their exact place in the section", () => {
+    const out = resolveMarks(section, sentences, [
+      { s: 0, u: ["Avidya is", "ignorance"], h: [], b: [] },
+    ]);
+    expect(out.underline.map(textOf)).toEqual(["Avidya is", "ignorance"]);
+    expect(out.missed).toBe(0);
   });
 
   /*
-   * A hallucinated index is a guess about text that isn't there. Dropping it is
-   * right; CLAMPING it would underline a real sentence the model never chose,
-   * quietly attributing an emphasis decision to it that it never made.
+   * The core disambiguation. "Avidya is" opens sentence 0 AND sentence 2; a
+   * global search would mark the first one both times, silently moving the
+   * debater's emphasis onto a sentence they didn't choose.
    */
-  it("drops out-of-range and non-integer indices rather than clamping", () => {
-    expect(resolveUnderlines(sentences, [-1, 4, 99, 1.5, 2])).toEqual(["Two."]);
+  it("picks the occurrence inside the named sentence, not the first in the section", () => {
+    const first = resolveMarks(section, sentences, [{ s: 0, u: ["Avidya is"], h: [], b: [] }]);
+    const third = resolveMarks(section, sentences, [{ s: 2, u: ["Avidya is"], h: [], b: [] }]);
+    expect(first.underline[0][0]).toBe(section.indexOf("Avidya is"));
+    expect(third.underline[0][0]).toBe(section.lastIndexOf("Avidya is"));
+    expect(first.underline[0][0]).not.toBe(third.underline[0][0]);
   });
 
-  it("collapses duplicate indices", () => {
-    expect(resolveUnderlines(sentences, [1, 1, 1])).toEqual(["One."]);
+  it("keeps the three layers separate", () => {
+    const out = resolveMarks(section, sentences, [
+      {
+        s: 2,
+        u: ["Avidya is", "our mistaken belief that these", "make up reality"],
+        h: ["make up reality"],
+        b: ["reality"],
+      },
+    ]);
+    expect(out.underline).toHaveLength(3);
+    expect(out.highlight.map(textOf)).toEqual(["make up reality"]);
+    expect(out.bold.map(textOf)).toEqual(["reality"]);
   });
 
-  it("still honours legacy verbatim strings so an old-format reply isn't lost", () => {
-    expect(resolveUnderlines(sentences, [0], ["Some copied text."])).toEqual([
-      "Zero.",
-      "Some copied text.",
+  /*
+   * Dropping beats guessing: marking a fragment the model didn't point at would
+   * attribute an emphasis decision to it that it never made — the same reason
+   * the cutter never invents text.
+   */
+  it("drops a short fragment that isn't in its own sentence", () => {
+    const out = resolveMarks(section, sentences, [{ s: 1, u: ["Avidya is"], h: [], b: [] }]);
+    expect(out.underline).toHaveLength(0);
+    expect(out.missed).toBe(1);
+  });
+
+  // A long fragment is effectively unique, so an off-by-one sentence number
+  // shouldn't cost the debater the mark.
+  it("still resolves a long fragment when the sentence number is off", () => {
+    const out = resolveMarks(section, sentences, [
+      { s: 0, u: ["our mistaken belief that these things make up reality"], h: [], b: [] },
+    ]);
+    expect(out.underline.map(textOf)).toEqual([
+      "our mistaken belief that these things make up reality",
     ]);
   });
 
-  it("returns nothing when the model selected nothing", () => {
-    expect(resolveUnderlines(sentences, [])).toEqual([]);
-    expect(resolveUnderlines([], [0, 1])).toEqual([]);
+  it("ignores marks pointing at sentences that don't exist", () => {
+    const out = resolveMarks(section, sentences, [{ s: 99, u: ["Avidya is"], h: [], b: [] }]);
+    expect(out.underline).toHaveLength(0);
+  });
+
+  it("handles a sentence the model chose to leave alone", () => {
+    const out = resolveMarks(section, sentences, []);
+    expect(out).toEqual({ underline: [], highlight: [], bold: [], missed: 0 });
   });
 });

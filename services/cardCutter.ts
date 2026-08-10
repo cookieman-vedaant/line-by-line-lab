@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { tagMarkupToDelimiters } from "@/lib/cardMarkup";
-import { applyEmphasis } from "@/lib/emphasis";
-import { GEMINI_MARKER_MODEL, GEMINI_MODEL, RateLimitedError, generateJson } from "@/lib/gemini";
+import { applyEmphasisSpans, createLocator } from "@/lib/emphasis";
+import { GEMINI_MARKER_MODEL, GEMINI_MODEL, generateJson } from "@/lib/gemini";
 import { createSharedCache } from "@/lib/sharedCache";
 import {
   ArticleUnreadableError,
@@ -202,99 +202,151 @@ Card length targets (share of the article's total words):
 If NOTHING in the article supports the claim, return {"error": "no_warrant"}.
 Otherwise return ONLY JSON: {"startIndex": N, "endIndex": M} (inclusive paragraph indices).`;
 
+/**
+ * Emphasis for ONE sentence: the exact fragments of it to underline, highlight
+ * and bold.
+ *
+ * Marking is per-sentence and SUB-SENTENCE, which is the shape a real hand-cut
+ * card has. Two earlier designs both failed on real articles:
+ *
+ *   - copying whole read-aloud sentences back as verbatim strings fought the
+ *     model's brevity bias and produced almost nothing (3-6% marked);
+ *   - selecting whole sentences by NUMBER fixed the volume but had no word
+ *     economy at all — every kept sentence was underlined end to end, including
+ *     its citations and hedges, so cards came back with nearly everything
+ *     underlined and nothing usefully stressed.
+ *
+ * Naming the sentence AND the fragments inside it gets both: the index scopes
+ * the search (so a fragment as common as "Avidya is" resolves unambiguously)
+ * while the fragments carry the trimming that makes a card readable at speed.
+ */
+const markSchema = z.object({
+  /** Sentence number from the numbered passage. */
+  s: z.number().int().min(0),
+  /** Fragments to underline — what the debater reads aloud. */
+  u: z.array(z.string()).max(40).optional().default([]),
+  /** Fragments to highlight; a subset of `u`. */
+  h: z.array(z.string()).max(20).optional().default([]),
+  /** Short fragments to bold. */
+  b: z.array(z.string()).max(20).optional().default([]),
+});
+
+export type MarkEntry = z.infer<typeof markSchema>;
+
 const markerSchema = z.object({
   tag: z.string().min(1),
   cite: z.string().min(1),
   citeDetails: z.string().min(1),
-  /**
-   * Sentence NUMBERS to underline, not the sentences themselves.
-   *
-   * This is the whole reason cards stopped being under-marked. Asking the model
-   * to COPY the read-aloud text back meant emitting most of the passage as JSON
-   * strings — fighting every model's bias toward short answers, and costing
-   * ~20 output tokens per sentence. Measured on real long articles it produced
-   * 3-6% of the card underlined however firmly the prompt asked for more.
-   * An index costs ~3 tokens, so marking 80% of a passage is now cheap, and
-   * "which sentences" is a judgement the model is good at.
-   *
-   * It also removes a whole failure mode: an index either resolves or is
-   * discarded, so an underline can never be silently lost to a copy that
-   * differed by a quote character.
-   */
-  underline: z.array(z.number().int().min(0)).max(4000).optional().default([]),
-  /** Legacy verbatim form. Kept so a model that ignores the numbering still
-   *  contributes something rather than producing a completely unmarked card. */
-  underlines: z.array(z.string()).max(300).optional().default([]),
-  highlights: z.array(z.string()).max(400),
-  // Optional so an older/underspecified model response still parses — a card
-  // with no bolds is valid, just less emphasized.
-  bolds: z.array(z.string()).max(200).optional().default([]),
+  marks: z.array(markSchema).max(3000).optional().default([]),
 });
 
 const MARKER_SYSTEM = `You are the emphasis marker inside a debate card-cutting tool (Lincoln-Douglas). You receive a claim and a passage extracted VERBATIM from an article. You do NOT rewrite anything — you return metadata that the app applies to the original text.
 
-The passage arrives as NUMBERED SENTENCES. You underline by NUMBER — you never copy the read-aloud text back.
+The passage arrives as NUMBERED SENTENCES. For each sentence worth marking, you return the exact FRAGMENTS of it to underline, highlight and bold.
 
 Return ONLY JSON:
-{"tag": "...", "cite": "...", "citeDetails": "...", "underline": [0, 1, 2, ...], "highlights": ["...", ...], "bolds": ["...", ...]}
+{"tag": "...", "cite": "...", "citeDetails": "...", "marks": [{"s": 0, "u": ["...", "..."], "h": ["..."], "b": ["..."]}, ...]}
 
-There are THREE layers of emphasis, exactly like a hand-cut debate card:
-  1. plain text — the LEFTOVERS: material that does not bear on the claim at all. Kept so the card stays honest about its source, never read aloud.
-  2. underline — everything that DOES bear on the claim, directly OR indirectly. On a passage chosen for this claim, this is normally the MAJORITY of the text.
-  3. highlight — the small set of key warrant phrases INSIDE the underlined text that the debater's voice STRESSES (coherent phrases, never lone keywords).
+════════ THE ONE RULE THAT MATTERS MOST ════════
+A cut card is read at three depths, and EACH DEPTH MUST READ AS GRAMMATICAL ENGLISH ON ITS OWN.
 
-Work through the passage from beginning to end so emphasis is distributed throughout, not clustered at the top.
+  u (underline)  — what the debater reads ALOUD. Your "u" fragments, read in order from the first sentence to the last, must form coherent prose that states the argument.
+  h (highlight)  — a SUBSET of u: what they read when short on time. Your "h" fragments, read in order, must ALSO form coherent, shorter prose.
+  b (bold)       — the one word or short phrase inside a marked span that the eye must land on.
 
-- underline: the NUMBERS of the sentences the debater reads aloud. Listing a number is cheap — there is no cost to being thorough, and a long list is EXPECTED. BE INCLUSIVE. This passage was already selected BECAUSE it supports the claim, so the default for any given sentence is that it gets underlined; leaving it out is the exception you have to justify.
-  Ask of each sentence: "could a debater use this to make the claim more convincing, better warranted, or more nuanced?" If yes — even INDIRECTLY — underline it. Underline a sentence if it does ANY of these:
-    • states or restates the claim;
-    • gives the WHY or HOW — the causal mechanism, logic, or warrant behind it;
-    • establishes a definition, premise, scope condition, or assumption the argument depends on;
-    • supplies supporting evidence, data, a study, an authority, or a concrete example;
-    • draws out an implication, consequence, stake, magnitude, or timeframe;
-    • qualifies, bounds, or adds nuance to the claim (qualified claims are HARDER to answer, so this text is valuable, not disposable);
-    • states a rival position the author then rebuts, or the rebuttal itself;
-    • supplies the background a judge needs for any of the above to land.
-  A sentence does NOT need to contain the claim's words to be worth underlining. Indirect relevance still counts.
+Before you finish, re-read your own "u" list as continuous prose. If it stutters, contradicts itself, or reads as disconnected scraps, fix it. Then do the same for "h".
 
-  WHAT STAYS PLAIN — this is the SHORT list, not the long one:
-    • material genuinely about a different subject;
-    • navigation and meta-text ("this article argues", "see section 3"), author bios, acknowledgements, funding notes, reference lists;
-    • a point repeated verbatim that you already underlined elsewhere;
-    • pure connective throat-clearing carrying no content of its own.
+Everything you leave unmarked stays in the card as small plain text — the card remains honest about its source. It is simply not read out.
 
-  CALIBRATION — read this twice: on a passage chosen for this claim, expect to list WELL OVER HALF of the sentence numbers, commonly 60-85% of them. UNDER-marking is by far the more common and more damaging failure: it hands the debater a card they must re-mark by hand, which defeats the entire tool. If your list covers less than half of a passage that is on-topic throughout, you have under-marked — go back and add the mechanism, evidence, implication and qualification sentences you skipped.
-  LENGTH IS NOT A REASON TO UNDERLINE LESS. A long passage that is on-topic throughout should be underlined throughout; do not "ration" emphasis to keep a long card looking sparse. Do not stop early to keep the list short — a 400-sentence passage may well need 300 numbers. The only thing to avoid at the other extreme is listing sentences that genuinely have nothing to do with the claim.
-  Give the numbers in ascending order.
+════════ WORD ECONOMY: FRAGMENTS, NOT WHOLE SENTENCES ════════
+You rarely underline a sentence end to end. You take the words that carry the argument and leave the rest, exactly as a debater with a highlighter does.
 
-- highlights: the load-bearing warrant phrases WITHIN the underlined sentences — the words the debater stresses. Highlighting is the SELECTIVE layer and it does NOT grow just because underlining did: aim for roughly one highlight per two or three underlined sentences, concentrated on the reasoning that proves the claim. Underlining most of a passage while highlighting most of it too would collapse the two layers into one and make the card unreadable. Follow these rules strictly:
-  • A highlight is a COHERENT, self-contained phrase that still makes sense read on its own — usually a short clause of about 3 to 10 words that keeps the key term TOGETHER with the words that state the point about it (subject + what is said about it). Example shape: "is the single strongest predictor of support", not "predictor".
-  • NEVER highlight a bare topic word or buzzword by itself ("nationalism", "reality", "emissions", "one", "truth"). If the crucial term is a single word, extend the highlight to include the surrounding words that give it meaning. A highlight that is just a keyword with no context is WRONG.
-  • Highlight each idea ONCE. NEVER highlight the same word or phrase more than once, even if the term recurs many times — choose the ONE sentence where it most clearly proves the claim and highlight it only there. Repeating the same buzzword is WRONG.
-  • Copy each highlight EXACTLY from inside an underlined sentence. Read in sequence, the highlights should form a coherent compressed version of the argument — not a scatter of disconnected words.
-  • Capture the WARRANT, not just the claim: make sure the highlighted phrases include the load-bearing reasoning — the WHY/HOW (mechanism, causal link), the key evidence, and the impact/stakes — so that reading only the highlights conveys why the claim is TRUE, not merely that it was asserted. Prefer meaningful, self-contained clauses over many disconnected fragments (a dense underlined sentence usually has ONE or TWO highlight-worthy clauses, not five) — but do not under-highlight to the point that the warrant is left unstressed.
+  Sentence: "Avidya is a Sanskrit word most commonly defined as ignorance."
+    u: ["Avidya is", "ignorance"]
+    (skips "a Sanskrit word most commonly defined as" — it costs breath and adds nothing)
 
-Worked example (match this style exactly):
-  Claim: "Christian nationalism drives support for the candidate."
-  Underlined sentence: "Survey data show that Christian nationalism is the single strongest predictor of support, outweighing income, education, and party affiliation."
-  GOOD -> highlights: ["Christian nationalism is the single strongest predictor of support", "outweighing income, education, and party affiliation"]
-  BAD  -> highlights: ["Christian nationalism", "Christian nationalism", "predictor", "support"]   (lone, repeated, out-of-context buzzwords — NEVER do this)
+ALWAYS cut, inside a sentence you are marking:
+  • parenthetical citations and page refs — "(Singh 394-395)", "(Puligandla 218)", "[3]";
+  • attribution and hedging preambles — "It is argued that", "According to X,", "what scholars sometimes refer to as", "most commonly defined as";
+  • negation-then-correction scaffolding — "not simply A; it is B" → keep only B;
+  • contentless connectives — "In this way,", "That is to say,", "Thus,", "Frequently,";
+  • wording that restates something you already marked.
+Keep enough for the fragment to parse: subject + verb + the operative point. "Avidya is" + "ignorance" reads as English; "is" + "ignorance" does not.
 
-- Prioritize by the claim AND its warrants: highlight the phrases that most directly state WHY or HOW the claim is true — the load-bearing reasoning, mechanisms, and consequences — not only phrases that echo the claim's keywords. Because you are now underlining the full reasoning chain, spread highlights across that reasoning (the warrant and implication sentences too), not just the sentences that restate the claim.
+════════ WHICH SENTENCES GET MARKED AT ALL ════════
+Mark a sentence when it does real work for THIS claim: it states the claim, gives the mechanism or warrant behind it, supplies evidence or an authority, draws out the implication or stakes, or qualifies it in a way that makes it harder to answer.
 
-- bolds: a SEPARATE, much smaller layer marking the MOST IMPORTANT context inside the underlined text. Bold is not a ranking of your highlights — it is its own judgment about what a reader's eye must land on. Rules:
-  • ONLY text that is already underlined may be bolded. NEVER bold text that is not underlined — that is always wrong and gets discarded.
-  • MOST OF YOUR BOLDS MUST BE ON UNDERLINED TEXT THAT YOU DID NOT HIGHLIGHT. This is the single most common mistake: do NOT simply repeat your highlight phrases back as bolds. If every bold you return is also a highlight, you have done this WRONG — go back and find the un-highlighted underlined language that carries critical context.
-  • What deserves bold in un-highlighted underlined text: the load-bearing qualifier, limitation, scope condition, credential, number, date, or causal connector that a reader must not miss — e.g. "fewer than one in three", "only when the coalition is broad", "the world's largest emitter", "declined by 40% since 2010".
-  • A highlight may ALSO be bolded, but only for the strongest one or two phrases in the entire card. Never bold every highlight.
-  • Keep bolds SHORT — usually 2 to 8 words, tighter than a highlight. Bold a phrase, never a whole sentence.
-  • Do NOT overuse bolding: a typical card has only about 3 to 6 bolds total. If several underlined sections are equally critical, bold each; otherwise bold only the strongest.
-  The legal combinations are: underlined only; underlined + highlighted; underlined + bold; underlined + highlighted + bold. Text that is not underlined must never be bolded or highlighted.
-  Copy each bold EXACTLY from inside an underlined span; a bold that isn't inside underlined text is discarded.
-  Worked example (continuing the sanctions card above):
-    Underlined + highlighted: "sanctions achieve their stated political objectives in fewer than one in three cases"
-    GOOD -> bolds: ["fewer than one in three cases", "leaving elites insulated", "most effective when the demand is modest"]  (a mix: one inside a highlight, the rest from underlined text that was NOT highlighted)
-    BAD  -> bolds: [every phrase you already listed in highlights]   (bold adds nothing — NEVER do this)
+Leave a sentence ENTIRELY unmarked — omit it from "marks" altogether — when it is:
+  • background or history the argument does not rest on;
+  • a long block quotation, verse or scripture being discussed rather than relied on;
+  • a tangent into a different school, theory, author or example;
+  • meta-text about the article — "In this article I examine…", "In Part 2 I will…", "see section 3";
+  • author bios, acknowledgements, funding notes, reference lists;
+  • a point you have already marked elsewhere.
+
+Whole PARAGRAPHS of a real article are routinely left untouched this way, and that is correct. A card with unmarked stretches is a card someone can actually read in a round.
+
+THERE IS NO TARGET AMOUNT. Do not mark to fill a quota and do not ration marks to look sparse. A passage dense with argument gets heavily marked; a passage that wanders gets very little. Both outcomes are right. Marking everything is exactly as wrong as marking nothing — it tells the debater nothing about what matters.
+
+════════ BUT DO NOT LEAVE THE ARGUMENT INCOMPLETE ════════
+The read-aloud text has to stand on its own in a round, with nothing else in front of the judge. Walk the passage and check that your "u" fragments carry the whole arc:
+
+  • the DEFINITION of the term the claim turns on — a debater must be able to say what the word MEANS before arguing from it, so definitional sentences near the start of a passage are usually worth marking even though they feel like preamble;
+  • the distinction the author draws — where they say "X is not A, it is B", the B side is the argument;
+  • the MECHANISM — why or how it works;
+  • the CONSEQUENCE, impact or stake;
+  • any qualifier that makes the claim harder to answer.
+
+Jumping straight to the conclusion is a real failure: it leaves the debater asserting the claim with no warrant behind it. If a judge could ask "what does that term even mean?" or "why does that follow?" and your underlined text has no answer, you cut too much. Cover the argument as it DEVELOPS, from the first sentence that does work to the last — not just the punchiest lines.
+
+════════ WORKED EXAMPLE — STUDY THIS CLOSELY ════════
+Claim: "Assumptions of 'me' vs 'the other' being disconnected entities is Avidya, the illusion that produces the delusion of separation."
+
+Passage:
+[0] Avidya is a Sanskrit word most commonly defined as ignorance.
+[1] This can be misleading if we think of ignorance as a lack of knowledge.
+[2] Avidya is not simply a lack of knowledge; it is a lack of what Hindu philosophers sometimes refer to as true knowledge (Singh 394-395).
+[3] The knowledge we have of the material world around us, our minds, thoughts, bodies, and emotions is worldly knowledge.
+[4] Avidya is our mistaken belief that these things make up reality, or our true self (Puligandla 218).
+[5] Avidya, then, is not simply ignorance, but spiritual ignorance (Lipner 246).
+[6] It is ignorance of our true selves and of the true nature of reality (Puligandla 244).
+
+Correct output:
+"marks": [
+ {"s":0,"u":["Avidya is","ignorance"],"h":[],"b":[]},
+ {"s":2,"u":["Avidya is","a lack of","true knowledge"],"h":["a lack of","true knowledge"],"b":["true knowledge"]},
+ {"s":3,"u":["The","knowledge we have of the material world around us, our minds, thoughts, bodies, and emotions is","worldly knowledge"],"h":[],"b":["material world","worldly knowledge"]},
+ {"s":4,"u":["Avidya is","our mistaken belief that these","make up reality","or our true self"],"h":["our mistaken belief that these","make up reality"],"b":["mistaken","reality"]},
+ {"s":5,"u":["Avidya, then,","is","spiritual ignorance"],"h":["spiritual ignorance"],"b":["spiritual ignorance"]},
+ {"s":6,"u":["It is","ignorance of","our","true selves","and","the true nature of reality"],"h":["ignorance of","true selves"],"b":["true selves"]}
+]
+
+What this example is teaching you:
+  • SIX of the seven sentences are marked. When a paragraph is carrying the argument you mark THROUGH it, sentence after sentence. Picking one representative line per paragraph and moving on is the most common way to ruin a card.
+  • Sentence [1] is dropped entirely — it is a caveat about how to read a word, not part of the argument.
+  • Every citation is left out: (Singh 394-395), (Puligandla 218), (Lipner 246).
+  • The negation scaffolding in [2] and [5] is left out. "not simply ignorance, but spiritual ignorance" keeps only "spiritual ignorance".
+  • Fragments are small and there are several per sentence — that is the word economy. [6] is marked with six short fragments, not one long one.
+  • Now read the "u" fragments straight through: "Avidya is ignorance. Avidya is a lack of true knowledge. The knowledge we have of the material world around us, our minds, thoughts, bodies, and emotions is worldly knowledge. Avidya is our mistaken belief that these things make up reality, or our true self. Avidya, then, is spiritual ignorance. It is ignorance of our true selves and the true nature of reality." THAT is a cut card. Aim for output that reads like this.
+
+Work through the passage from the first sentence to the last so emphasis is spread across the argument, not clustered at the top.
+
+════════ h — THE COMPRESSED VERSION ════════
+Copy each "h" fragment from inside your own "u" fragments for that same sentence. Highlight the reasoning that PROVES the claim — the mechanism, the key evidence, the impact — not merely the words that echo the claim.
+
+  • Not every marked sentence needs a highlight. A sentence that is pure setup usually has none.
+  • NEVER highlight a bare topic word alone ("reality", "emissions", "nationalism", "truth"). Extend it to include what is being SAID about that term: "is the single strongest predictor of support", not "predictor".
+  • Highlight each idea ONCE. If a term recurs ten times, highlight the one place it lands hardest.
+  • Read your highlights back in order. If they sound like a list of nouns rather than an argument, you highlighted keywords — go back and extend each into a claim.
+
+════════ b — WHAT THE EYE LANDS ON ════════
+Bold the load-bearing term inside text you already marked: the key noun phrase, the number, the qualifier, the scope condition.
+  • 1 to 4 words. Bold a term, never a clause and never a sentence.
+  • Usually the crucial term inside a highlight ("true knowledge", "worldly knowledge", "spiritual ignorance"), or a decisive figure in underlined text ("fewer than one in three", "the world's largest emitter", "declined by 40% since 2010").
+  • Bold that lands in unmarked text is discarded, so only bold what you marked.
+
+════════ COPY FRAGMENTS EXACTLY ════════
+Every fragment in "u", "h" and "b" must be copied CHARACTER-FOR-CHARACTER from the sentence numbered "s" — same words, punctuation and capitalization. A fragment that cannot be found in that sentence is silently dropped, which quietly costs the debater emphasis they needed. Do not stitch together words from across a gap into one fragment: use several fragments instead, which is why "u" is a list.
 
 - tag: a punchy 1-2 sentence statement of what the evidence proves, phrased from the user's claim (this is YOUR wording). Mark 1-3 key phrases with __underline__ markers.
 - cite: the HUMAN author's last name + 2-digit year, no apostrophe (e.g. "Rodrigues 16"). Multiple authors: "FirstAuthorLastName et al. YY". Only when NO human author is stated anywhere: publication name + YY. See "Finding the author".
@@ -306,7 +358,7 @@ Finding the author (name the PERSON who wrote it, never the website):
 - NEVER invent, guess, or infer an author from the topic. Only if NO human author is stated anywhere (metadata or cite context) may you cite by the publication (e.g. "Reuters 25").
 - Same rule for dates and credentials: use only what the metadata or cite context actually states.
 
-Highlights and bolds are still VERBATIM copies (they are short, and they must land inside the right words) — copy them exactly, including punctuation and capitalization, or they are silently dropped. Underlines are numbers, so they cannot be dropped this way.`;
+Final check before you answer: read your "u" fragments straight through as one passage, then your "h" fragments. Both must sound like someone making an argument out loud. That, not how much you marked, is what makes the card good.`;
 
 function buildMarkerPrompt(
   claim: string,
@@ -331,44 +383,114 @@ function buildMarkerPrompt(
 
 type MarkerData = z.infer<typeof markerSchema>;
 
-/** A marked section: the model's output plus its underlines resolved to real text. */
+/** A marked section: the model's metadata plus the section's text with markers applied. */
 interface MarkedSection {
   data: MarkerData;
-  /** Exact sentence strings to underline, taken from the passage itself. */
-  underlines: string[];
+  /** This section's text, already carrying emphasis delimiters. */
+  body: string;
+}
+
+/** Resolved character offsets within one section, ready for applyEmphasisSpans. */
+export interface ResolvedSpans {
+  underline: Array<[number, number]>;
+  highlight: Array<[number, number]>;
+  bold: Array<[number, number]>;
+  /** Fragments that couldn't be located and were dropped. */
+  missed: number;
 }
 
 /**
- * Turn the model's sentence numbers into the actual sentences.
+ * Locate each sentence within the section it came from.
  *
- * Out-of-range numbers are dropped rather than clamped: a hallucinated index is
- * a guess about text that isn't there, and clamping it would underline a real
- * sentence the model never chose. Duplicates collapse. Any legacy verbatim
- * strings ride along, so a model that ignored the numbering still contributes.
+ * The sentences were produced BY splitting this section, so each is an exact
+ * substring; scanning forward with a cursor keeps repeated sentences in order
+ * instead of collapsing them onto the first occurrence.
  */
-export function resolveUnderlines(
-  sentences: string[],
-  indices: number[],
-  legacy: string[] = [],
-): string[] {
-  const seen = new Set<number>();
-  const picked: string[] = [];
-  for (const i of indices) {
-    if (!Number.isInteger(i) || i < 0 || i >= sentences.length || seen.has(i)) continue;
-    seen.add(i);
-    picked.push(sentences[i]);
+function sentenceRanges(section: string, sentences: string[]): Array<[number, number] | null> {
+  const ranges: Array<[number, number] | null> = [];
+  let cursor = 0;
+  for (const s of sentences) {
+    const at = section.indexOf(s, cursor);
+    if (at === -1) {
+      ranges.push(null);
+      continue;
+    }
+    ranges.push([at, at + s.length]);
+    cursor = at + s.length;
   }
-  return [...picked, ...legacy];
+  return ranges;
+}
+
+/**
+ * A fragment long enough to be unique on its own. Below this it MUST be found
+ * inside the sentence the model named — "Avidya is" appears a dozen times in a
+ * passage, and marking the wrong one puts emphasis on text nobody chose.
+ */
+const GLOBALLY_UNIQUE_CHARS = 25;
+
+/**
+ * Turn the model's per-sentence fragments into character spans in `section`.
+ *
+ * Scoping each search to one sentence is what makes sub-sentence marking
+ * possible at all. A bare substring search over the whole passage cannot tell
+ * which "make up reality" was meant; the sentence number disambiguates it, and
+ * a fragment that doesn't appear in its own sentence is dropped rather than
+ * guessed at — the same rule the rest of the cutter follows about never
+ * inventing what the source didn't say.
+ */
+export function resolveMarks(
+  section: string,
+  sentences: string[],
+  marks: MarkEntry[],
+): ResolvedSpans {
+  const ranges = sentenceRanges(section, sentences);
+  const locate = createLocator(section);
+  const out: ResolvedSpans = { underline: [], highlight: [], bold: [], missed: 0 };
+
+  const resolve = (fragment: string, range: [number, number]): [number, number] | null => {
+    const spans = locate(fragment);
+    if (spans.length === 0) return null;
+    const inside = spans.find(([start, end]: [number, number]) => start >= range[0] && end <= range[1]);
+    if (inside) return inside;
+    // Long fragments are effectively unique, so an off-by-one sentence number
+    // shouldn't cost the debater the mark. Short ones stay strictly scoped.
+    return fragment.length >= GLOBALLY_UNIQUE_CHARS ? spans[0] : null;
+  };
+
+  for (const mark of marks) {
+    const range = ranges[mark.s];
+    if (!range) continue;
+    for (const [fragments, bucket] of [
+      [mark.u, out.underline],
+      [mark.h, out.highlight],
+      [mark.b, out.bold],
+    ] as const) {
+      for (const fragment of fragments) {
+        const span = resolve(fragment, range);
+        if (span) bucket.push(span);
+        else out.missed++;
+      }
+    }
+  }
+  return out;
 }
 
 /**
  * One marker call over a passage (or one section of it): the quality-critical
  * step. A stronger model picks coherent in-context warrant phrases instead of
  * disconnected buzzwords. It fails FAST on the premium model (retries: 0) — that
- * model gets "high demand" 503s — and drops straight to the reliable default
- * model rather than burning ~15s retrying. maxOutputTokens is large because dense
- * emphasis means many substrings (avoid truncation). Throws on total failure or
- * unparseable output.
+ * model gets "high demand" 503s — and `fallbackModel` drops straight to the
+ * reliable default model rather than burning ~15s retrying. maxOutputTokens is
+ * large because dense emphasis means many substrings (avoid truncation). Throws
+ * on total failure or unparseable output.
+ *
+ * The failover lives in lib/gemini rather than here because a cut fans these
+ * calls out CONCURRENTLY (see Promise.all below). Hand-rolling it at this level
+ * meant all eight sections independently discovered the premium model was dead,
+ * on every cut — and those failures opened a circuit breaker shared with the
+ * cheap model, so the fallback this function depends on was itself blocked.
+ * lib/modelAvailability now parks a spent model, so later cuts skip it entirely
+ * instead of rediscovering the same thing eight times each.
  */
 async function markPassageSection(
   claim: string,
@@ -377,36 +499,26 @@ async function markPassageSection(
 ): Promise<MarkedSection> {
   const sentences = splitSentences(section);
   const prompt = buildMarkerPrompt(claim, article, sentences);
-  let raw: unknown;
-  try {
-    raw = await generateJson({
-      system: MARKER_SYSTEM,
-      prompt,
-      model: GEMINI_MARKER_MODEL,
-      maxOutputTokens: 40000,
-      retries: GEMINI_MARKER_MODEL !== GEMINI_MODEL ? 0 : undefined,
-    });
-  } catch (err) {
-    if (err instanceof RateLimitedError && GEMINI_MARKER_MODEL !== GEMINI_MODEL) {
-      console.warn("cardCutter: marker model busy; falling back to the default model");
-      raw = await generateJson({
-        system: MARKER_SYSTEM,
-        prompt,
-        model: GEMINI_MODEL,
-        maxOutputTokens: 40000,
-      });
-    } else {
-      throw err;
-    }
-  }
+  const raw = await generateJson({
+    system: MARKER_SYSTEM,
+    prompt,
+    model: GEMINI_MARKER_MODEL,
+    maxOutputTokens: 40000,
+    retries: GEMINI_MARKER_MODEL !== GEMINI_MODEL ? 0 : undefined,
+    fallbackModel: GEMINI_MARKER_MODEL !== GEMINI_MODEL ? GEMINI_MODEL : undefined,
+  });
   const parsed = markerSchema.safeParse(raw);
   if (!parsed.success) {
     console.error("cardCutter: unparseable marker output");
     throw new Error("Card cutting finished but returned an unreadable result. Please try again.");
   }
+  const spans = resolveMarks(section, sentences, parsed.data.marks);
+  if (spans.missed > 0) {
+    console.warn(`cardCutter: ${spans.missed} fragments didn't match their sentence and were skipped`);
+  }
   return {
     data: parsed.data,
-    underlines: resolveUnderlines(sentences, parsed.data.underline, parsed.data.underlines),
+    body: applyEmphasisSpans(section, spans.underline, spans.highlight, spans.bold),
   };
 }
 
@@ -547,25 +659,28 @@ async function runCut(req: CutRequest): Promise<Card> {
     MAX_MARKER_SECTIONS,
   );
 
+  /*
+   * Each section is marked AND rendered independently, then the rendered
+   * sections are rejoined. That works because splitIntoSections cuts only on
+   * paragraph boundaries, so the sections rejoin with "\n\n" to exactly the
+   * original passage (see its tests) — and it is what lets marking be
+   * sub-sentence at all: a fragment's offsets are only meaningful inside the
+   * section its sentence numbers refer to.
+   */
+  const parts = sections.length > 0 ? sections : [passage];
   let head: MarkerData;
-  const underlines: string[] = [];
-  const highlights: string[] = [];
-  const bolds: string[] = [];
+  let bodies: string[];
 
-  if (sections.length <= 1) {
-    const only = await markPassageSection(req.claim, article, sections[0] ?? passage);
+  if (parts.length === 1) {
+    const only = await markPassageSection(req.claim, article, parts[0]);
     head = only.data;
-    underlines.push(...only.underlines);
-    bolds.push(...only.data.bolds);
-    highlights.push(...only.data.highlights);
+    bodies = [only.body];
   } else {
     // Section 0 owns the tag/cite (it holds the article's opening) and MUST
     // succeed. The rest are best-effort in parallel: one busy/failed section
-    // shouldn't sink the whole card — it just contributes no marks (that region
-    // stays plain) instead of throwing. applyEmphasis dedupes highlights across
-    // sections and marks every underline occurrence, so merging is safe.
+    // shouldn't sink the whole card — it just stays plain instead of throwing.
     const marked = await Promise.all(
-      sections.map((sec, i) =>
+      parts.map((sec, i) =>
         markPassageSection(req.claim, article, sec).catch((err: unknown) => {
           if (i === 0) throw err;
           console.warn(`cardCutter: section ${i} marking failed; leaving it plain`, String(err));
@@ -578,18 +693,12 @@ async function runCut(req: CutRequest): Promise<Card> {
       throw new Error("Card cutting couldn't mark the opening section. Please try again.");
     }
     head = first.data;
-    for (const m of marked) {
-      if (!m) continue;
-      underlines.push(...m.underlines);
-      bolds.push(...m.data.bolds);
-      highlights.push(...m.data.highlights);
-    }
+    // A failed section contributes its ORIGINAL text, so the card still holds
+    // the whole passage — just unmarked through that stretch.
+    bodies = marked.map((m, i) => m?.body ?? parts[i]);
   }
 
-  const { body, missed, applied } = applyEmphasis(passage, underlines, highlights, bolds);
-  if (missed > 0) {
-    console.warn(`cardCutter: ${missed} emphasis substrings didn't match and were skipped (${applied} applied)`);
-  }
+  const body = bodies.join("\n\n");
 
   return {
     // The tag is the one place the AI supplies markup (`__key phrase__`);
