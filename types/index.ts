@@ -280,6 +280,26 @@ export interface Round {
   createdAt: string; // ISO timestamp
 }
 
+/** Which tool asked for a cut. Both funnel through /api/cut. */
+export const CUT_ORIGINS = ["finder", "cutter"] as const;
+export type CutOrigin = (typeof CUT_ORIGINS)[number];
+
+/**
+ * A card as it was saved to the account's history. Extends the `Card` the Card
+ * Cutter produced with the context needed to find it again later: what was being
+ * argued, where the text came from, and which tool cut it.
+ */
+export interface SavedCard extends Card {
+  id: string;
+  claim: string;
+  cardLength: string;
+  origin: CutOrigin;
+  sourceUrl?: string;
+  sourceTitle?: string;
+  sourcePublication?: string;
+  createdAt: string; // ISO timestamp
+}
+
 /** Derived record summary — computed purely from a Round[] (see lib/roundStats). */
 export interface RoundSummary {
   total: number;

@@ -8,6 +8,8 @@ import {
   NoWarrantFoundError,
   cutCard,
 } from "@/services/cardCutter";
+import { recordCut } from "@/services/cutHistory";
+import { requireUser } from "@/lib/supabase/user";
 import { CARD_LENGTHS } from "@/types";
 
 // Fetching an article + cutting can take a while; don't cut it off early.
@@ -66,9 +68,24 @@ export async function POST(req: Request) {
     );
   }
 
+  // The verified session, for filing the card in this account's history.
+  // requireUser() is memoized per request (React cache), so this costs nothing
+  // beyond the auth check guardApi already made.
+  const auth = await requireUser();
+  if (!auth.ok) return auth.response;
+
   try {
     const card = await cutCard(parsed.data);
-    return NextResponse.json({ card });
+    // File it in the account's history. This is the single choke point BOTH the
+    // Article Finder and the Cut a Card panel pass through, so saving here — and
+    // not in the browser — is what makes the history complete by construction.
+    // recordCut never throws; a failed save must not cost the user their card.
+    const saved = await recordCut(auth.supabase, {
+      userId: auth.user.id,
+      card,
+      request: parsed.data,
+    });
+    return NextResponse.json({ card, saved });
   } catch (err) {
     // Honest, user-facing failures — surface the exact message.
     if (err instanceof ArticleUnreadableError || err instanceof NoWarrantFoundError) {

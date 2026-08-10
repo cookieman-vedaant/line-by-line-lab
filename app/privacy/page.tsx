@@ -25,7 +25,7 @@ const PROCESSORS: { name: string; purpose: string; data: string }[] = [
   {
     name: "Supabase",
     purpose: "Account sign-in and database hosting",
-    data: "Email, hashed password, your Round Log, and profile data",
+    data: "Email, hashed password, your Round Log, the cards you've cut, and profile data",
   },
   {
     name: "Google (Gemini API)",
@@ -200,6 +200,12 @@ export default function PrivacyPolicy() {
             your notes).
           </>,
           <>
+            <strong>Cards you cut:</strong> every card the Card Cutter produces is saved to your
+            account so you can find it again — the card text (the author&apos;s own verbatim
+            wording), its cite, the claim you cut it for, and the article it came from. It is
+            visible only to you, and you can delete any of it in <strong>My Cards</strong>.
+          </>,
+          <>
             <strong>Data we derive:</strong> an AI-generated &quot;debater profile&quot; summarizing
             your logged rounds, used only to make coaching specific to you.
           </>,
@@ -320,7 +326,8 @@ export default function PrivacyPolicy() {
       <P>
         We do not sell data, serve targeted ads, or run such profiling, so those opt-outs do not
         apply in practice, but you may still exercise the access, correction, deletion, and
-        portability rights above. You can delete Round Log entries yourself at any time in the app.
+        portability rights above. You can delete Round Log entries and saved cards yourself at any
+        time in the app.
       </P>
       <P>
         To make a request, email{" "}
@@ -344,16 +351,18 @@ export default function PrivacyPolicy() {
           <>
             <strong>Access (Art. 15):</strong> a copy of the personal data we hold about you. You can
             get this instantly yourself — <strong>Record → Download my data</strong> exports your
-            account, Round Log, debater profile, and any feedback you sent, as JSON.
+            account, Round Log, debater profile, the cards you&apos;ve cut, and any feedback you
+            sent, as JSON.
           </>,
           <>
             <strong>Rectification (Art. 16):</strong> correct anything inaccurate. Round Log entries
-            are editable and deletable in the app; email us for anything else.
+            are editable and deletable in the app, and saved cards are deletable in{" "}
+            <strong>My Cards</strong>; email us for anything else.
           </>,
           <>
             <strong>Erasure (Art. 17):</strong> delete your data. Do it yourself at any time via{" "}
-            <strong>Record → Delete my account</strong>, which removes your account, rounds, and
-            profile.
+            <strong>Record → Delete my account</strong>, which removes your account, rounds, saved
+            cards, and profile.
           </>,
           <>
             <strong>Portability (Art. 20):</strong> receive your data in a structured,
@@ -424,7 +433,8 @@ export default function PrivacyPolicy() {
       </H2>
       <P>
         We keep your account and content while your account is active. When you delete your account,
-        your rounds and debater profile are deleted with it. Bug reports you sent are kept but
+        your rounds, saved cards, and debater profile are deleted with it. Bug reports you sent are
+        kept but
         <strong> anonymized</strong> (detached from your account and stripped of your contact email),
         so a reported problem doesn&apos;t disappear before it&apos;s fixed.
       </P>

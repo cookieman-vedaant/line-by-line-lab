@@ -15,7 +15,7 @@ import { requireUser } from "@/lib/supabase/user";
  *
  * Deletion order matters. `auth.users` is deleted LAST, because every child
  * table's foreign key hangs off it:
- *   - rounds / debater_profile / profiles CASCADE away with the user.
+ *   - rounds / debater_profile / profiles / cut_cards CASCADE away with the user.
  *   - feedback.user_id and audit_log.user_id are ON DELETE SET NULL, so bug
  *     reports and the security trail survive in anonymized form. That's
  *     deliberate: erasing the audit record of a deletion would defeat the point
@@ -63,8 +63,12 @@ export async function GET(req: Request) {
    */
   const ROUND_CAP = 10_000;
   const FEEDBACK_CAP = 1_000;
+  // Lower than the others on purpose: a card body is kilobytes, so the same
+  // 10,000 would be hundreds of MB built in function memory. 2,000 cards is
+  // already several seasons of cutting, and going over is disclosed below.
+  const CARD_CAP = 2_000;
 
-  const [rounds, profile, feedback] = await Promise.all([
+  const [rounds, profile, feedback, cards] = await Promise.all([
     auth.supabase
       .from("rounds")
       .select("*")
@@ -78,6 +82,12 @@ export async function GET(req: Request) {
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(FEEDBACK_CAP),
+    auth.supabase
+      .from("cut_cards")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(CARD_CAP),
   ]);
 
   const payload = {
@@ -90,11 +100,14 @@ export async function GET(req: Request) {
     rounds: rounds.data ?? [],
     debaterProfile: profile.data ?? null,
     feedback: feedback.data ?? [],
-    ...((rounds.data?.length ?? 0) >= ROUND_CAP || (feedback.data?.length ?? 0) >= FEEDBACK_CAP
+    cutCards: cards.data ?? [],
+    ...((rounds.data?.length ?? 0) >= ROUND_CAP ||
+    (feedback.data?.length ?? 0) >= FEEDBACK_CAP ||
+    (cards.data?.length ?? 0) >= CARD_CAP
       ? {
           truncated:
-            `This export was capped at ${ROUND_CAP} rounds and ${FEEDBACK_CAP} feedback entries. ` +
-            `Contact us to request the remainder.`,
+            `This export was capped at ${ROUND_CAP} rounds, ${FEEDBACK_CAP} feedback entries ` +
+            `and ${CARD_CAP} cut cards. Contact us to request the remainder.`,
         }
       : {}),
     // Named explicitly so the export is honest about its own boundaries rather

@@ -5,6 +5,7 @@ import ArticleResults from "@/components/ArticleResults";
 import CardCutterPanel from "@/components/CardCutterPanel";
 import CardView from "@/components/CardView";
 import CoachPanel from "@/components/CoachPanel";
+import HistoryPanel from "@/components/HistoryPanel";
 import RehighlighterPanel from "@/components/RehighlighterPanel";
 import RoundLogPanel from "@/components/RoundLogPanel";
 import SearchForm from "@/components/SearchForm";
@@ -32,13 +33,15 @@ type SearchState =
   | { status: "empty"; notice: string }
   | { status: "error"; message: string };
 
-type Tab = "find" | "cut" | "wiki" | "rehighlight" | "coach" | "record";
+type Tab = "find" | "cut" | "history" | "wiki" | "rehighlight" | "coach" | "record";
 
 // Declared once, in the order they appear, so the tablist markup and the
-// arrow-key order can never drift apart.
+// arrow-key order can never drift apart. History sits directly after Cut a Card
+// because that is what it is: where your cuts end up.
 const TABS: readonly { value: Tab; label: string }[] = [
   { value: "find", label: "Find Articles" },
   { value: "cut", label: "Cut a Card" },
+  { value: "history", label: "My Cards" },
   { value: "wiki", label: "Wiki" },
   { value: "rehighlight", label: "Re-Highlight" },
   { value: "coach", label: "Coach" },
@@ -63,6 +66,16 @@ export default function EvidenceWorkbench() {
   const [coachSeed, setCoachSeed] = useState<{ prompt: string; nonce: number } | undefined>(
     undefined,
   );
+  // Counts cuts from BOTH entry points. The server already filed the card in the
+  // account's history by the time we get here, so this is only the nudge that
+  // tells the My Cards tab its list is one card out of date.
+  const [cutCount, setCutCount] = useState(0);
+
+  /** Single place both cut paths report through, so neither can forget one half. */
+  function noteCut(card: Card, source: string) {
+    setLastCut({ card, source });
+    setCutCount((n) => n + 1);
+  }
 
   async function handleSearch(params: SearchParams) {
     setSearch({ status: "searching", stage: null });
@@ -112,7 +125,7 @@ export default function EvidenceWorkbench() {
       return;
     }
     setResult({ card: outcome.card, article });
-    setLastCut({ card: outcome.card, source: `${article.title} (${article.url})` });
+    noteCut(outcome.card, `${article.title} (${article.url})`);
   }
 
   // Everything the Coach should know from the other tabs: the current claim, the
@@ -171,7 +184,7 @@ export default function EvidenceWorkbench() {
       }}
       onClick={() => setTab(value)}
       onKeyDown={onTabKeyDown}
-      // Tighter on small screens so six tools fit in two rows instead of three
+      // Tighter on small screens so the tools stay in two rows instead of three
       // — the masthead already costs most of a phone's first screen.
       className={`btn-press frame px-3 py-2 font-display text-xs font-bold uppercase tracking-wide sm:px-5 sm:py-2.5 sm:text-sm ${
         tab === value ? "bg-accent text-paper" : "bg-paper-2 text-ink"
@@ -219,10 +232,20 @@ export default function EvidenceWorkbench() {
         className={tab === "cut" ? "" : "hidden"}
       >
         <div className="tab-panel">
-          <CardCutterPanel
-            initialClaim={lastParams?.claim}
-            onCardCut={(card, source) => setLastCut({ card, source })}
-          />
+          <CardCutterPanel initialClaim={lastParams?.claim} onCardCut={noteCut} />
+        </div>
+      </div>
+
+      <div
+        role="tabpanel"
+        id={panelId("history")}
+        aria-labelledby={tabId("history")}
+        className={tab === "history" ? "" : "hidden"}
+      >
+        <div className="tab-panel">
+          {/* `active` matters: every panel is mounted, so without it this would
+              fetch a page of card bodies on every Lab load, for everyone. */}
+          <HistoryPanel active={tab === "history"} refreshKey={cutCount} />
         </div>
       </div>
 

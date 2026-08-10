@@ -49,6 +49,7 @@ const NAV: readonly { group: string; items: readonly { id: string; title: string
     group: "Cutting it",
     items: [
       { id: "cut", title: "Cut a Card" },
+      { id: "history", title: "My Cards" },
       { id: "cards", title: "Working with cards" },
     ],
   },
@@ -203,7 +204,7 @@ export default function Docs() {
             what it can do.
           </h1>
           <p className="mt-5 max-w-2xl text-lg font-medium leading-snug">
-            Seven tools. What each one takes, what it gives back, and where it stops.
+            Eight tools. What each one takes, what it gives back, and where it stops.
           </p>
           <div className="masthead-rule mt-8 h-[3px] w-full bg-ink" />
         </header>
@@ -241,7 +242,7 @@ export default function Docs() {
                 <Link href="/lab" className="font-semibold text-accent underline underline-offset-4">
                   the Lab
                 </Link>
-                , one screen with seven tools across the top.
+                , one screen with every tool across the top.
               </p>
               <Note>
                 <span className="font-semibold">The rule that never bends:</span> the app never
@@ -382,6 +383,44 @@ export default function Docs() {
                 highlight, and the app applies those marks to the real text. Verbatim is guaranteed
                 by construction, not by asking a model to behave. Length is enforced mechanically as
                 a share of the article, so Short stays short.
+              </Note>
+            </Tool>
+
+            <Tool
+              id="history"
+              name="My Cards"
+              tag={
+                <>
+                  Every card you have ever cut, <Hi>saved to your account automatically</Hi> —
+                  from either tool, on every device.
+                </>
+              }
+              cite="lab › my cards · nothing to set up"
+            >
+              <Block label="What lands here">
+                <Bullets
+                  items={[
+                    "Every card from Cut a Card, and every card cut from a Find Articles result.",
+                    "Saved the moment the card is made — there is no Save button to forget.",
+                    "Stored against your account, not your device: cut on a school laptop, read it on your phone that night.",
+                  ]}
+                />
+              </Block>
+              <Block label="What you can do with it">
+                <Bullets
+                  items={[
+                    "Filter by tag, cite, the claim you cut it for, or the article title.",
+                    "Open any card to get the full editor and the same Word / HTML export as a fresh cut.",
+                    "Delete anything you do not want kept.",
+                  ]}
+                />
+              </Block>
+              <Note>
+                <span className="font-semibold">Private to you, and honest:</span> nobody else can
+                see your cards — that is enforced by the database, not just the interface. Saved
+                cards cannot be rewritten in place, so what is stored is always what the Card Cutter
+                actually produced. Editing an open card changes your copy for export, never the
+                record. Deleting your account deletes all of it.
               </Note>
             </Tool>
 

@@ -201,6 +201,22 @@ export const TOOLS: Tool[] = [
       "Reskins color, fonts, mood, and background together",
     ],
   },
+  // APPENDED, never inserted mid-list: TheRound renders `TOOLS.slice(0, 6)`
+  // against hardcoded RAIL_LABELS and HANDOFF arrays, so putting a tool anywhere
+  // in the first six would silently pair every stage with the wrong label.
+  {
+    index: "08",
+    name: "My Cards",
+    tagline: "Every card you've cut, on every device.",
+    blurb:
+      "Cards save themselves. Anything the Card Cutter produces — from a search result or from your own article — lands in your account the moment it's made, so a card cut on a school laptop is on your phone that evening. Filter by tag, cite, or the claim you cut it for, then open any card to edit and export it exactly like a fresh one.",
+    points: [
+      "Saves every cut automatically — no Save button to forget",
+      "Tied to your account, not one device or browser",
+      "Filter by tag, cite, claim, or article title",
+      "Private to you, and deletable card by card",
+    ],
+  },
 ];
 
 export const PRICING: PricingTier[] = [
