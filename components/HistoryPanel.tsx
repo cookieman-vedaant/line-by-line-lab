@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import CardView from "@/components/CardView";
-import { deleteCardFromHistory, fetchCardHistory } from "@/lib/cardHistory";
+import { deleteCardFromHistory, fetchCard, fetchCardHistory } from "@/lib/cardHistory";
+import { CUT_CARDS_WARN_AT } from "@/lib/cutCardLimit";
 import { matchesQuery } from "@/lib/cutCardMap";
-import type { SavedCard } from "@/types";
+import type { SavedCard, SavedCardSummary } from "@/types";
 
 const inputClasses =
   "w-full frame bg-paper-2 px-3 py-2.5 text-sm font-medium text-ink " +
@@ -42,12 +43,16 @@ export default function HistoryPanel({
    *  up the new card instead of going stale behind a tab. */
   refreshKey?: number;
 }) {
-  const [cards, setCards] = useState<SavedCard[]>([]);
+  const [cards, setCards] = useState<SavedCardSummary[]>([]);
+  /** Bodies fetched so far, by card id. Opening a card twice costs one request. */
+  const [bodies, setBodies] = useState<Record<string, SavedCard>>({});
   const [cursor, setCursor] = useState<string | null>(null);
+  const [capacity, setCapacity] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
+  const [loadingBody, setLoadingBody] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const loadedOnce = useRef(false);
   /** The cut count this list already reflects. Differs from `refreshKey` exactly
@@ -73,6 +78,7 @@ export default function HistoryPanel({
     }
     loadedOnce.current = true;
     const fresh = outcome.page.cards;
+    setCapacity(outcome.page.limit);
 
     if (mode === "initial") {
       setCards(fresh);
@@ -125,7 +131,31 @@ export default function HistoryPanel({
     setCursor(outcome.page.nextCursor);
   }
 
-  async function remove(card: SavedCard) {
+  /**
+   * Open a card, fetching its text the first time. The row already has
+   * everything the collapsed state shows, so this is the only moment ~20KB of
+   * body needs to cross the network — and only for the one card being read.
+   */
+  async function toggle(card: SavedCardSummary) {
+    if (openId === card.id) {
+      setOpenId(null);
+      return;
+    }
+    setOpenId(card.id);
+    if (bodies[card.id]) return;
+
+    setLoadingBody(card.id);
+    const outcome = await fetchCard(card.id);
+    setLoadingBody(null);
+    if (!outcome.ok) {
+      setError(outcome.error);
+      setOpenId(null);
+      return;
+    }
+    setBodies((prev) => ({ ...prev, [card.id]: outcome.card }));
+  }
+
+  async function remove(card: SavedCardSummary) {
     const label = card.tag.trim() || card.cite || "this card";
     if (!window.confirm(`Delete “${label}” from your history? This can't be undone.`)) return;
 
@@ -137,6 +167,12 @@ export default function HistoryPanel({
       return;
     }
     setCards((prev) => prev.filter((c) => c.id !== card.id));
+    setBodies((prev) => {
+      if (!prev[card.id]) return prev;
+      const next = { ...prev };
+      delete next[card.id];
+      return next;
+    });
     if (openId === card.id) setOpenId(null);
   }
 
@@ -209,14 +245,24 @@ export default function HistoryPanel({
         </p>
       )}
 
+      {capacity > 0 && cards.length >= CUT_CARDS_WARN_AT && !cursor && (
+        <p role="status" className="frame bg-yellow px-4 py-3 text-sm font-medium text-black">
+          Your library holds the most recent <strong>{capacity}</strong> cards, and you have{" "}
+          <strong>{cards.length}</strong>. New cuts still save — the oldest card drops off to make
+          room. Delete anything you don&apos;t need to keep more of what you do.
+        </p>
+      )}
+
       <div className="flex flex-col gap-4">
         {shown.map((card) => (
           <HistoryRow
             key={card.id}
             card={card}
             open={openId === card.id}
+            full={bodies[card.id]}
+            loadingBody={loadingBody === card.id}
             deleting={deletingId === card.id}
-            onToggle={() => setOpenId((id) => (id === card.id ? null : card.id))}
+            onToggle={() => void toggle(card)}
             onDelete={() => remove(card)}
           />
         ))}
@@ -239,12 +285,17 @@ export default function HistoryPanel({
 function HistoryRow({
   card,
   open,
+  full,
+  loadingBody,
   deleting,
   onToggle,
   onDelete,
 }: {
-  card: SavedCard;
+  card: SavedCardSummary;
   open: boolean;
+  /** The card WITH its text, once fetched. Undefined until then. */
+  full?: SavedCard;
+  loadingBody: boolean;
   deleting: boolean;
   onToggle: () => void;
   onDelete: () => void;
@@ -292,15 +343,25 @@ function HistoryRow({
 
       {open && (
         <div id={panelId} className="tab-panel border-t-2 border-ink/15 p-4">
+          {loadingBody && (
+            <p className="label-mono animate-pulse text-sm text-accent">
+              <span aria-hidden>▸ </span>opening the card…
+            </p>
+          )}
           {/* The same CardView as a fresh cut, so a saved card edits and exports
               exactly like one you just made. Edits stay in the browser — the
-              history is a record of what was cut, and never writes back. */}
-          <CardView
-            card={card}
-            sourceUrl={card.sourceUrl}
-            sourceName={card.sourcePublication ?? card.sourceTitle}
-            kicker="✂ From your history"
-          />
+              history is a record of what was cut, and never writes back.
+              Rendered only once the body has arrived: CardView writes its
+              content imperatively and remounts on a new card, so handing it a
+              placeholder first would make the real text a second remount. */}
+          {full && (
+            <CardView
+              card={full}
+              sourceUrl={full.sourceUrl}
+              sourceName={full.sourcePublication ?? full.sourceTitle}
+              kicker="✂ From your history"
+            />
+          )}
         </div>
       )}
     </div>

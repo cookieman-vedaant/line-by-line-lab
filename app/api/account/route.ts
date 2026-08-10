@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { clientIp, guardApi } from "@/lib/apiGuard";
 import { audit } from "@/lib/audit";
+import { CUT_CARDS_MAX_PER_USER } from "@/lib/cutCardLimit";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { requireUser } from "@/lib/supabase/user";
 
@@ -63,10 +64,11 @@ export async function GET(req: Request) {
    */
   const ROUND_CAP = 10_000;
   const FEEDBACK_CAP = 1_000;
-  // Lower than the others on purpose: a card body is kilobytes, so the same
-  // 10,000 would be hundreds of MB built in function memory. 2,000 cards is
-  // already several seasons of cutting, and going over is disclosed below.
-  const CARD_CAP = 2_000;
+  // Matches the library's own ceiling, so a full export is always the complete
+  // library rather than a second, tighter limit nobody was told about. Bodies
+  // average ~20KB, so this is ~10MB built in function memory — the reason it is
+  // not simply unbounded like it could be for rounds.
+  const CARD_CAP = CUT_CARDS_MAX_PER_USER;
 
   const [rounds, profile, feedback, cards] = await Promise.all([
     auth.supabase

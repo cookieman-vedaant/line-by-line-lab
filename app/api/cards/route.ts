@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { guardApi } from "@/lib/apiGuard";
-import { CUT_CARD_COLUMNS, rowToSavedCard, type CutCardRow } from "@/lib/cutCardMap";
+import { CUT_CARD_LIST_COLUMNS, rowToCardSummary, type CutCardListRow } from "@/lib/cutCardMap";
+import { CUT_CARDS_MAX_PER_USER } from "@/lib/cutCardLimit";
 import { requireUser } from "@/lib/supabase/user";
 
 /**
@@ -23,10 +24,14 @@ import { requireUser } from "@/lib/supabase/user";
 // AI work, so it neither demands the human cookie nor spends the AI budget.
 const GUARD = { name: "cards", requireHuman: false, countGlobal: false, perMinute: 60 } as const;
 
-/** Page size: default, and the ceiling a caller may request. Lower than rounds'
- *  because a card body is kilobytes, not a sentence — 50 is already ~250KB. */
-const DEFAULT_LIMIT = 50;
-const MAX_LIMIT = 100;
+/**
+ * Page size. Generous BECAUSE the rows are summaries: at ~200 bytes each a
+ * 100-row page is ~20KB, so most libraries arrive in a single request. Sending
+ * bodies here is what used to make this expensive (~20KB per card), not the
+ * number of rows.
+ */
+const DEFAULT_LIMIT = 100;
+const MAX_LIMIT = 200;
 
 /**
  * GET /api/cards?limit=50&before=<iso-timestamp>
@@ -52,7 +57,7 @@ export async function GET(req: Request) {
 
   let query = auth.supabase
     .from("cut_cards")
-    .select(CUT_CARD_COLUMNS)
+    .select(CUT_CARD_LIST_COLUMNS)
     .eq("user_id", auth.user.id)
     .order("created_at", { ascending: false })
     .limit(limit);
@@ -72,12 +77,14 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Couldn't load your card history." }, { status: 500 });
   }
 
-  const rows = data as unknown as CutCardRow[];
-  const cards = rows.map(rowToSavedCard);
+  const rows = data as unknown as CutCardListRow[];
+  const cards = rows.map(rowToCardSummary);
   // Only advertise another page when this one came back full.
   const nextCursor = rows.length === limit ? rows[rows.length - 1].created_at : null;
 
-  return NextResponse.json({ cards, nextCursor });
+  // The cap travels with the list so the panel can say what the ceiling is
+  // without hardcoding a number that could drift from the database's.
+  return NextResponse.json({ cards, nextCursor, limit: CUT_CARDS_MAX_PER_USER });
 }
 
 export async function DELETE(req: Request) {

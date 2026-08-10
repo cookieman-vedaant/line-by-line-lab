@@ -202,8 +202,9 @@ export default function PrivacyPolicy() {
           <>
             <strong>Cards you cut:</strong> every card the Card Cutter produces is saved to your
             account so you can find it again — the card text (the author&apos;s own verbatim
-            wording), its cite, the claim you cut it for, and the article it came from. It is
-            visible only to you, and you can delete any of it in <strong>My Cards</strong>.
+            wording), its cite, the claim you cut it for, and the article it came from. Your
+            library keeps the most recent 500; past that the oldest card is deleted to make room.
+            It is visible only to you, and you can delete any of it in <strong>My Cards</strong>.
           </>,
           <>
             <strong>Data we derive:</strong> an AI-generated &quot;debater profile&quot; summarizing
@@ -432,9 +433,10 @@ export default function PrivacyPolicy() {
         Data retention
       </H2>
       <P>
-        We keep your account and content while your account is active. When you delete your account,
-        your rounds, saved cards, and debater profile are deleted with it. Bug reports you sent are
-        kept but
+        We keep your account and content while your account is active, with one standing limit: your
+        card library holds the most recent <strong>500</strong> cards, and a new cut past that
+        deletes the oldest one. When you delete your account, your rounds, saved cards, and debater
+        profile are deleted with it. Bug reports you sent are kept but
         <strong> anonymized</strong> (detached from your account and stripped of your contact email),
         so a reported problem doesn&apos;t disappear before it&apos;s fixed.
       </P>

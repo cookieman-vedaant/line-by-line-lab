@@ -413,6 +413,15 @@ export default function Docs() {
                   ]}
                 />
               </Block>
+              <Block label="How much it holds">
+                <Bullets
+                  items={[
+                    "The most recent 500 cards. That is a heavy season of personal cutting, and most debaters never approach it.",
+                    "Past 500, a new cut still saves — the oldest card drops off to make room, so the card you just cut is never the one you lose.",
+                    "The list itself stays fast however full it gets: opening the library fetches only tags and cites, and a card's text is loaded when you open that card.",
+                  ]}
+                />
+              </Block>
               <Note>
                 <span className="font-semibold">Private to you, and honest:</span> nobody else can
                 see your cards — that is enforced by the database, not just the interface. Saved

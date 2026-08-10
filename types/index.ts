@@ -285,12 +285,19 @@ export const CUT_ORIGINS = ["finder", "cutter"] as const;
 export type CutOrigin = (typeof CUT_ORIGINS)[number];
 
 /**
- * A card as it was saved to the account's history. Extends the `Card` the Card
- * Cutter produced with the context needed to find it again later: what was being
- * argued, where the text came from, and which tool cut it.
+ * One row in the card library: everything needed to FIND a card, and nothing
+ * needed to read one.
+ *
+ * The body and the full citation details are deliberately absent. A measured cut
+ * card body averages ~20KB while this summary is ~200 bytes, so including them
+ * made a 50-row page a ~1MB download to render text the row never shows. The
+ * body is fetched only when a card is actually opened.
  */
-export interface SavedCard extends Card {
+export interface SavedCardSummary {
   id: string;
+  /** Tag, still carrying its emphasis markers. */
+  tag: string;
+  cite: string;
   claim: string;
   cardLength: string;
   origin: CutOrigin;
@@ -299,6 +306,12 @@ export interface SavedCard extends Card {
   sourcePublication?: string;
   createdAt: string; // ISO timestamp
 }
+
+/**
+ * A saved card with its text — the summary plus the two heavy fields. This is
+ * what one card detail request returns, and what the card view renders.
+ */
+export interface SavedCard extends SavedCardSummary, Card {}
 
 /** Derived record summary — computed purely from a Round[] (see lib/roundStats). */
 export interface RoundSummary {

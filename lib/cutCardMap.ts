@@ -1,4 +1,4 @@
-import { CUT_ORIGINS, type CutOrigin, type SavedCard } from "@/types";
+import { CUT_ORIGINS, type CutOrigin, type SavedCard, type SavedCardSummary } from "@/types";
 
 /**
  * Pure mappers between the Supabase `cut_cards` row (snake_case, nullable) and
@@ -7,13 +7,11 @@ import { CUT_ORIGINS, type CutOrigin, type SavedCard } from "@/types";
  * same split as lib/roundMap.
  */
 
-/** A row as it comes back from the `cut_cards` table. */
-export interface CutCardRow {
+/** A list row from `cut_cards` — no body, no citation details. */
+export interface CutCardListRow {
   id: string;
   tag: string | null;
   cite: string | null;
-  cite_details: string | null;
-  body: string | null;
   claim: string | null;
   card_length: string | null;
   origin: string | null;
@@ -23,10 +21,26 @@ export interface CutCardRow {
   created_at: string;
 }
 
-/** The columns every read selects. `user_id` is never returned — the caller
- *  already knows whose cards these are, and shipping it invites using it. */
-export const CUT_CARD_COLUMNS =
-  "id,tag,cite,cite_details,body,claim,card_length,origin,source_url,source_title,source_publication,created_at";
+/** A full row, for one card being opened. */
+export interface CutCardRow extends CutCardListRow {
+  cite_details: string | null;
+  body: string | null;
+}
+
+/**
+ * Columns for the LIST. Note what is missing: `body` and `cite_details`.
+ *
+ * A measured cut-card body averages ~20KB (an Entire Article cut is larger
+ * still), while everything a list row displays comes to ~200 bytes. Selecting
+ * bodies here made one 50-row page a ~1MB transfer to render text no row shows,
+ * and it grew with the length of what people cut rather than with how many cards
+ * they had. The body is fetched per card, on open — see CUT_CARD_FULL_COLUMNS.
+ */
+export const CUT_CARD_LIST_COLUMNS =
+  "id,tag,cite,claim,card_length,origin,source_url,source_title,source_publication,created_at";
+
+/** Columns for ONE card, opened to be read: the list fields plus the heavy two. */
+export const CUT_CARD_FULL_COLUMNS = `${CUT_CARD_LIST_COLUMNS},cite_details,body`;
 
 function toOrigin(value: string | null): CutOrigin {
   // An unrecognised origin means a newer server wrote a value this build doesn't
@@ -45,14 +59,12 @@ function optional(value: string | null): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
-/** DB row → app `SavedCard`. */
-export function rowToSavedCard(row: CutCardRow): SavedCard {
+/** DB list row → app `SavedCardSummary`. */
+export function rowToCardSummary(row: CutCardListRow): SavedCardSummary {
   return {
     id: row.id,
     tag: row.tag ?? "",
     cite: row.cite ?? "",
-    citeDetails: row.cite_details ?? "",
-    body: row.body ?? "",
     claim: row.claim ?? "",
     cardLength: row.card_length ?? "",
     origin: toOrigin(row.origin),
@@ -63,6 +75,15 @@ export function rowToSavedCard(row: CutCardRow): SavedCard {
   };
 }
 
+/** DB full row → app `SavedCard`, for a card being opened. */
+export function rowToSavedCard(row: CutCardRow): SavedCard {
+  return {
+    ...rowToCardSummary(row),
+    citeDetails: row.cite_details ?? "",
+    body: row.body ?? "",
+  };
+}
+
 /**
  * Does this saved card match a free-text filter? Matches the tag, the cite, the
  * claim it was cut for, and the source title — the four things a debater
@@ -70,7 +91,7 @@ export function rowToSavedCard(row: CutCardRow): SavedCard {
  * in the browser would match on incidental words and turn a precise filter into
  * noise, which is the same mistake the wiki search had to be rescued from.
  */
-export function matchesQuery(card: SavedCard, query: string): boolean {
+export function matchesQuery(card: SavedCardSummary, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
   return [card.tag, card.cite, card.claim, card.sourceTitle ?? ""].some((field) =>
