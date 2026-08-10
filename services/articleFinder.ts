@@ -267,8 +267,20 @@ async function runSearch(
 
   const ranking = rankerSchema.safeParse(rankingRaw);
   if (!ranking.success) {
-    console.error("articleFinder: unparseable ranking output", ranking.error.message);
-    throw new Error("The search completed but returned an unreadable result. Please try again.");
+    /*
+     * Degrade instead of failing. By this point the retrieval step has already
+     * found REAL articles; only the ORDER the model proposed came back
+     * malformed. Throwing discarded a whole good result set over a formatting
+     * slip - observed live, where a search holding six usable sources reported
+     * "returned an unreadable result" instead.
+     *
+     * Ordering is the one part of the pipeline with a working non-AI
+     * implementation, so this is a real degradation rather than a guess: the
+     * articles and their citations are untouched, only the ranking is weaker.
+     */
+    console.warn("articleFinder: unparseable ranking output; using heuristic ranking", ranking.error.message);
+    onStage?.("verify");
+    return verifyAndFilter(heuristicRanking(shortlist));
   }
 
   const articles = ranking.data.selections

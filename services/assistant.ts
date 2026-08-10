@@ -8,7 +8,7 @@ import {
 } from "@google/genai";
 import { stripDelimiters } from "@/lib/cardMarkup";
 import { generateContentRaw } from "@/lib/gemini";
-import { modelFor } from "@/lib/models";
+import { fallbackFor, modelFor } from "@/lib/models";
 import type { Tier } from "@/lib/tier";
 import { NoSourcesFoundError, findArticles } from "@/services/articleFinder";
 import {
@@ -309,6 +309,10 @@ export async function runAssistant(
   // single largest quality gap in the product. Pro now gets the strong model
   // plus a thinking budget (safe here: the output is prose, not fragile JSON).
   const { model, thinkingBudget } = modelFor("coach", opts.tier ?? "free");
+  // A Pro coach whose premium model has spent its daily quota answers on the
+  // cheap model instead of refusing to answer at all. Thinking is dropped on
+  // that path inside lib/gemini - see the note there.
+  const fallbackModel = fallbackFor("coach", opts.tier ?? "free") ?? undefined;
   const contents: Content[] = req.messages
     .slice(-MAX_HISTORY)
     .map((m) => ({
@@ -325,6 +329,7 @@ export async function runAssistant(
       contents,
       tools: [{ functionDeclarations: TOOLS }],
       model,
+      fallbackModel,
       thinkingBudget,
       temperature: 0.4,
       maxOutputTokens: 2048,
@@ -360,6 +365,7 @@ export async function runAssistant(
     system,
     contents,
     model,
+    fallbackModel,
     thinkingBudget,
     temperature: 0.4,
     maxOutputTokens: 2048,

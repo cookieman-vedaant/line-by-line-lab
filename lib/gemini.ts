@@ -7,6 +7,11 @@ import {
 import { CircuitOpenError, withBreaker } from "@/lib/circuitBreaker";
 import { throttleGemini } from "@/lib/geminiThrottle";
 import { extractJson } from "@/lib/json";
+import {
+  claimModelAttempt,
+  markModelAvailable,
+  markModelExhausted,
+} from "@/lib/modelAvailability";
 
 // NOTE: per-task, per-tier model selection now lives in lib/models.ts
 // (`modelFor(task, tier)`). The two constants below remain the DEFAULTS used
@@ -89,9 +94,19 @@ async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
  * Only TRANSIENT errors count against it: a 400 from a malformed prompt is our
  * bug, not an outage, and letting it open the circuit would take the AI offline
  * for every user over one bad request.
+ *
+ * ── THE BREAKER IS KEYED PER MODEL, AND MUST STAY THAT WAY ──────────────────
+ * It used to be one breaker named "gemini" for every model, which produced a
+ * genuinely bad failure: `gemini-3.5-flash` is capped at 20 requests/DAY on the
+ * free tier, one card cut fires eight marker calls at it, and eight failures
+ * blew past the threshold of five — opening the circuit for EVERY model. The
+ * Article Finder, which runs entirely on the healthy cheap model, went down as
+ * collateral damage, and the marker's own fallback to that same cheap model was
+ * unreachable because it had to pass through the circuit it had just opened.
+ * One exhausted model must never be able to take a healthy one offline.
  */
-function withGeminiBreaker<T>(fn: () => Promise<T>): Promise<T> {
-  return withBreaker("gemini", fn, isTransient);
+function withGeminiBreaker<T>(model: string, fn: () => Promise<T>): Promise<T> {
+  return withBreaker(`gemini:${model}`, fn, countsAgainstBreaker);
 }
 
 /**
@@ -105,6 +120,36 @@ function isTransient(err: unknown): boolean {
   return /\b(429|500|502|503|504)\b|RESOURCE_EXHAUSTED|UNAVAILABLE|quota|rate.?limit|overloaded|high demand|ECONNRESET|ETIMEDOUT|ENOTFOUND|fetch failed/i.test(
     err.message,
   );
+}
+
+/**
+ * A DAILY quota exhaustion, which `isTransient` alone can't distinguish from an
+ * ordinary rate limit — both are 429s mentioning "quota". Google names the
+ * violated quota in the error body, so read the name rather than guess:
+ *
+ *   GenerateRequestsPerDayPerProjectPerModel-FreeTier   <- resets tomorrow
+ *   GenerateRequestsPerMinutePerProjectPerModel-...     <- resets in seconds
+ *
+ * Note the per-day error still advertises a `retryDelay` of ~25s, so that field
+ * is actively misleading here and is deliberately not consulted.
+ *
+ * Matching conservatively is safe: an unrecognized 429 simply falls through to
+ * the existing retry-and-breaker path, which is what happened before this
+ * existed.
+ */
+export function isDailyQuotaExhausted(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  if (!/\b429\b|RESOURCE_EXHAUSTED/i.test(err.message)) return false;
+  return /PerDayPerProject|RequestsPerDay|per[\s-]?day/i.test(err.message);
+}
+
+/**
+ * What the breaker is allowed to count. Running out of a per-day allowance is a
+ * fact about our BILLING PLAN, not about whether Gemini is reachable — counting
+ * it would trip a breaker that no amount of provider recovery can reset.
+ */
+function countsAgainstBreaker(err: unknown): boolean {
+  return isTransient(err) && !isDailyQuotaExhausted(err);
 }
 
 /** Thrown when the server is missing its API key — surfaced as a clean 500. */
@@ -122,11 +167,36 @@ export class MissingApiKeyError extends Error {
  * high demand / overload (503). Surfaced as a friendly "try again" hint.
  */
 export class RateLimitedError extends Error {
-  constructor() {
+  constructor(cause?: unknown) {
     super(
       "The AI is busy right now (rate limit or high demand). Wait a few seconds and try again.",
+      // Keep the provider's own message attached. Without it this error erases
+      // the only evidence of WHICH limit was hit, and a per-minute blip and a
+      // spent daily allowance become indistinguishable in the logs.
+      cause === undefined ? undefined : { cause },
     );
     this.name = "RateLimitedError";
+  }
+}
+
+/**
+ * One specific model has spent its daily allowance. Extends RateLimitedError on
+ * purpose: every caller that already degrades gracefully on a rate limit (the
+ * marker's fallback, the ranker's heuristic ordering, the re-highlighter) keeps
+ * working with no change, and callers that care about the distinction can test
+ * for this subtype.
+ *
+ * The message deliberately omits the model id — it reaches real users, who are
+ * owed something honest ("today", not "a few seconds") but not our internals.
+ */
+export class ModelUnavailableError extends RateLimitedError {
+  readonly model: string;
+
+  constructor(model: string) {
+    super();
+    this.name = "ModelUnavailableError";
+    this.model = model;
+    this.message = "The AI has reached today's request limit. Please try again later.";
   }
 }
 
@@ -140,6 +210,7 @@ export function getGemini(): GoogleGenAI {
   client ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   return client;
 }
+
 
 interface GenerateJsonOptions {
   system: string;
@@ -155,25 +226,76 @@ interface GenerateJsonOptions {
   /** Max retry attempts on transient errors (default = RETRY_DELAYS_MS.length).
    *  Pass 0 to fail fast when the caller has its own fallback. */
   retries?: number;
+  /** Model to retry on when the preferred one is rate-limited or out of quota.
+   *  Prefer `fallbackFor(task, tier)` from lib/models.ts over a literal. */
+  fallbackModel?: string;
 }
 
 /**
  * One Gemini call that must produce JSON. Returns the parsed value, or null
  * if the model's output wasn't parseable — callers decide how to fail honestly.
+ *
+ * When `fallbackModel` is set, a rate limit or exhausted daily quota on the
+ * preferred model drops to the fallback rather than failing the request. That is
+ * what keeps the app working on a free key where the premium model is capped at
+ * 20 requests/day: quality degrades for the rest of the day, the feature does not
+ * disappear. Availability is re-probed periodically (lib/modelAvailability), so
+ * the premium model returns on its own once the cap is lifted.
  */
 export async function generateJson(opts: GenerateJsonOptions): Promise<unknown> {
+  const primary = opts.model ?? GEMINI_MODEL;
+  try {
+    return await generateJsonOn(primary, opts);
+  } catch (err) {
+    if (!shouldFailOver(err, primary, opts.fallbackModel)) throw err;
+    console.warn(`gemini: ${primary} unavailable (${describe(err)}); using ${opts.fallbackModel}`);
+    return await generateJsonOn(opts.fallbackModel as string, withFallbackRetries(opts));
+  }
+}
+
+/**
+ * Callers pass `retries: 0` so a doomed premium call fails fast instead of
+ * burning ~10s of backoff when a fallback exists. That reasoning does NOT carry
+ * over to the fallback itself: it is the last resort, so a single per-minute
+ * blip on it would fail the whole request with nothing left to try. Restore the
+ * normal ladder for that leg.
+ *
+ * This is not hypothetical — it is exactly how a live cut failed. Eight marker
+ * sections all failed over to the cheap model at once, one of them met a
+ * per-minute 429, and `retries: 0` turned that into a dead card instead of a
+ * three-second wait.
+ */
+function withFallbackRetries<T extends { retries?: number }>(opts: T): T {
+  return { ...opts, retries: undefined };
+}
+
+/** True when `err` is worth retrying on a different model. */
+function shouldFailOver(err: unknown, primary: string, fallback?: string): boolean {
+  return !!fallback && fallback !== primary && err instanceof RateLimitedError;
+}
+
+/** Short reason string for the fallback log line. */
+function describe(err: unknown): string {
+  return err instanceof ModelUnavailableError ? "daily quota spent" : "rate limited";
+}
+
+/** One JSON call against ONE specific model, with the retry ladder. */
+async function generateJsonOn(model: string, opts: GenerateJsonOptions): Promise<unknown> {
   const ai = getGemini();
   const maxRetries = opts.retries ?? RETRY_DELAYS_MS.length;
 
   // Try once, then retry on transient errors with backoff. Non-transient errors
   // fail immediately.
   for (let attempt = 0; ; attempt++) {
+    // Skip a model already known to be out of quota — no point paying for the
+    // round trip, and exactly one caller is let through to re-probe it.
+    if (!claimModelAttempt(model)) throw new ModelUnavailableError(model);
     try {
       await throttleGemini();
-      const response = await withGeminiBreaker(() =>
+      const response = await withGeminiBreaker(model, () =>
         withSlot(() =>
           ai.models.generateContent({
-            model: opts.model ?? GEMINI_MODEL,
+            model,
             contents: opts.prompt,
             config: {
               systemInstruction: opts.system,
@@ -190,13 +312,22 @@ export async function generateJson(opts: GenerateJsonOptions): Promise<unknown> 
           }),
         ),
       );
-      return extractJson(response.text ?? "");
+      markModelAvailable(model);      return extractJson(response.text ?? "");
     } catch (err) {
-      // An open circuit means Gemini is already known-down; retrying here would
-      // just re-throw instantly in a loop. Surface the friendly message now.
+      // Out of daily allowance: park the model and give up on it immediately.
+      // Retrying buys nothing — the window resets tomorrow, not in 3 seconds.
+      if (isDailyQuotaExhausted(err)) {
+        markModelExhausted(model);
+        throw new ModelUnavailableError(model);
+      }
+      // A probe that failed for any OTHER reason isn't a quota problem, so stop
+      // treating the model as parked and let the breaker own it from here.
+      markModelAvailable(model);
+      // An open circuit means this model is already known-down; retrying here
+      // would just re-throw instantly in a loop. Surface the message now.
       if (err instanceof CircuitOpenError) throw new RateLimitedError();
       if (!isTransient(err)) throw err;
-      if (attempt >= maxRetries) throw new RateLimitedError();
+      if (attempt >= maxRetries) throw new RateLimitedError(err);
       await sleep(withJitter(RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)]));
     }
   }
@@ -216,41 +347,74 @@ interface GenerateContentRawOptions {
    *  reasoning is the actual product. */
   thinkingBudget?: number;
   retries?: number;
+  /** Model to retry on when the preferred one is rate-limited or out of quota. */
+  fallbackModel?: string;
 }
 
 /**
  * Lower-level Gemini call for the assistant/agent loop: sends the full `contents`
  * (multi-turn + function-response turns) and optional tools, and returns the raw
  * response so the caller can read `functionCalls` / `text`. Same transient-retry
- * behavior as generateJson (thinking disabled to conserve free-tier tokens).
+ * and model-failover behavior as generateJson.
  */
 export async function generateContentRaw(
+  opts: GenerateContentRawOptions,
+): Promise<GenerateContentResponse> {
+  const primary = opts.model ?? GEMINI_MODEL;
+  try {
+    return await generateContentRawOn(primary, opts.thinkingBudget ?? 0, opts);
+  } catch (err) {
+    if (!shouldFailOver(err, primary, opts.fallbackModel)) throw err;
+    console.warn(`gemini: ${primary} unavailable (${describe(err)}); using ${opts.fallbackModel}`);
+    /*
+     * Thinking is dropped on the fallback. The fallback is always the cheap
+     * model (see fallbackFor), whose value here is that it ANSWERS — and
+     * `thinkingBudget: 0` is the only configuration this project has actually
+     * verified working on it (npm run check:models probes exactly that shape).
+     * Carrying a 2048-token budget over from the Coach's premium config risks
+     * turning a graceful degradation into a 400.
+     */
+    return await generateContentRawOn(opts.fallbackModel as string, 0, withFallbackRetries(opts));
+  }
+}
+
+/** One raw call against ONE specific model, with the retry ladder. */
+async function generateContentRawOn(
+  model: string,
+  thinkingBudget: number,
   opts: GenerateContentRawOptions,
 ): Promise<GenerateContentResponse> {
   const ai = getGemini();
   const maxRetries = opts.retries ?? RETRY_DELAYS_MS.length;
   for (let attempt = 0; ; attempt++) {
+    if (!claimModelAttempt(model)) throw new ModelUnavailableError(model);
     try {
       await throttleGemini();
-      return await withGeminiBreaker(() =>
+      const response = await withGeminiBreaker(model, () =>
         withSlot(() =>
           ai.models.generateContent({
-            model: opts.model ?? GEMINI_MODEL,
+            model,
             contents: opts.contents,
             config: {
               systemInstruction: opts.system,
               temperature: opts.temperature ?? 0.3,
               maxOutputTokens: opts.maxOutputTokens ?? 4096,
-              thinkingConfig: { thinkingBudget: opts.thinkingBudget ?? 0 },
+              thinkingConfig: { thinkingBudget },
               ...(opts.tools ? { tools: opts.tools } : {}),
             },
           }),
         ),
       );
+      markModelAvailable(model);      return response;
     } catch (err) {
+      if (isDailyQuotaExhausted(err)) {
+        markModelExhausted(model);
+        throw new ModelUnavailableError(model);
+      }
+      markModelAvailable(model);
       if (err instanceof CircuitOpenError) throw new RateLimitedError();
       if (!isTransient(err)) throw err;
-      if (attempt >= maxRetries) throw new RateLimitedError();
+      if (attempt >= maxRetries) throw new RateLimitedError(err);
       await sleep(withJitter(RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)]));
     }
   }
