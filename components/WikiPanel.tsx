@@ -58,7 +58,14 @@ export default function WikiPanel() {
             id="wiki-claim"
             value={claim}
             onChange={(e) => setClaim(e.target.value)}
-            placeholder="brahman is the ultimate truth"
+            /*
+             * An INSTRUCTION, not a sample query. The previous placeholder was a
+             * hardcoded example phrased like something a real debater would type,
+             * which read to users as another person's search leaking onto their
+             * screen. A placeholder is shared by everyone who loads the page, so
+             * it must never look like anyone's content.
+             */
+            placeholder="Describe your claim…"
             className={inputClasses}
           />
           <p className="mt-2 text-xs text-ink/60">
