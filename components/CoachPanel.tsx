@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import CardView from "@/components/CardView";
+import CoachMessage from "@/components/CoachMessage";
 import { extractPdf, requestAssistant } from "@/lib/apiClient";
 import {
   getProfileServerSnapshot,
@@ -208,11 +209,19 @@ export default function CoachPanel({ context, seed }: CoachPanelProps) {
           <div key={i} className={turn.role === "user" ? "flex justify-end" : "flex justify-start"}>
             <div className={turn.role === "user" ? "max-w-[85%]" : "w-full"}>
               <div
-                className={`frame px-4 py-3 text-sm font-medium leading-relaxed whitespace-pre-wrap ${
-                  turn.role === "user" ? "bg-accent text-paper" : "bg-paper-2 text-ink"
+                className={`frame px-4 py-3 text-sm font-medium leading-relaxed ${
+                  turn.role === "user"
+                    ? "bg-accent text-paper whitespace-pre-wrap"
+                    : "bg-paper-2 text-ink"
                 }`}
               >
-                {turn.content}
+                {/*
+                 * Only the Coach's own replies are parsed as Markdown. A user's
+                 * message is text they typed — quite possibly a pasted card with
+                 * asterisks in it — and silently restyling their words would
+                 * misrepresent what they wrote.
+                 */}
+                {turn.role === "user" ? turn.content : <CoachMessage content={turn.content} />}
               </div>
 
               {turn.articles && turn.articles.length > 0 && (
