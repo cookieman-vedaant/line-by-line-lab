@@ -10,13 +10,20 @@ import { searchPrep } from "@/services/wikiMining";
  *
  * Thin: all logic is in `services/wikiMining.ts`, which queries our own
  * `wiki_cards` index (built by `services/wikiIngest.ts`). No opencaselist login,
- * no rate limit, no caselist to pick — one query over the whole indexed corpus.
+ * and no rate limit — one query over the whole indexed corpus, optionally
+ * narrowed to the caselists the debater actually competes in.
  */
 
 export const maxDuration = 30;
 
 const searchSchema = z.object({
   claim: z.string().trim().min(2).max(500),
+  /*
+   * Bounded and shape-checked here, then normalized again in the service, which
+   * drops anything that isn't an opencaselist slug. An over-long or malformed
+   * list is rejected at the edge rather than handed to the query.
+   */
+  caselists: z.array(z.string().trim().max(32)).max(13).optional(),
 });
 
 export async function POST(req: Request) {
@@ -45,7 +52,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const result = await searchPrep(parsed.data.claim);
+    const result = await searchPrep(parsed.data.claim, parsed.data.caselists);
     return NextResponse.json({ result });
   } catch (err) {
     console.error("wiki/search failed", err);

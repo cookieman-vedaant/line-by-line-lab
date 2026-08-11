@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import CardView from "@/components/CardView";
-import { requestWikiSearch } from "@/lib/apiClient";
-import type { WikiCardResult, WikiSearchResult } from "@/types";
+import { requestWikiCaselists, requestWikiSearch } from "@/lib/apiClient";
+import { caselistOptionLabel } from "@/lib/caselistLabel";
+import type { WikiCardResult, WikiCaselist, WikiSearchResult } from "@/types";
 
 const inputClasses =
   "w-full frame bg-paper-2 px-3 py-2.5 text-sm font-medium text-ink " +
@@ -15,18 +16,39 @@ const labelClasses = "label-mono mb-2 block text-xs text-ink";
  *
  * opencaselist has no whole-wiki search, so we index it ourselves and search
  * that: the debater types the argument they want and gets matching cards from
- * every caselist and every year at once, instantly. No opencaselist login, no
- * picking a caselist. Every card shown is verbatim disclosed content, rendered
- * with the original debater's own highlighting.
+ * every caselist and every year at once, instantly. No opencaselist login
+ * required. Every card shown is verbatim disclosed content, rendered with the
+ * original debater's own highlighting.
+ *
+ * The caselist filter is optional but does real work. A search returns at most
+ * 60 cards out of 200k+, so on a broad claim those slots go to whichever
+ * division ranked highest overall — often not the one the debater competes in,
+ * which makes prep that exists feel missing. Narrowing spends the 60 on their
+ * own event, and is much faster besides (measured 7.9s -> 0.7s).
  */
 export default function WikiPanel() {
   const [claim, setClaim] = useState("");
+  const [caselist, setCaselist] = useState(""); // "" = every caselist
+  const [caselists, setCaselists] = useState<WikiCaselist[]>([]);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<WikiSearchResult | null>(null);
   // Bumped per search so <WikiResults> remounts, clearing its filters and
   // jump-to pointer for the fresh result set.
   const [runId, setRunId] = useState(0);
+
+  // Populate the filter once. Failure is silent by design — requestWikiCaselists
+  // returns [] — so a dropdown that can't load leaves search working across
+  // everything rather than blocking it.
+  useEffect(() => {
+    let live = true;
+    void requestWikiCaselists().then((list) => {
+      if (live) setCaselists(list);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
 
   async function handleSearch(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -37,7 +59,10 @@ export default function WikiPanel() {
     setError(null);
     setResult(null);
     setSearching(true);
-    const outcome = await requestWikiSearch({ claim: claim.trim() });
+    const outcome = await requestWikiSearch({
+      claim: claim.trim(),
+      ...(caselist ? { caselists: [caselist] } : {}),
+    });
     setSearching(false);
     if (!outcome.ok) {
       setError(outcome.error);
@@ -74,6 +99,31 @@ export default function WikiPanel() {
             year</strong> — and returns the ones that match, ready to use.
           </p>
         </div>
+
+        {caselists.length > 0 && (
+          <div>
+            <label htmlFor="wiki-caselist" className={labelClasses}>
+              Caselist <span className="text-ink/40">(optional)</span>
+            </label>
+            <select
+              id="wiki-caselist"
+              value={caselist}
+              onChange={(e) => setCaselist(e.target.value)}
+              className={inputClasses}
+            >
+              <option value="">Every caselist</option>
+              {caselists.map((c) => (
+                <option key={c.caselist} value={c.caselist}>
+                  {caselistOptionLabel(c.caselist, c.cards)}
+                </option>
+              ))}
+            </select>
+            <p className="mt-2 text-xs text-ink/60">
+              A search returns the 60 best matches. Narrowing to your own event spends all 60
+              on prep you can actually hit — and returns them faster.
+            </p>
+          </div>
+        )}
 
         <button
           type="submit"

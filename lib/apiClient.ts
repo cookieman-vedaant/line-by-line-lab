@@ -12,6 +12,7 @@ import type {
   SearchStage,
   SearchStreamEvent,
   ThemeSpec,
+  WikiCaselist,
   WikiSearchRequest,
   WikiSearchResult,
 } from "@/types";
@@ -328,6 +329,24 @@ export async function requestWikiSearch(req: WikiSearchRequest): Promise<WikiSea
     return { ok: true, result: data.result };
   } catch {
     return { ok: false, error: "Could not reach the server. Is it running?" };
+  }
+}
+
+/**
+ * The caselists available to filter a wiki search by.
+ *
+ * Returns an empty list rather than an error on failure: the filter is an
+ * optional narrowing, so a dropdown that fails to populate should leave search
+ * working across everything, not block it.
+ */
+export async function requestWikiCaselists(): Promise<WikiCaselist[]> {
+  try {
+    const res = await fetch("/api/wiki/caselists", { headers: apiHeaders() });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.caselists) ? (data.caselists as WikiCaselist[]) : [];
+  } catch {
+    return [];
   }
 }
 

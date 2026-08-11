@@ -404,6 +404,23 @@ export interface RehighlightResult {
  */
 export interface WikiSearchRequest {
   claim: string;
+  /**
+   * Restrict the search to these opencaselist caselists (e.g. ["hsld25"]).
+   * Omitted or empty means search everything.
+   *
+   * This is how a debater reaches prep the result cap would otherwise bury: the
+   * index spans 13 caselists, and on a broad claim the cap gets spent on
+   * whichever division ranked highest overall rather than the one they compete
+   * in. Narrowing also makes the query markedly faster, since the caselist index
+   * shrinks the corpus before ranking.
+   */
+  caselists?: string[];
+}
+
+/** One caselist a debater can filter by, with how much prep it holds. */
+export interface WikiCaselist {
+  caselist: string;
+  cards: number;
 }
 
 /**
