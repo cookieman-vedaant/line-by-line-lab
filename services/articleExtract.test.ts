@@ -78,7 +78,49 @@ describe("extractPageMetadata", () => {
 
   it("returns empty fields when nothing is present", () => {
     const meta = extractPageMetadata(docFrom(""));
-    expect(meta).toEqual({ title: "", author: "", publication: "", date: "" });
+    expect(meta).toEqual({
+      title: "",
+      author: "",
+      publication: "",
+      date: "",
+      modified: "",
+      authorQualification: "",
+      publisherQualification: "",
+      canonicalUrl: "",
+    });
+  });
+
+  it("reads an updated date separately, so the cite can prefer the later one", () => {
+    const meta = extractPageMetadata(
+      docFrom(
+        '<meta property="article:published_time" content="2019-04-02">' +
+          '<meta property="article:modified_time" content="2024-11-30">',
+      ),
+    );
+    expect(meta.date).toBe("2019-04-02");
+    expect(meta.modified).toBe("2024-11-30");
+  });
+
+  it("reads the canonical URL, so a share link never lands in the cite", () => {
+    const meta = extractPageMetadata(
+      docFrom('<link rel="canonical" href="https://example.org/real-article">'),
+    );
+    expect(meta.canonicalUrl).toBe("https://example.org/real-article");
+  });
+
+  it("copies the author's stated role out of JSON-LD rather than inferring one", () => {
+    const meta = extractPageMetadata(
+      docFrom(
+        `<script type="application/ld+json">${JSON.stringify({
+          "@type": "NewsArticle",
+          author: { "@type": "Person", name: "Ty Bishop", jobTitle: "Senior Partner" },
+          publisher: { "@type": "Organization", name: "McKinsey", description: "A management consulting firm" },
+        })}</script>`,
+      ),
+    );
+    expect(meta.author).toBe("Ty Bishop");
+    expect(meta.authorQualification).toBe("Senior Partner");
+    expect(meta.publisherQualification).toBe("A management consulting firm");
   });
 });
 
@@ -133,6 +175,10 @@ describe("extractArticleCached", () => {
     publication: "P",
     date: "2026-01-01",
     text: "the article body",
+    authors: ["A"],
+    authorQualification: "",
+    publisherQualification: "",
+    canonicalUrl: "",
   };
   // Unique URL per test so the module-level cache can't leak state between them.
   const freshUrl = () => `https://example.com/a-${Math.random().toString(36).slice(2)}`;

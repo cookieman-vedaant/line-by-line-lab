@@ -1,9 +1,11 @@
 import { z } from "zod";
 import { tagMarkupToDelimiters } from "@/lib/cardMarkup";
+import { citeName, citeYear } from "@/lib/cite";
 import { applyEmphasisSpans, createLocator } from "@/lib/emphasis";
 import { GEMINI_MARKER_MODEL, GEMINI_MODEL, generateJson } from "@/lib/gemini";
 import { createSharedCache } from "@/lib/sharedCache";
 import {
+  articleFromFields,
   ArticleUnreadableError,
   extractArticleCached,
   type ExtractedArticle,
@@ -349,14 +351,23 @@ Bold the load-bearing term inside text you already marked: the key noun phrase, 
 Every fragment in "u", "h" and "b" must be copied CHARACTER-FOR-CHARACTER from the sentence numbered "s" — same words, punctuation and capitalization. A fragment that cannot be found in that sentence is silently dropped, which quietly costs the debater emphasis they needed. Do not stitch together words from across a gap into one fragment: use several fragments instead, which is why "u" is a list.
 
 - tag: a punchy 1-2 sentence statement of what the evidence proves, phrased from the user's claim (this is YOUR wording). Mark 1-3 key phrases with __underline__ markers.
-- cite: the HUMAN author's last name + 2-digit year, no apostrophe (e.g. "Rodrigues 16"). Multiple authors: "FirstAuthorLastName et al. YY". Only when NO human author is stated anywhere: publication name + YY. See "Finding the author".
-- citeDetails: full cite content WITHOUT brackets: author (+ qualifications if known), "Article Title." Publication, date. Do NOT include a URL — the app appends the real link itself.
+- cite: the cite name from RESOLVED CITE FACTS + the two-digit year, no apostrophe (e.g. "Rodrigues 16", "Bishop et al. 24").
+- citeDetails: full cite content WITHOUT brackets: author (+ qualifications), "Article Title." Publication, date. Do NOT include a URL — the app appends the real link itself.
 
-Finding the author (name the PERSON who wrote it, never the website):
-- Use the provided metadata author when it is a person's name.
-- Treat the metadata author as NOT a real byline if it is an organization or matches/contains the publication (e.g. author "Reuters" with publication "Reuters", or "BBC News"). In that case ignore it and search the CITE CONTEXT block for a human byline ("By Jane Smith", "Article written by: Jane Smith", usually at the very top or bottom) and use that name.
-- NEVER invent, guess, or infer an author from the topic. Only if NO human author is stated anywhere (metadata or cite context) may you cite by the publication (e.g. "Reuters 25").
-- Same rule for dates and credentials: use only what the metadata or cite context actually states.
+════════ THE CITE IS CHECKED, NOT COMPOSED ════════
+Author, year and link are RESOLVED FOR YOU in the RESOLVED CITE FACTS block. That block is the product of reading the page's structured data. It outranks your reading of the article text, and it outranks your prior knowledge of the author or the outlet.
+
+- USE the given cite name verbatim. If it says "Bishop et al.", write "Bishop et al." — never shorten it to one author and never swap in a different name.
+- If it says NO HUMAN BYLINE, cite the publication. That is the ONLY case where an outlet is allowed to be the author. Never print the outlet as the author when authors are listed — a report published by a firm is cited by the PEOPLE who wrote it, not the firm.
+- USE the given two-digit year. If it says NONE, write the cite with no year rather than inventing one, and put "no date" in citeDetails. A year mentioned inside the article's prose is NOT the publication year — an article discussing 2035 is not cited "35".
+- NEVER write a URL, DOI or "available at" into citeDetails. The app appends the real, resolved link itself. A link you write will be wrong.
+
+════════ QUALIFICATIONS ════════
+A cite is worth more when it says who the author is, and worth nothing if that part is invented.
+- When "author's stated role" is given, use it, trimmed to the load-bearing part (e.g. "Professor of Economics, MIT" or "Senior Partner"). You may shorten it; you may not embellish it.
+- When it is NONE STATED, look in the CITE CONTEXT for an explicit bio sentence about that same author ("Jane Smith is a professor of..."). Use it only if it names the author you are citing.
+- When there is no human author, use "what the publisher is" to qualify the ORGANISATION instead (e.g. "McKinsey & Company, a management consulting firm"). This is what gives an unbylined institutional report its weight.
+- If neither exists, give NO qualification. Never infer credentials from the topic, the outlet's reputation, or the author's name. "Expert on foreign policy" invented for a byline is a fabricated qualification and is treated as fabricated evidence.
 
 Final check before you answer: read your "u" fragments straight through as one passage, then your "h" fragments. Both must sound like someone making an argument out loud. That, not how much you marked, is what makes the card good.`;
 
@@ -365,16 +376,34 @@ function buildMarkerPrompt(
   article: ExtractedArticle,
   sentences: string[],
 ): string {
-  // Bylines usually live at the very top or bottom of the article, which the
-  // selected passage may exclude — give the model the head + tail for the cite.
-  const head = article.text.slice(0, 800);
-  const tail = article.text.length > 1300 ? article.text.slice(-500) : "";
+  // Bylines live at the very top or the very bottom — a report often credits its
+  // authors only in a closing block — and the selected passage may exclude both.
+  // The window is generous because a byline missed here is a cite that names the
+  // outlet instead of the person.
+  const head = article.text.slice(0, 1600);
+  const tail = article.text.length > 2600 ? article.text.slice(-1000) : "";
   const citeContext = [head, tail].filter(Boolean).join("\n…\n");
+
+  // Author, date and link are RESOLVED before the model sees anything (see
+  // lib/cite.ts). They are handed over as settled facts rather than as hints,
+  // because every one of them is a thing the model used to get wrong by
+  // re-deriving it from raw text.
+  const resolved = [
+    `- authors: ${article.authors.length > 0 ? article.authors.join(", ") : "NONE FOUND — no human byline on this page"}`,
+    `- cite name to use: ${citeName(article.authors) || `(no human author — use the publication: ${article.publication || "unknown"})`}`,
+    `- most recent date the page states: ${article.date || "NONE STATED"}`,
+    `- two-digit year for the cite: ${citeYear(article.date) || "NONE — omit the year rather than guessing"}`,
+    `- publication: ${article.publication || "unknown"}`,
+    `- author's stated role: ${article.authorQualification || "NONE STATED — omit qualifications"}`,
+    `- what the publisher is: ${article.publisherQualification || "NONE STATED"}`,
+  ].join("\n");
 
   return [
     `Claim the card must support: ${claim}`,
-    `Known metadata — title: ${article.title || "unknown"}; author: ${article.author || "unknown"}; publication: ${article.publication || "unknown"}; date: ${article.date || "unknown"}.`,
-    "--- CITE CONTEXT (article start/end — for finding the author/date only, do NOT quote from here) ---",
+    `Article title: ${article.title || "unknown"}`,
+    "--- RESOLVED CITE FACTS (already verified from the page — USE THESE, do not re-derive them) ---",
+    resolved,
+    "--- CITE CONTEXT (article start/end — for the author's credentials only, do NOT quote from here) ---",
     citeContext,
     `--- PASSAGE (${sentences.length} numbered sentences, verbatim from the article — underline by NUMBER; highlight/bold ONLY from here) ---`,
     sentences.map((s, i) => `[${i}] ${s}`).join("\n"),
@@ -524,13 +553,15 @@ async function markPassageSection(
 
 /** Resolve the cut source into clean article text + metadata. */
 async function resolveSource(req: CutRequest): Promise<ExtractedArticle> {
-  const fromProvidedText = (): ExtractedArticle => ({
-    title: req.source.title ?? "",
-    author: req.source.author ?? "",
-    publication: req.source.publication ?? "",
-    date: req.source.date ?? "",
-    text: (req.source.text ?? "").trim(),
-  });
+  const fromProvidedText = (): ExtractedArticle =>
+    articleFromFields({
+      title: req.source.title,
+      author: req.source.author,
+      publication: req.source.publication,
+      date: req.source.date,
+      text: (req.source.text ?? "").trim(),
+      url: req.source.url,
+    });
 
   if (req.source.url) {
     try {
@@ -706,7 +737,9 @@ async function runCut(req: CutRequest): Promise<Card> {
     tag: tagMarkupToDelimiters(head.tag),
     cite: head.cite,
     // Add the real link ourselves — never from the AI, so it can't be invented.
-    citeDetails: appendSourceUrl(head.citeDetails, req.source.url),
+    // The RESOLVED link — canonical when the page declares one — so a share
+    // link, tracking URL or redirect never ends up in the cite.
+    citeDetails: appendSourceUrl(head.citeDetails, article.canonicalUrl || req.source.url),
     body,
   };
 }

@@ -11,6 +11,7 @@ import { createSharedCache } from "@/lib/sharedCache";
 import { normalizeForComparison } from "@/lib/verbatim";
 import { appendSourceUrl } from "@/services/cardCutter";
 import {
+  articleFromFields,
   ArticleUnreadableError,
   extractArticleCached,
   type ExtractedArticle,
@@ -205,7 +206,7 @@ async function resolveSource(
       }
     }
     return {
-      article: { title: "", author: "", publication: "", date: "", text: s.card.trim() },
+      article: articleFromFields({ text: s.card.trim(), url }),
       notice: url
         ? "Couldn't fetch the full article — analyzed only the pasted card, so contradictions are limited to what's inside it."
         : "No source link in the card — analyzed only the pasted card text. Paste the article's URL for a full re-highlight.",
@@ -214,13 +215,13 @@ async function resolveSource(
 
   if (s.text?.trim()) {
     return {
-      article: {
-        title: s.title ?? "",
-        author: s.author ?? "",
-        publication: s.publication ?? "",
-        date: s.date ?? "",
+      article: articleFromFields({
+        title: s.title,
+        author: s.author,
+        publication: s.publication,
+        date: s.date,
         text: s.text.trim(),
-      },
+      }),
     };
   }
 

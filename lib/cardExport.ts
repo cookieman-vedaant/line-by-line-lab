@@ -1,11 +1,12 @@
 import { type CardDoc, type Run, docToHtmlFile } from "@/lib/cardRich";
+import { wordHighlightName } from "@/lib/wordHighlight";
 
 /**
  * Card downloads.
  *
  * Both formats are built from the runs read off the live card, so a download is
  * what is on screen. The .docx mirrors the clipboard HTML property for property
- * (same sizes, weights, underlines, colors, background fills, 2pt paragraph
+ * (same sizes, weights, underlines, colors, highlighting, 2pt paragraph
  * spacing, 1.07 line spacing), which is what makes a downloaded file match a
  * paste into Google Docs.
  *
@@ -34,7 +35,7 @@ function triggerDownload(blob: Blob, filename: string): void {
 }
 
 export async function downloadDocx(doc: CardDoc, font: string, name: string): Promise<void> {
-  const { Document, Packer, Paragraph, TextRun, ShadingType, HeadingLevel } = await import("docx");
+  const { Document, Packer, Paragraph, TextRun, HeadingLevel } = await import("docx");
 
   const runs = (list: Run[]) =>
     list.map(
@@ -47,11 +48,12 @@ export async function downloadDocx(doc: CardDoc, font: string, name: string): Pr
           size: Math.round(r.sizePt * 2), // docx sizes are half-points
           font,
           color: r.color,
-          // Shading with the exact hex rather than one of Word's 16 named
-          // highlight colors, so the fill matches the screen and the Docs paste.
-          shading: r.highlight
-            ? { type: ShadingType.CLEAR, color: "auto", fill: r.highlight }
-            : undefined,
+          // The highlighter PEN, not shading. Shading kept the exact hex but
+          // Word recolours text over it in Read Mode and Dark Mode, which turned
+          // every highlighted card unreadable in the two views debaters actually
+          // use. See lib/wordHighlight.ts — the app's three colours land on
+          // Word's cyan/yellow/green exactly, so nothing is lost.
+          highlight: wordHighlightName(r.highlight),
         }),
     );
 

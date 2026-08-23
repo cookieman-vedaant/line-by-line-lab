@@ -1,8 +1,40 @@
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
+import { mostRecentDate, splitAuthors } from "@/lib/cite";
 import { hasPaywallPhrase, hasStructuredPaywallSignal } from "@/lib/paywall";
 import { createSharedCache } from "@/lib/sharedCache";
 import { BlockedUrlError, safeFetch } from "@/lib/ssrfGuard";
+
+/**
+ * Build an article from loose fields — pasted text, or a card the
+ * re-highlighter is working from without a fetchable source.
+ *
+ * Everything that isn't a fetch still goes through the same citation
+ * resolution, so a byline the debater pasted gets the same treatment as one
+ * scraped off a page. Doing this per call site is how "McKinsey" survives in
+ * one path and not another.
+ */
+export function articleFromFields(fields: {
+  title?: string;
+  author?: string;
+  publication?: string;
+  date?: string;
+  text: string;
+  url?: string;
+}): ExtractedArticle {
+  const authors = splitAuthors(fields.author ?? "");
+  return {
+    title: fields.title ?? "",
+    author: authors.join(", ") || (fields.author ?? ""),
+    publication: fields.publication ?? "",
+    date: mostRecentDate([normalizeDate(fields.date ?? "")]),
+    text: fields.text,
+    authors,
+    authorQualification: findAuthorBioInText(fields.text, authors),
+    publisherQualification: "",
+    canonicalUrl: fields.url ?? "",
+  };
+}
 
 /** Honest failure — the article couldn't be fetched or parsed. */
 export class ArticleUnreadableError extends Error {
@@ -19,8 +51,21 @@ export interface ExtractedArticle {
   title: string;
   author: string;
   publication: string;
+  /** The most recent date the PAGE states about itself — published or updated. */
   date: string;
   text: string;
+  /**
+   * Every human author found, in order. Empty when only an organisation was
+   * credited, which is a different thing from "we couldn't find anyone" and is
+   * what stops the outlet being printed as the author.
+   */
+  authors: string[];
+  /** The author's stated role or bio, copied from the page. Never inferred. */
+  authorQualification: string;
+  /** What the publisher IS, copied from the page — used when nobody is bylined. */
+  publisherQualification: string;
+  /** Where the article actually lives after redirects and canonicalisation. */
+  canonicalUrl: string;
 }
 
 const FETCH_TIMEOUT_MS = 15000;
@@ -123,17 +168,27 @@ export async function extractArticleFromUrl(
   // Prefer structured metadata over Readability's byline (often null); fall back
   // to a visible byline in the article text. Then drop a "byline" that is really
   // the site/publisher name, so the cite never prints the website as the author.
-  const author = cleanAuthor(
+  const rawAuthor = cleanAuthor(
     meta.author || parsed.byline || findBylineInText(text) || "",
     publication,
   );
+  // Resolve the byline into actual people. An organisation resolves to nobody,
+  // which is the signal the cite needs — "no human wrote this" is not the same
+  // as "the outlet is the author".
+  const authors = splitAuthors(rawAuthor);
 
   return {
     title: meta.title || parsed.title || "",
-    author,
+    author: authors.join(", ") || rawAuthor,
     publication,
-    date: meta.date || parsed.publishedTime?.slice(0, 10) || "",
+    // Published OR updated, whichever is later: a debater cites the version
+    // they can actually read.
+    date: mostRecentDate([meta.date, meta.modified, parsed.publishedTime?.slice(0, 10)]),
     text,
+    authors,
+    authorQualification: meta.authorQualification || findAuthorBioInText(text, authors),
+    publisherQualification: meta.publisherQualification,
+    canonicalUrl: meta.canonicalUrl || url,
   };
 }
 
@@ -215,6 +270,11 @@ interface PageMetadata {
   author: string;
   publication: string;
   date: string;
+  /** Updated/modified date, kept separate so the caller can take the later one. */
+  modified: string;
+  authorQualification: string;
+  publisherQualification: string;
+  canonicalUrl: string;
 }
 
 /**
@@ -222,7 +282,16 @@ interface PageMetadata {
  * Fully defensive — never throws; a missing field just stays empty.
  */
 export function extractPageMetadata(doc: Document): PageMetadata {
-  const meta: PageMetadata = { title: "", author: "", publication: "", date: "" };
+  const meta: PageMetadata = {
+    title: "",
+    author: "",
+    publication: "",
+    date: "",
+    modified: "",
+    authorQualification: "",
+    publisherQualification: "",
+    canonicalUrl: "",
+  };
 
   const attr = (selector: string, attribute = "content"): string => {
     try {
@@ -249,8 +318,21 @@ export function extractPageMetadata(doc: Document): PageMetadata {
       attr('meta[itemprop="datePublished"]') ||
       attr("time[datetime]", "datetime"),
   );
+  // Updated dates are read SEPARATELY, not as a fallback: a page usually states
+  // both, and the cite wants the later one. Reading them as a fallback would
+  // mean an updated article always cited as its original year.
+  meta.modified = normalizeDate(
+    attr('meta[property="article:modified_time"]') ||
+      attr('meta[property="og:updated_time"]') ||
+      attr('meta[itemprop="dateModified"]') ||
+      attr('meta[name="last-modified"]'),
+  );
+  // Where the article really lives — a share link or tracking URL in the address
+  // bar must never end up in the cite.
+  meta.canonicalUrl =
+    attr('link[rel="canonical"]', "href") || attr('meta[property="og:url"]') || "";
 
-  // JSON-LD fills any gaps (author, date, publisher).
+  // JSON-LD fills any gaps (author, dates, publisher, credentials).
   try {
     const scripts = doc.querySelectorAll('script[type="application/ld+json"]');
     for (const script of scripts) {
@@ -258,7 +340,12 @@ export function extractPageMetadata(doc: Document): PageMetadata {
       for (const node of jsonLd) {
         if (!meta.author) meta.author = jsonLdAuthor(node);
         if (!meta.date) meta.date = normalizeDate(stringField(node, "datePublished"));
+        if (!meta.modified) meta.modified = normalizeDate(stringField(node, "dateModified"));
         if (!meta.publication) meta.publication = jsonLdPublisher(node);
+        if (!meta.authorQualification) meta.authorQualification = jsonLdAuthorQualification(node);
+        if (!meta.publisherQualification) {
+          meta.publisherQualification = jsonLdPublisherQualification(node);
+        }
       }
     }
   } catch {
@@ -266,6 +353,43 @@ export function extractPageMetadata(doc: Document): PageMetadata {
   }
 
   return meta;
+}
+
+/**
+ * The author's stated role, straight from the page's own structured data.
+ *
+ * A cite is stronger when it says WHO the author is, and a debater should never
+ * have to take the app's word for it — so this only ever copies what the page
+ * publishes about them. Nothing is inferred from the topic, the outlet or the
+ * name; when a page says nothing, the cite says nothing.
+ */
+function jsonLdAuthorQualification(node: Record<string, unknown>): string {
+  const author = node.author;
+  if (!author) return "";
+  const list = Array.isArray(author) ? author : [author];
+  for (const entry of list) {
+    if (!entry || typeof entry !== "object") continue;
+    const obj = entry as Record<string, unknown>;
+    const type = obj["@type"];
+    if (typeof type === "string" && /organization/i.test(type)) continue;
+    const parts = [stringField(obj, "jobTitle"), stringField(obj, "description")]
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (parts.length > 0) return parts.join(", ").slice(0, 300);
+  }
+  return "";
+}
+
+/**
+ * What the publisher is, for the case the user asked about: nobody is bylined,
+ * so the card has to stand on the institution instead. Same rule — copied, not
+ * inferred.
+ */
+function jsonLdPublisherQualification(node: Record<string, unknown>): string {
+  const pub = node.publisher;
+  if (!pub || typeof pub !== "object") return "";
+  const obj = pub as Record<string, unknown>;
+  return stringField(obj, "description").trim().slice(0, 300);
 }
 
 /**
@@ -362,16 +486,42 @@ const NAME_PATTERN = `${NAME_TOKEN}(?:[ \\t]+${NAME_TOKEN}){1,3}`;
  * "By Jane Smith" or "Article written by: Jane Smith".
  */
 export function findBylineInText(text: string): string {
-  const head = text.slice(0, 600);
+  // Bylines sit at the top, but plenty of reports credit their authors in a
+  // block at the END ("This article is a collaborative effort by…"), which the
+  // old head-only scan could never see — that is how a McKinsey piece ends up
+  // with no author and gets cited as the outlet.
+  const head = text.slice(0, 1200);
+  const tail = text.length > 2000 ? text.slice(-1200) : "";
+  const LIST = `${NAME_PATTERN}(?:\\s*(?:,|and|&)\\s*${NAME_PATTERN}){0,5}`;
   const patterns = [
-    new RegExp(`(?:article\\s+)?[Ww]ritten [Bb]y[:\\s]+(${NAME_PATTERN})`),
-    new RegExp(`(?:^|\\n)\\s*[Bb]y[:\\s]+(${NAME_PATTERN})`),
+    new RegExp(`collaborative effort by\\s+(${LIST})`, "i"),
+    new RegExp(`(?:this (?:article|report|paper) was )?(?:written|prepared|authored) by[:\\s]+(${LIST})`, "i"),
+    new RegExp(`(?:^|\\n)\\s*authors?[:\\s]+(${LIST})`, "i"),
+    new RegExp(`(?:^|\\n)\\s*[Bb]y[:\\s]+(${LIST})`),
   ];
-  for (const re of patterns) {
-    const m = head.match(re);
-    if (m?.[1]) return m[1].trim();
+  for (const source of [head, tail]) {
+    if (!source) continue;
+    for (const re of patterns) {
+      const m = source.match(re);
+      // Ignore a "byline" that resolved to nothing but an organisation.
+      if (m?.[1] && splitAuthors(m[1]).length > 0) return m[1].trim();
+    }
   }
   return "";
+}
+
+/**
+ * A visible "Jane Doe is a professor of…" line, when the page publishes no
+ * structured bio. Scoped to a sentence that starts with an author we already
+ * found, so it can't attach a stranger's credentials to the cite.
+ */
+export function findAuthorBioInText(text: string, authors: string[]): string {
+  if (authors.length === 0) return "";
+  const first = authors[0];
+  const escaped = first.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`${escaped}\\s+(?:is|was|serves as|works as)\\s+([^.\\n]{10,220})`, "i");
+  const m = text.match(re);
+  return m?.[1] ? m[1].trim().replace(/\s+/g, " ") : "";
 }
 
 /**

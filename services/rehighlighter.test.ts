@@ -57,6 +57,10 @@ const article: ExtractedArticle = {
   date: "2024-01-01",
   text:
     "Sanctions are often praised as decisive. In practice, however, the regime rerouted trade through neighbors. The effect on the economy was, at best, modest and short-lived.",
+  authors: ["Jane Smith"],
+  authorQualification: "",
+  publisherQualification: "",
+  canonicalUrl: "",
 };
 
 const analysis: RehighlightAnalysis = {

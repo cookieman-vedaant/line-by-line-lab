@@ -1,4 +1,5 @@
 import { parseCardMarkup, stripDelimiters } from "@/lib/cardMarkup";
+import { wordHighlightName } from "@/lib/wordHighlight";
 import type { Card } from "@/types";
 
 /**
@@ -220,7 +221,18 @@ export function readCard(root: HTMLElement): CardDoc {
 
 /* ---------- runs -> HTML (clipboard, and the .html download) ---------- */
 
+/**
+ * One run as HTML, for the clipboard and the .html download.
+ *
+ * Highlighting is written TWICE on purpose. `background-color` is what browsers
+ * and Google Docs understand, but Word imports it as shading, and Word recolours
+ * text over shading in Read Mode and Dark Mode until the card can't be read.
+ * `mso-highlight` is Word's own CSS extension for the highlighter pen — Word
+ * honours it and everything else ignores it, so one string is correct in both
+ * places. See lib/wordHighlight.ts.
+ */
 function runHtml(r: Run, font: string): string {
+  const pen = wordHighlightName(r.highlight);
   const css = [
     `font-family:${font}`,
     `font-size:${r.sizePt}pt`,
@@ -228,6 +240,7 @@ function runHtml(r: Run, font: string): string {
     r.italic ? "font-style:italic" : "",
     r.underline ? "text-decoration:underline" : "",
     r.highlight ? `background-color:#${r.highlight}` : "",
+    pen ? `mso-highlight:${pen}` : "",
     `color:#${r.color}`,
   ]
     .filter(Boolean)
