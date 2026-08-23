@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   dedupeCandidates,
+  pickWorkUrl,
   publicationAgeToFromDate,
   reconstructAbstract,
   type CandidateArticle,
@@ -76,5 +77,35 @@ describe("dedupeCandidates", () => {
   it("keeps genuinely different works", () => {
     const other = { ...base, title: "A Completely Different Paper" };
     expect(dedupeCandidates([base, other])).toHaveLength(2);
+  });
+});
+
+describe("pickWorkUrl", () => {
+  it("prefers an OA HTML landing page", () => {
+    expect(
+      pickWorkUrl({
+        best_oa_location: { landing_page_url: "https://ex.org/full", pdf_url: "https://ex.org/f.pdf" },
+        primary_location: { landing_page_url: "https://doi.org/x" },
+        doi: "https://doi.org/x",
+      }),
+    ).toBe("https://ex.org/full");
+  });
+
+  it("returns the OA PDF instead of falling to the paywalled DOI", () => {
+    // The fix: an OA work whose only OA location is a PDF used to yield the
+    // paywalled DOI ("not full text"). We read PDFs now, so return the PDF.
+    expect(
+      pickWorkUrl({
+        best_oa_location: { pdf_url: "https://repo.org/paper.pdf" },
+        primary_location: { landing_page_url: "https://doi.org/10.1/x" },
+        doi: "https://doi.org/10.1/x",
+      }),
+    ).toBe("https://repo.org/paper.pdf");
+  });
+
+  it("falls back to the DOI only when there is no OA location at all", () => {
+    expect(
+      pickWorkUrl({ primary_location: undefined, doi: "https://doi.org/10.1/y" }),
+    ).toBe("https://doi.org/10.1/y");
   });
 });

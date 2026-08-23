@@ -151,9 +151,16 @@ interface OpenAlexWork {
  */
 export function pickWorkUrl(w: OpenAlexWork): string {
   const oa = w.best_oa_location;
+  // An OA HTML landing page is cleanest to extract.
   if (oa?.landing_page_url && !/\.pdf($|\?)/i.test(oa.landing_page_url)) {
     return oa.landing_page_url;
   }
+  // The OA PDF is real, free full text — now that the extractor reads PDFs, it
+  // is far better than falling straight to the paywalled DOI, which is why so
+  // many results came back "not full text". Prefer it over the publisher page.
+  if (oa?.pdf_url) return oa.pdf_url;
+  const primary = w.primary_location?.landing_page_url;
+  if (primary && !/\.pdf($|\?)/i.test(primary)) return primary;
   return w.primary_location?.landing_page_url ?? w.doi ?? "";
 }
 

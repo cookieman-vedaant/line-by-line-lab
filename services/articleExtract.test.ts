@@ -2,12 +2,17 @@ import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 import {
   cleanAuthor,
+  decodeHtml,
   extractArticleCached,
   type ExtractedArticle,
   extractPageMetadata,
   findBylineInText,
+  isPdfResponse,
   normalizeDate,
+  pdfToParagraphs,
 } from "./articleExtract";
+
+const bytesOf = (s: string): ArrayBuffer => new TextEncoder().encode(s).buffer;
 
 const docFrom = (head: string): Document =>
   new JSDOM(`<!doctype html><html><head>${head}</head><body></body></html>`).window.document;
@@ -211,5 +216,44 @@ describe("extractArticleCached", () => {
     const ok = await extractArticleCached(url, 15000, flaky);
     expect(calls).toBe(2);
     expect(ok).toEqual(sample);
+  });
+});
+
+describe("isPdfResponse", () => {
+  it("detects a PDF by its magic bytes even when mislabeled", () => {
+    // The reported bug: a PDF served as text/html was decoded as text, putting
+    // the PDF's binary streams into the card body.
+    expect(isPdfResponse("text/html", "https://x.org/a", bytesOf("%PDF-1.7 rest"))).toBe(true);
+  });
+  it("detects a PDF by content-type and by extension", () => {
+    expect(isPdfResponse("application/pdf", "https://x.org/a", bytesOf("junk"))).toBe(true);
+    expect(isPdfResponse("", "https://x.org/paper.pdf", bytesOf("junk"))).toBe(true);
+    expect(isPdfResponse("", "https://x.org/paper.pdf?dl=1", bytesOf("junk"))).toBe(true);
+  });
+  it("leaves real HTML alone", () => {
+    expect(isPdfResponse("text/html; charset=utf-8", "https://x.org/a", bytesOf("<html></html>"))).toBe(false);
+  });
+});
+
+describe("decodeHtml", () => {
+  it("decodes UTF-8 by default", () => {
+    expect(decodeHtml(bytesOf("<p>café</p>"), "text/html")).toContain("café");
+  });
+  it("falls back to UTF-8 on an unknown charset instead of throwing", () => {
+    expect(decodeHtml(bytesOf("<p>ok</p>"), "text/html; charset=made-up")).toContain("ok");
+  });
+});
+
+describe("pdfToParagraphs", () => {
+  it("reflows hard-wrapped lines into sentences, not one-line paragraphs", () => {
+    // Wrapped lines join into one paragraph; a BLANK line is the real
+    // paragraph break. (Sentence boundaries within a paragraph are the cutter's
+    // job, not this function's.)
+    const raw = "Automation displaces\nlabor in exposed regions.\n\nWages then\nfall.";
+    const out = pdfToParagraphs(raw);
+    expect(out).toBe("Automation displaces labor in exposed regions.\n\nWages then fall.");
+  });
+  it("stitches a hyphenated word-wrap back together", () => {
+    expect(pdfToParagraphs("employ-\nment fell")).toBe("employment fell");
   });
 });

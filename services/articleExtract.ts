@@ -89,11 +89,114 @@ const MIN_ACCESSIBLE_CHARS = 2200;
  * Fetch a URL and extract clean article text with Mozilla Readability —
  * the same engine behind Firefox Reader Mode. Free, runs on our server.
  */
+/** Largest PDF we'll pull fully into memory to extract. Beyond this, reject. */
+const MAX_PDF_BYTES = 25 * 1024 * 1024;
+
+/**
+ * Is this response a PDF? Checks the declared type, the URL, and — because
+ * servers mislabel PDFs as octet-stream or even text/html — the `%PDF-` magic
+ * bytes. Any one is enough.
+ */
+export function isPdfResponse(contentType: string, url: string, buffer: ArrayBuffer): boolean {
+  if (contentType.includes("application/pdf")) return true;
+  if (/\.pdf(\?|#|$)/i.test(url)) return true;
+  const b = new Uint8Array(buffer, 0, Math.min(5, buffer.byteLength));
+  return b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46 && b[4] === 0x2d;
+}
+
+/**
+ * Decode page bytes to text, honouring the HTTP charset when it's stated and
+ * defaulting to UTF-8 — the same rule `res.text()` follows, but reached from
+ * the raw bytes so the PDF check above can run first on the same body (a
+ * Response body can only be read once).
+ */
+export function decodeHtml(buffer: ArrayBuffer, contentType: string): string {
+  const m = /charset=["']?([\w-]+)/i.exec(contentType);
+  const enc = (m?.[1] ?? "utf-8").toLowerCase();
+  try {
+    return new TextDecoder(enc).decode(buffer);
+  } catch {
+    return new TextDecoder("utf-8").decode(buffer);
+  }
+}
+
+/**
+ * Reflow PDF-extracted text into paragraphs. PDF extraction yields hard-wrapped
+ * LINES, not paragraphs; feeding those straight to the cutter makes every line
+ * its own "paragraph" and fragments the marking. Join a line to the next unless
+ * the current one ends a sentence, and stitch hyphenated word-wraps back
+ * together. Blank lines stay paragraph breaks.
+ */
+export function pdfToParagraphs(raw: string): string {
+  const paragraphs: string[] = [];
+  let current = "";
+  for (const line of raw.replace(/\r/g, "").split("\n")) {
+    const t = line.trim();
+    if (!t) {
+      if (current) paragraphs.push(current);
+      current = "";
+      continue;
+    }
+    if (!current) current = t;
+    else if (/[.!?:;”")]\s*$/.test(current)) {
+      paragraphs.push(current);
+      current = t;
+    } else if (current.endsWith("-")) current = current.slice(0, -1) + t;
+    else current = `${current} ${t}`;
+  }
+  if (current) paragraphs.push(current);
+  return paragraphs.filter(Boolean).join("\n\n");
+}
+
+/**
+ * Build an article from a fetched PDF using unpdf (the same serverless-safe
+ * pdf.js build the upload route uses). Text only — a PDF rarely carries a
+ * trustworthy machine-readable author or date, so those are left empty and
+ * resolved from the search result's metadata by mergeCiteFacts. A scanned,
+ * image-only PDF yields no text and is rejected rather than cut empty.
+ */
+async function articleFromPdf(bytes: Uint8Array, url: string): Promise<ExtractedArticle> {
+  if (bytes.byteLength > MAX_PDF_BYTES) {
+    throw new ArticleUnreadableError(
+      "That PDF is too large to read here. Download it and paste the text instead.",
+    );
+  }
+  const { extractText, getDocumentProxy } = await import("unpdf");
+  let raw: string;
+  try {
+    const pdf = await getDocumentProxy(bytes);
+    const result = await extractText(pdf, { mergePages: true });
+    raw = Array.isArray(result.text) ? result.text.join("\n\n") : result.text;
+  } catch {
+    throw new ArticleUnreadableError(
+      "That PDF couldn't be read — it may be scanned images or corrupted. Paste the text instead.",
+    );
+  }
+  const text = pdfToParagraphs(raw ?? "");
+  if (text.trim().length < MIN_ARTICLE_CHARS) {
+    throw new ArticleUnreadableError(
+      "That PDF had no extractable text (it may be scanned images). Paste the text instead.",
+    );
+  }
+  return {
+    title: "",
+    author: "",
+    publication: new URL(url).hostname.replace(/^www\./, ""),
+    date: "",
+    text,
+    authors: [],
+    etAl: false,
+    authorQualification: "",
+    publisherQualification: "",
+    canonicalUrl: url,
+  };
+}
+
 export async function extractArticleFromUrl(
   url: string,
   timeoutMs: number = FETCH_TIMEOUT_MS,
 ): Promise<ExtractedArticle> {
-  let html: string;
+  let html = "";
   try {
     // safeFetch validates the URL (and every redirect hop) against the SSRF guard
     // before making the request — a user-supplied link can't reach an internal or
@@ -123,7 +226,15 @@ export async function extractArticleFromUrl(
         `The site responded with error ${res.status}. It may be paywalled or blocking readers — try pasting the article text instead.`,
       );
     }
-    html = await res.text();
+    // Read the raw bytes ONCE, then decide what they are. A URL that serves a
+    // PDF (arXiv, NBER, gov reports — prime debate evidence) was being decoded
+    // as text, which put the PDF's binary streams straight into the card body.
+    const contentType = (res.headers.get("content-type") ?? "").toLowerCase();
+    const buffer = await res.arrayBuffer();
+    if (isPdfResponse(contentType, url, buffer)) {
+      return await articleFromPdf(new Uint8Array(buffer), url);
+    }
+    html = decodeHtml(buffer, contentType);
   } catch (err) {
     if (err instanceof ArticleUnreadableError) throw err;
     if (err instanceof BlockedUrlError) {
