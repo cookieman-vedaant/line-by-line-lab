@@ -49,7 +49,42 @@ async function verifyAndFilter(articles: Article[]): Promise<Article[]> {
   return [...accessible, ...rest].slice(0, RETURN_LIMIT);
 }
 
-/** Honest failure — no reputable sources exist. Never fabricate one instead. */
+/**
+ * Turn the ranker's picks into articles, falling back to heuristic ordering
+ * when it gave us nothing usable.
+ *
+ * The model is ALLOWED to return an empty selection list, and on a narrowly
+ * worded claim it regularly does: retrieval hands it forty real articles about
+ * the subject, none of which argue that exact proposition, and it reports that
+ * none "relate to the claim". Treating that as "no reputable sources exist" told
+ * debaters the web was empty while forty retrieved articles sat in the shortlist
+ * — and it punished precisely the specific, well-formed claims the tool should
+ * reward.
+ *
+ * An empty ranking is an opinion about ORDER, not evidence about the world. So
+ * it degrades exactly as an unparseable ranking already did: same real articles,
+ * weaker ordering. `NoSourcesFoundError` now means only what it says — retrieval
+ * itself came back empty.
+ */
+export function articlesFromRanking(
+  selections: Array<{ index: number; explanation: string; credibilityScore: number }>,
+  shortlist: CandidateArticle[],
+): Article[] {
+  const picked = selections
+    .filter((s) => s.index >= 0 && s.index < shortlist.length)
+    .map((s) => candidateToArticle(shortlist[s.index], s.explanation, s.credibilityScore));
+  if (picked.length > 0) return picked;
+  console.warn(
+    `articleFinder: ranker selected none of ${shortlist.length} candidates; using heuristic ranking`,
+  );
+  return heuristicRanking(shortlist);
+}
+
+/**
+ * Honest failure — RETRIEVAL found nothing. Never fabricate a source instead,
+ * and never report this when candidates were found but not ranked (see
+ * articlesFromRanking).
+ */
 export class NoSourcesFoundError extends Error {
   constructor() {
     super("No reputable sources were found matching your criteria.");
@@ -104,11 +139,12 @@ Rules:
 - Judge debate usefulness for THIS claim and THIS evidence type from each abstract/snippet — not just topical overlap. An article that argues the claim is better than one that merely mentions it.
 - Both scholarly and reputable web sources are valid evidence. Peer-reviewed journals and university publications carry the most authority for deep warrants and Ks; reputable news, think tanks (e.g. Brookings, RAND, CFR), and government/organization reports are strong for uniqueness, recency, and real-world impacts. Judge each source's credibility on its merits — don't reflexively rank all academic above all web.
 - Ranking factors in order: relevance to the exact claim, debate usefulness for the evidence type, source credibility, author/institution expertise, recency.
-- Drop candidates that are clearly off-topic or that argue AGAINST the claim (unless nothing supports it — then return none).
+- Drop candidates that are clearly off-topic or that argue AGAINST the claim.
 - ERR TOWARD INCLUSION: a debater can skim a marginal article, but can't read one you hid. Include partial or indirect support and note the limits in the explanation.
+- A SPECIFIC claim is not a reason to return less. Debaters write narrow claims ("manufacturing contracted because credit tightened for small firms"), and the literature is usually broader than the sentence they typed. An article that establishes PART of the claim, the general mechanism behind it, or the same effect in a neighbouring case is real evidence a debater can use — rank it and say in the explanation exactly which part it carries and which part it does not. Do NOT require an article to argue the whole claim word for word.
 - explanation: 1-2 concrete sentences on exactly what claim the article supports and why it's useful for this evidence type.
 - credibilityScore: 0-100 from venue quality, citation count, and author expertise.
-- Pick 5-8 whenever plausible candidates exist (fewer only if the pool is genuinely thin). If NONE relate to the claim at all, return {"selections": []}.
+- Pick 5-8 whenever plausible candidates exist (fewer only if the pool is genuinely thin). Return {"selections": []} ONLY when the candidates are about an entirely different subject — not merely because none matches the claim exactly. If they are on-subject but imperfect, rank them.
 
 Return ONLY JSON: {"selections": [{"index": 2, "explanation": "...", "credibilityScore": 87}, ...]} ordered best-first.`;
 
@@ -283,13 +319,7 @@ async function runSearch(
     return verifyAndFilter(heuristicRanking(shortlist));
   }
 
-  const articles = ranking.data.selections
-    .filter((s) => s.index < shortlist.length)
-    .map((s) => candidateToArticle(shortlist[s.index], s.explanation, s.credibilityScore));
-
-  if (articles.length === 0) {
-    throw new NoSourcesFoundError();
-  }
+  const articles = articlesFromRanking(ranking.data.selections, shortlist);
 
   // Only surface sources the debater can actually open and cut from.
   onStage?.("verify");
