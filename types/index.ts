@@ -87,6 +87,18 @@ export interface Article {
    * readable full text a debater can open and cut from (not paywalled/blocked).
    */
   accessible?: boolean;
+  /**
+   * The individual people credited, unmangled. `author` above is a DISPLAY
+   * string ("Fawzi et al."); collapsing it and then re-splitting it downstream
+   * is how one author became "et al." and how an outlet became a byline. The
+   * Card Cutter builds the cite from this, never from the display string.
+   */
+  authors?: string[];
+  /**
+   * First author's affiliations, when the source database states them. Copied
+   * into the cite as qualifications — never inferred.
+   */
+  authorInstitutions?: string[];
 }
 
 /**
@@ -140,6 +152,14 @@ export interface CutSource {
   author?: string;
   publication?: string;
   date?: string;
+  /**
+   * The credited people as separate names, when the caller has them (search
+   * results do). Preferred over re-splitting the `author` display string, which
+   * is lossy: "Fawzi et al." cannot be split back into who wrote the paper.
+   */
+  authors?: string[];
+  /** First author's affiliations, from the source database. Used as quals. */
+  authorInstitutions?: string[];
 }
 
 /** What `/api/cut` accepts. Exactly one of source.url / source.text is required. */

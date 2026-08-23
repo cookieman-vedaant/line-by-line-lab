@@ -17,9 +17,71 @@ export interface CandidateArticle {
   abstract: string;
   citationCount: number;
   source: "openalex" | "semanticscholar" | "web";
+  /**
+   * The first author's institutions, straight from OpenAlex. This is the only
+   * author-qualification source in the app that costs nothing and can't be
+   * hallucinated — the debater gets "Professor, Harvard University" in the cite
+   * because OpenAlex says so, not because a model guessed.
+   */
+  authorInstitutions?: string[];
 }
 
 const FETCH_TIMEOUT_MS = 10000;
+
+/**
+ * OpenAlex's "polite pool". Sending a contact address moves a request out of the
+ * anonymous pool and into one with real rate limits.
+ *
+ * This is not an optimisation — it is the difference between working and not.
+ * As of Aug 2026 OpenAlex rejects anonymous SEARCH outright:
+ *
+ *   {"error":"Rate limit exceeded","message":"Anonymous search is temporarily
+ *    rate-limited while the search cluster ..."}
+ *
+ * Measured live: the exact query the app sends returns 429 every time bare and
+ * 200 with 20 results the moment `mailto` is attached. Without it the Article
+ * Finder silently loses its entire scholarly half and runs on web hits alone —
+ * no real authors, no dates, no open-access full text.
+ *
+ * Override with OPENALEX_MAILTO. The default is a real, monitored address for
+ * this app; OpenAlex only needs somewhere to reach us if a query misbehaves.
+ */
+const OPENALEX_MAILTO = process.env.OPENALEX_MAILTO || "thelinebylinelab@gmail.com";
+const USER_AGENT = `LineByLineLab/1.0 (mailto:${OPENALEX_MAILTO})`;
+
+/**
+ * Retry a rate-limited scholarly request with exponential backoff.
+ *
+ * Semantic Scholar's keyless pool is shared across every anonymous caller on the
+ * internet, so a 429 is routine and usually clears within a second or two. One
+ * bare attempt threw away results that a short wait would have returned; the
+ * search still degrades gracefully if every attempt fails.
+ */
+async function withRetry<T>(
+  label: string,
+  attempt: () => Promise<T>,
+  // Four, not three: measured against the live APIs, OpenAlex still 429s
+  // intermittently even inside the polite pool, and a query that returned
+  // nothing on attempt three returned 20 results on attempt four. Both
+  // providers run in parallel with the web search, so the worst case costs
+  // ~3.5s of a ~10s budget and only on requests that would otherwise be empty.
+  attempts = 4,
+): Promise<T> {
+  let lastError: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await attempt();
+    } catch (err) {
+      lastError = err;
+      const rateLimited = err instanceof Error && /\b429\b/.test(err.message);
+      // Only a rate limit is worth waiting out. A 404 or a parse error will
+      // fail identically no matter how long we sleep.
+      if (!rateLimited || i === attempts - 1) break;
+      await new Promise((r) => setTimeout(r, 500 * 2 ** i));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(`${label} failed`);
+}
 
 /** OpenAlex stores abstracts as {word: [positions]}; rebuild the plain text. */
 export function reconstructAbstract(
@@ -72,7 +134,10 @@ interface OpenAlexWork {
   cited_by_count?: number;
   doi?: string;
   abstract_inverted_index?: Record<string, number[]> | null;
-  authorships?: { author?: { display_name?: string } }[];
+  authorships?: {
+    author?: { display_name?: string };
+    institutions?: { display_name?: string }[];
+  }[];
   primary_location?: OpenAlexLocation;
   best_oa_location?: OpenAlexLocation | null;
 }
@@ -97,6 +162,8 @@ async function searchOpenAlex(query: string, fromDate: string | null): Promise<C
     search: query,
     "per-page": "20",
     sort: "relevance_score:desc",
+    // Polite pool — see OPENALEX_MAILTO. Without this the request is 429'd.
+    mailto: OPENALEX_MAILTO,
   });
   // open_access.is_oa:true — only works a debater can actually READ for free
   // (free full text exists), so results are far more likely to be cuttable.
@@ -104,11 +171,14 @@ async function searchOpenAlex(query: string, fromDate: string | null): Promise<C
   if (fromDate) filters.push(`from_publication_date:${fromDate}`);
   params.set("filter", filters.join(","));
 
-  const res = await fetch(`https://api.openalex.org/works?${params}`, {
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  const data = await withRetry("OpenAlex", async () => {
+    const res = await fetch(`https://api.openalex.org/works?${params}`, {
+      headers: { "User-Agent": USER_AGENT },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(`OpenAlex responded ${res.status}`);
+    return (await res.json()) as { results?: OpenAlexWork[] };
   });
-  if (!res.ok) throw new Error(`OpenAlex responded ${res.status}`);
-  const data: { results?: OpenAlexWork[] } = await res.json();
 
   return (data.results ?? []).flatMap((w): CandidateArticle[] => {
     const url = pickWorkUrl(w);
@@ -125,6 +195,11 @@ async function searchOpenAlex(query: string, fromDate: string | null): Promise<C
         abstract: reconstructAbstract(w.abstract_inverted_index),
         citationCount: w.cited_by_count ?? 0,
         source: "openalex",
+        // First author's affiliations — the cite's qualification, stated by the
+        // database rather than inferred by a model.
+        authorInstitutions: (w.authorships?.[0]?.institutions ?? [])
+          .map((i) => i.display_name ?? "")
+          .filter(Boolean),
       },
     ];
   });
@@ -152,12 +227,24 @@ async function searchSemanticScholar(
   });
   if (fromDate) params.set("publicationDateOrYear", `${fromDate}:`);
 
-  const res = await fetch(
-    `https://api.semanticscholar.org/graph/v1/paper/search?${params}`,
-    { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) },
-  );
-  if (!res.ok) throw new Error(`Semantic Scholar responded ${res.status}`);
-  const data: { data?: S2Paper[] } = await res.json();
+  // A free key (semanticscholar.org/product/api) lifts the shared anonymous
+  // pool's limit. Optional: without it the retry below usually still gets through.
+  const apiKey = process.env.SEMANTIC_SCHOLAR_API_KEY;
+
+  const data = await withRetry("Semantic Scholar", async () => {
+    const res = await fetch(
+      `https://api.semanticscholar.org/graph/v1/paper/search?${params}`,
+      {
+        headers: {
+          "User-Agent": USER_AGENT,
+          ...(apiKey ? { "x-api-key": apiKey } : {}),
+        },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      },
+    );
+    if (!res.ok) throw new Error(`Semantic Scholar responded ${res.status}`);
+    return (await res.json()) as { data?: S2Paper[] };
+  });
 
   return (data.data ?? []).flatMap((p): CandidateArticle[] => {
     if (!p.title || !p.url) return [];

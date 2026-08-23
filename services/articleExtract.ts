@@ -1,6 +1,6 @@
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
-import { mostRecentDate, splitAuthors } from "@/lib/cite";
+import { mostRecentDate, parseByline } from "@/lib/cite";
 import { hasPaywallPhrase, hasStructuredPaywallSignal } from "@/lib/paywall";
 import { createSharedCache } from "@/lib/sharedCache";
 import { BlockedUrlError, safeFetch } from "@/lib/ssrfGuard";
@@ -22,10 +22,11 @@ export function articleFromFields(fields: {
   text: string;
   url?: string;
 }): ExtractedArticle {
-  const authors = splitAuthors(fields.author ?? "");
+  const { authors, etAl } = parseByline(fields.author ?? "");
   return {
     title: fields.title ?? "",
     author: authors.join(", ") || (fields.author ?? ""),
+    etAl,
     publication: fields.publication ?? "",
     date: mostRecentDate([normalizeDate(fields.date ?? "")]),
     text: fields.text,
@@ -64,6 +65,12 @@ export interface ExtractedArticle {
   authorQualification: string;
   /** What the publisher IS, copied from the page — used when nobody is bylined. */
   publisherQualification: string;
+  /**
+   * The byline was truncated with "et al.", so more people are credited than
+   * `authors` lists. Carried separately because it cannot be recovered from the
+   * names: "al." is not a surname.
+   */
+  etAl?: boolean;
   /** Where the article actually lives after redirects and canonicalisation. */
   canonicalUrl: string;
 }
@@ -175,11 +182,12 @@ export async function extractArticleFromUrl(
   // Resolve the byline into actual people. An organisation resolves to nobody,
   // which is the signal the cite needs — "no human wrote this" is not the same
   // as "the outlet is the author".
-  const authors = splitAuthors(rawAuthor);
+  const { authors, etAl } = parseByline(rawAuthor);
 
   return {
     title: meta.title || parsed.title || "",
     author: authors.join(", ") || rawAuthor,
+    etAl,
     publication,
     // Published OR updated, whichever is later: a debater cites the version
     // they can actually read.
@@ -327,6 +335,13 @@ export function extractPageMetadata(doc: Document): PageMetadata {
       attr('meta[itemprop="dateModified"]') ||
       attr('meta[name="last-modified"]'),
   );
+  // The scholarly standard for an author's affiliation, and the one most
+  // journal and repository pages actually emit.
+  meta.authorQualification =
+    attr('meta[name="citation_author_institution"]') ||
+    attr('meta[property="article:author_institution"]') ||
+    "";
+
   // Where the article really lives — a share link or tracking URL in the address
   // bar must never end up in the cite.
   meta.canonicalUrl =
@@ -372,12 +387,38 @@ function jsonLdAuthorQualification(node: Record<string, unknown>): string {
     const obj = entry as Record<string, unknown>;
     const type = obj["@type"];
     if (typeof type === "string" && /organization/i.test(type)) continue;
-    const parts = [stringField(obj, "jobTitle"), stringField(obj, "description")]
+    // affiliation / worksFor are how most scholarly and think-tank pages state
+    // an author's institution; reading only jobTitle+description left the vast
+    // majority of pages with no qualification at all.
+    const parts = [
+      stringField(obj, "jobTitle"),
+      stringField(obj, "description"),
+      namedField(obj, "affiliation"),
+      namedField(obj, "worksFor"),
+    ]
       .map((p) => p.trim())
       .filter(Boolean);
-    if (parts.length > 0) return parts.join(", ").slice(0, 300);
+    if (parts.length > 0) return [...new Set(parts)].join(", ").slice(0, 300);
   }
   return "";
+}
+
+/**
+ * A JSON-LD field that may be a string, an object with a `name`, or an array of
+ * either — the three shapes `affiliation` and `worksFor` actually appear in.
+ */
+function namedField(obj: Record<string, unknown>, key: string): string {
+  const value = obj[key];
+  if (!value) return "";
+  const one = (v: unknown): string => {
+    if (typeof v === "string") return v;
+    if (v && typeof v === "object" && "name" in v) {
+      const name = (v as Record<string, unknown>).name;
+      return typeof name === "string" ? name : "";
+    }
+    return "";
+  };
+  return (Array.isArray(value) ? value : [value]).map(one).filter(Boolean).join(", ");
 }
 
 /**
@@ -504,7 +545,7 @@ export function findBylineInText(text: string): string {
     for (const re of patterns) {
       const m = source.match(re);
       // Ignore a "byline" that resolved to nothing but an organisation.
-      if (m?.[1] && splitAuthors(m[1]).length > 0) return m[1].trim();
+      if (m?.[1] && parseByline(m[1]).authors.length > 0) return m[1].trim();
     }
   }
   return "";
@@ -519,9 +560,34 @@ export function findAuthorBioInText(text: string, authors: string[]): string {
   if (authors.length === 0) return "";
   const first = authors[0];
   const escaped = first.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = new RegExp(`${escaped}\\s+(?:is|was|serves as|works as)\\s+([^.\\n]{10,220})`, "i");
-  const m = text.match(re);
-  return m?.[1] ? m[1].trim().replace(/\s+/g, " ") : "";
+  // Two shapes carry essentially every stated credential:
+  //   predicative — "Jane Smith is a professor of economics at Yale."
+  //   appositive  — "Jane Smith, a senior fellow at Brookings, argues that ..."
+  // Only the first was scanned, which is most of why cards came back with no
+  // qualification at all: the appositive is the form journalism actually uses.
+  const patterns = [
+    new RegExp(`${escaped}\\s+(?:is|was|serves as|works as|teaches)\\s+([^.\\n]{10,220})`, "i"),
+    new RegExp(
+      `${escaped}\\s*,\\s*((?:an?|the)?\\s*[^,.\\n]{10,160}?(?:\\bat\\b|\\bof\\b|\\bfor\\b)[^,.\\n]{2,120})\\s*,`,
+      "i",
+    ),
+  ];
+  for (const re of patterns) {
+    const m = text.match(re);
+    if (!m?.[1]) continue;
+    const found = m[1].trim().replace(/\s+/g, " ");
+    // A credential names a ROLE. Without one this is just the next clause of a
+    // sentence that happens to begin with the author's name — "Jane Smith, at
+    // the height of the crisis, said ..." is not a qualification.
+    if (
+      /\b(professor|fellow|director|researcher|scientist|economist|analyst|lecturer|chair|dean|president|editor|expert|specialist|adviser|advisor|counsel|historian|philosopher|physician|engineer|author of)\b/i.test(
+        found,
+      )
+    ) {
+      return found;
+    }
+  }
+  return "";
 }
 
 /**

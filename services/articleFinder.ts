@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { RateLimitedError, generateJson } from "@/lib/gemini";
+import { fallbackFor, modelFor } from "@/lib/models";
+import type { Tier } from "@/lib/tier";
 import { createSharedCache } from "@/lib/sharedCache";
 import { filterReputable } from "@/lib/sourceFilter";
 import {
@@ -175,15 +177,25 @@ function candidateToArticle(
 ): Article {
   return {
     title: c.title,
-    author: c.authors.length > 1 ? `${c.authors[0]} et al.` : c.authors[0] ?? c.venue,
+    // Display only, and EMPTY when nobody is credited. It used to fall back to
+    // `c.venue`, which put the outlet — for a web hit, the bare hostname — into
+    // the author field, from where it flowed into the cite and got printed as
+    // the byline. "No author stated" and "the publisher wrote it" are different
+    // facts; the cite has to be able to tell them apart.
+    author: c.authors.length > 1 ? `${c.authors[0]} et al.` : (c.authors[0] ?? ""),
     url: c.url,
     publication: c.venue || c.source,
-    date: c.date || "unknown",
+    // Empty, not the literal string "unknown" — that used to reach the cite as
+    // if it were a date and beat the real one off the page.
+    date: c.date || "",
     explanation,
     credibilityScore,
     // Carried so the Card Cutter can fall back to real abstract text when the
     // (often paywalled) article URL can't be fetched.
     abstract: c.abstract,
+    // The unmangled people, for the cite (see Article.authors).
+    authors: c.authors,
+    authorInstitutions: c.authorInstitutions,
   };
 }
 
@@ -219,8 +231,11 @@ const searchCache = createSharedCache<Article[]>({
   namespace: "search",
 });
 
-function searchCacheKey(p: SearchParams): string {
+// Tier is part of the key: free ranks on the lite model and pro/admin on the
+// strong one, so their result orderings differ and must not share a cache slot.
+function searchCacheKey(p: SearchParams, tier: Tier): string {
   return JSON.stringify([
+    tier,
     p.evidenceType,
     p.claim.trim().toLowerCase(),
     p.sourceType ?? "Any",
@@ -237,14 +252,18 @@ export async function findArticles(
   params: SearchParams,
   clientKey?: string,
   onStage?: StageReporter,
+  tier: Tier = "free",
 ): Promise<Article[]> {
-  return searchCache.wrap(searchCacheKey(params), () => runSearch(params, clientKey, onStage));
+  return searchCache.wrap(searchCacheKey(params, tier), () =>
+    runSearch(params, clientKey, onStage, tier),
+  );
 }
 
 async function runSearch(
   params: SearchParams,
   clientKey?: string,
   onStage?: StageReporter,
+  tier: Tier = "free",
 ): Promise<Article[]> {
   // 1. Build search queries with NO AI call (see heuristicQueries).
   const queries = heuristicQueries(params.claim);
@@ -291,6 +310,14 @@ async function runSearch(
       system: RANKER_SYSTEM,
       prompt: rankingPrompt,
       maxOutputTokens: 4096,
+      // Pro/admin rank on the stronger judgement model; free stays on lite — the
+      // same model the ranker used before, so free results are unchanged.
+      model: modelFor("rank", tier).model,
+      // When the strong model is out of quota, rank on the cheap model rather
+      // than dropping all the way to heuristic ordering. AI ranking on a weaker
+      // model still reads the abstracts; the heuristic below never does, so it's
+      // the last resort, not the first.
+      fallbackModel: fallbackFor("rank", tier) ?? undefined,
     });
   } catch (err) {
     if (err instanceof RateLimitedError) {
@@ -305,13 +332,13 @@ async function runSearch(
   if (!ranking.success) {
     /*
      * Degrade instead of failing. By this point the retrieval step has already
-     * found REAL articles; only the ORDER the model proposed came back
+     * found REAL articles; only the model's opinion about their ORDER came back
      * malformed. Throwing discarded a whole good result set over a formatting
-     * slip - observed live, where a search holding six usable sources reported
+     * slip — observed live, where a search that had six usable sources reported
      * "returned an unreadable result" instead.
      *
      * Ordering is the one part of the pipeline with a working non-AI
-     * implementation, so this is a real degradation rather than a guess: the
+     * implementation, so this is a genuine degradation and not a guess: the
      * articles and their citations are untouched, only the ranking is weaker.
      */
     console.warn("articleFinder: unparseable ranking output; using heuristic ranking", ranking.error.message);

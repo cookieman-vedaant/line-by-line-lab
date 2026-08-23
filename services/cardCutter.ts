@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { tagMarkupToDelimiters } from "@/lib/cardMarkup";
-import { citeName, citeYear } from "@/lib/cite";
+import { citeName, citeYear, mostRecentDate, parseByline } from "@/lib/cite";
 import { applyEmphasisSpans, createLocator } from "@/lib/emphasis";
 import { GEMINI_MARKER_MODEL, GEMINI_MODEL, generateJson } from "@/lib/gemini";
 import { createSharedCache } from "@/lib/sharedCache";
@@ -8,6 +8,7 @@ import {
   articleFromFields,
   ArticleUnreadableError,
   extractArticleCached,
+  normalizeDate,
   type ExtractedArticle,
 } from "@/services/articleExtract";
 import type { Card, CardLength, CutRequest } from "@/types";
@@ -390,7 +391,7 @@ function buildMarkerPrompt(
   // re-deriving it from raw text.
   const resolved = [
     `- authors: ${article.authors.length > 0 ? article.authors.join(", ") : "NONE FOUND — no human byline on this page"}`,
-    `- cite name to use: ${citeName(article.authors) || `(no human author — use the publication: ${article.publication || "unknown"})`}`,
+    `- cite name to use: ${citeName(article.authors, article.etAl) || `(no human author — use the publication: ${article.publication || "unknown"})`}`,
     `- most recent date the page states: ${article.date || "NONE STATED"}`,
     `- two-digit year for the cite: ${citeYear(article.date) || "NONE — omit the year rather than guessing"}`,
     `- publication: ${article.publication || "unknown"}`,
@@ -551,29 +552,79 @@ async function markPassageSection(
   };
 }
 
+/**
+ * The people credited by the CALLER, resolved to real names.
+ *
+ * Prefers the structured `authors` list a search result carries. Splitting the
+ * display string instead is lossy in a way that shows up on the card: "Fawzi et
+ * al." parses back to a person surnamed "al.", and a web result whose only
+ * "author" was its hostname parses to a byline of "nbcnews.com".
+ */
+export function callerAuthors(source: CutRequest["source"]): { authors: string[]; etAl: boolean } {
+  const structured = (source.authors ?? []).flatMap((a) => parseByline(a).authors);
+  if (structured.length > 0) return { authors: structured, etAl: false };
+  return parseByline(source.author ?? "");
+}
+
+/**
+ * Merge what the CALLER knows about a source with what the PAGE says, field by
+ * field.
+ *
+ * This used to be `req.source.X || extracted.X` throughout, which reads as "the
+ * caller knows best". For a search result the caller often knows worst: a web
+ * hit arrives with its hostname in the author field and no date at all, and
+ * those beat the byline and publication date read off the page itself. That is
+ * the mechanism behind cites that name the outlet and cites that carry the
+ * wrong year.
+ *
+ * So each field goes to whichever side actually holds the better fact:
+ *   - authors: the page's own byline wins — it is the primary source. The
+ *     caller's list fills in only when the page states nobody.
+ *   - date: the most RECENT date either side can verify, so an updated article
+ *     cites as updated and a junk value can't win merely by being first.
+ *   - title/publication: caller first, since a search result's are clean and a
+ *     scraper's often carry site furniture.
+ *   - qualifications: the page's own words first, then the database's
+ *     affiliations. Never inferred on either side.
+ */
+export function mergeCiteFacts(
+  extracted: ExtractedArticle,
+  source: CutRequest["source"],
+): ExtractedArticle {
+  const caller = callerAuthors(source);
+  const institutions = (source.authorInstitutions ?? []).filter(Boolean).join(", ");
+  const usePage = extracted.authors.length > 0;
+  const authors = usePage ? extracted.authors : caller.authors;
+  return {
+    ...extracted,
+    title: source.title || extracted.title,
+    publication: source.publication || extracted.publication,
+    authors,
+    etAl: usePage ? extracted.etAl : caller.etAl,
+    author: authors.join(", ") || extracted.author || "",
+    date: mostRecentDate([extracted.date, normalizeDate(source.date ?? "")]),
+    authorQualification: extracted.authorQualification || institutions,
+  };
+}
+
 /** Resolve the cut source into clean article text + metadata. */
 async function resolveSource(req: CutRequest): Promise<ExtractedArticle> {
   const fromProvidedText = (): ExtractedArticle =>
-    articleFromFields({
-      title: req.source.title,
-      author: req.source.author,
-      publication: req.source.publication,
-      date: req.source.date,
-      text: (req.source.text ?? "").trim(),
-      url: req.source.url,
-    });
+    mergeCiteFacts(
+      articleFromFields({
+        title: req.source.title,
+        author: req.source.author,
+        publication: req.source.publication,
+        date: req.source.date,
+        text: (req.source.text ?? "").trim(),
+        url: req.source.url,
+      }),
+      req.source,
+    );
 
   if (req.source.url) {
     try {
-      const extracted = await extractArticleCached(req.source.url);
-      // User/search-supplied metadata wins over what the page scraper guessed.
-      return {
-        ...extracted,
-        title: req.source.title || extracted.title,
-        author: req.source.author || extracted.author,
-        publication: req.source.publication || extracted.publication,
-        date: req.source.date || extracted.date,
-      };
+      return mergeCiteFacts(await extractArticleCached(req.source.url), req.source);
     } catch (err) {
       // The URL couldn't be read (paywalled DOI/publisher page, JS-only, PDF).
       // Search results ship the real abstract as a fallback — cut from that

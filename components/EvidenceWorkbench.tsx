@@ -116,6 +116,10 @@ export default function EvidenceWorkbench() {
         url: article.url,
         title: article.title,
         author: article.author,
+        // The real people + affiliations, so the cite is built from names the
+        // database stated rather than from the "X et al." display string.
+        authors: article.authors,
+        authorInstitutions: article.authorInstitutions,
         publication: article.publication,
         date: article.date,
         // Fallback for when the (often paywalled) URL can't be fetched —

@@ -4,6 +4,7 @@ import {
   citeYear,
   looksLikeOrganization,
   mostRecentDate,
+  parseByline,
   splitAuthors,
   surnameOf,
 } from "@/lib/cite";
@@ -116,5 +117,107 @@ describe("citeYear", () => {
   it("is empty without a date, so no year gets invented", () => {
     expect(citeYear("")).toBe("");
     expect(citeYear("n.d.")).toBe("");
+  });
+});
+
+/**
+ * The byline shapes that were reaching real cards wrong.
+ *
+ * Every case here was measured against the live extractor, not imagined: a
+ * battery of 22 real-world byline shapes resolved 9 of them incorrectly, and
+ * each `it` below names one of those failures. The user-visible symptoms were
+ * "it gives the wrong authors, and it mistakes them for the publisher" and
+ * cites reading "Smith et al." for pieces one person wrote.
+ */
+describe("byline shapes that used to produce a wrong cite", () => {
+  it("reads a surname-first byline as ONE person, not two", () => {
+    // "Fawzi, Alhussein" is how citation_author and most scholarly metadata
+    // write a name. Splitting on the comma made every solo paper an "et al."
+    // Measured on nature.com: cited "Fawzi et al." for a single-author paper.
+    expect(citeName(splitAuthors("Fawzi, Alhussein"))).toBe("Fawzi");
+    expect(citeName(splitAuthors("Smith, J."))).toBe("Smith");
+  });
+
+  it("keeps the people in a surname-first LIST", () => {
+    expect(citeName(splitAuthors("Fawzi, Alhussein; Balog, Matej"))).toBe("Fawzi et al.");
+  });
+
+  it("keeps 'et al.' instead of citing a person named 'al.'", () => {
+    // A search result arrives pre-collapsed. "al." was being taken as the
+    // surname, printing the cite "al. 23".
+    const { authors, etAl } = parseByline("Alhussein Fawzi et al.");
+    expect(authors).toEqual(["Alhussein Fawzi"]);
+    expect(citeName(authors, etAl)).toBe("Fawzi et al.");
+  });
+
+  it("does not count a post-nominal or a job title as a second author", () => {
+    expect(citeName(splitAuthors("Jane Smith, Ph.D."))).toBe("Smith");
+    expect(citeName(splitAuthors("Jane Smith, Senior Fellow"))).toBe("Smith");
+  });
+
+  it("keeps the person out of a syndicated 'for OUTLET' credit", () => {
+    // Judged as an organisation because of the " for ", so the byline vanished
+    // and the cite named the outlet instead.
+    expect(citeName(splitAuthors("Jane Smith for Reuters"))).toBe("Smith");
+  });
+
+  it("still reads an institution built around 'for' as an organisation", () => {
+    // The guard above must not open a hole here.
+    expect(splitAuthors("Center for American Progress")).toEqual([]);
+  });
+
+  it("keeps every particle in a compound surname", () => {
+    expect(surnameOf("Maria de la Cruz")).toBe("de la Cruz");
+    expect(citeName(splitAuthors("Maria de la Cruz"))).toBe("de la Cruz");
+  });
+
+  it("never lets a publication or institution become the author", () => {
+    // The exact symptom reported: the publisher printed where the author goes.
+    for (const outlet of ["Nature", "Reuters", "Congressional Budget Office"]) {
+      expect(splitAuthors(outlet)).toEqual([]);
+    }
+  });
+
+  it("leaves ordinary bylines alone", () => {
+    expect(citeName(splitAuthors("Alhussein Fawzi"))).toBe("Fawzi");
+    expect(citeName(splitAuthors("Ty Bishop, Rachel Chen and Omar Farouk"))).toBe("Bishop et al.");
+    expect(citeName(splitAuthors("By Jane Smith"))).toBe("Smith");
+    expect(citeName(splitAuthors("Dr. Jane Smith"))).toBe("Smith");
+    expect(citeName(splitAuthors("Jean-Paul Fitoussi and Amartya Sen"))).toBe("Fitoussi et al.");
+  });
+});
+
+/**
+ * Surname-first bylines with trailing initials — "Acemoglu D", "Nakamoto S".
+ *
+ * This is the dominant format in journals, PubMed and wire metadata, and it
+ * broke in the exact way a user reported: the cite "just takes the last word
+ * rather than the actual author", printing the trailing INITIAL ("D", "S")
+ * where the surname belongs. Each case fixes one real citation.
+ */
+describe("surname-first bylines with trailing initials", () => {
+  const cases: Array<[string, string]> = [
+    ["Acemoglu D", "Acemoglu"],
+    ["Acemoglu D.", "Acemoglu"],
+    ["Acemoglu DA", "Acemoglu"],
+    ["He K", "He"],
+    ["Smith J", "Smith"],
+    ["Smith JA", "Smith"],
+    ["Nakamoto S", "Nakamoto"],
+    ["van der Berg M", "van der Berg"],
+  ];
+  for (const [raw, want] of cases) {
+    it(`cites ${JSON.stringify(raw)} as ${JSON.stringify(want)}, not the initial`, () => {
+      expect(surnameOf(raw)).toBe(want);
+      expect(citeName(splitAuthors(raw))).toBe(want);
+    });
+  }
+
+  it("still reads a real surname that follows given names", () => {
+    // The fix must not fire on ordinary "Given Surname" — the surname is still
+    // last there, and a short lowercase surname is not an initial.
+    expect(surnameOf("Kaiming He")).toBe("He");
+    expect(surnameOf("Daron Acemoglu")).toBe("Acemoglu");
+    expect(surnameOf("Y. Bengio")).toBe("Bengio");
   });
 });
