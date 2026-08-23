@@ -24,6 +24,7 @@ import { initBotId } from "botid/client/core";
 initBotId({
   protect: [
     { path: "/api/search", method: "POST" },
+    { path: "/api/sharpen", method: "POST" },
     { path: "/api/cut", method: "POST" },
     { path: "/api/rehighlight", method: "POST" },
     { path: "/api/assistant", method: "POST" },
