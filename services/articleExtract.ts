@@ -569,18 +569,50 @@ function jsonLdAuthor(node: Record<string, unknown>): string {
 }
 
 /**
- * Drop an "author" that is really the website/publisher rather than a person, so
- * the cite falls back to a real byline or the publication instead of printing the
- * site name as the author (e.g. author "Reuters" on a Reuters page). Blanks the
- * author when it equals, or clearly contains, the publication name.
+ * Strip the OUTLET out of a byline, keeping the human.
+ *
+ * News bylines routinely carry the publication inline — "Jane Smith, The
+ * Guardian", "Jane Smith | Vox", "Maria Lopez - Politico". The old rule blanked
+ * the WHOLE byline whenever it merely CONTAINED the publication name (for any
+ * outlet of four characters or more), so the cite printed the website instead
+ * of the reporter — the exact "it takes the website name instead of the author"
+ * bug. That is a big share of major outlets: Guardian, Bloomberg, Politico,
+ * Washington Post, Associated Press.
+ *
+ * Now only the delimited SEGMENT that is the outlet is removed, and a byline
+ * that is nothing but the outlet ("Reuters") still resolves to empty so the
+ * cite can fall back to the publication. A real name that happens to share a
+ * word with the outlet ("Bill Hill" on The Hill) is untouched — the whole
+ * string is only dropped on an exact match.
  */
 export function cleanAuthor(author: string, publication: string): string {
   const a = author.trim();
   if (!a) return "";
   const pub = publication.trim().toLowerCase();
-  const low = a.toLowerCase();
-  if (pub && (low === pub || (pub.length >= 4 && low.includes(pub)))) return "";
-  return a;
+  if (!pub) return a;
+  if (a.toLowerCase() === pub) return "";
+
+  // Split into delimited credits. A comma is included because "Jane Smith, Vox"
+  // is an author-then-outlet, and dropping only the outlet segment leaves the
+  // real author (and other real authors) intact.
+  const parts = a
+    .split(/\s*(?:\||\/|•|·|,| [-–—] )\s*/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (parts.length <= 1) return a;
+
+  const isOutlet = (segment: string): boolean => {
+    const low = segment.toLowerCase();
+    // The segment IS the outlet, or is the outlet plus a small amount ("The
+    // Guardian" for "Guardian"). A generous length gap would start eating real
+    // multi-word names, so keep it tight.
+    return low === pub || (pub.length >= 3 && low.includes(pub) && low.length <= pub.length + 6);
+  };
+  const kept = parts.filter((s) => !isOutlet(s));
+  // Nothing matched the outlet → the substring overlap was coincidental; leave
+  // the byline exactly as it was for the name parser.
+  if (kept.length === parts.length) return a;
+  return kept.join(", ");
 }
 
 function jsonLdPublisher(node: Record<string, unknown>): string {

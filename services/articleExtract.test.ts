@@ -1,5 +1,6 @@
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
+import { citeName, parseByline } from "@/lib/cite";
 import {
   cleanAuthor,
   decodeHtml,
@@ -137,12 +138,40 @@ describe("cleanAuthor", () => {
     expect(cleanAuthor("Reuters", "Reuters")).toBe("");
     expect(cleanAuthor("bbc news", "BBC News")).toBe("");
   });
-  it("blanks an author that contains the publication name", () => {
-    expect(cleanAuthor("BBC News Staff", "BBC News")).toBe("");
+  it("keeps the human when the outlet rides along as a delimited credit", () => {
+    // The reported bug: the old rule blanked the WHOLE byline whenever it merely
+    // contained the publication, so the cite printed the website. Now only the
+    // outlet segment is removed.
+    expect(cleanAuthor("Jane Smith | The Guardian", "The Guardian")).toBe("Jane Smith");
+    expect(cleanAuthor("Jane Smith, Vox", "Vox")).toBe("Jane Smith");
+    expect(cleanAuthor("Maria Lopez - Politico", "Politico")).toBe("Maria Lopez");
+    expect(cleanAuthor("By Sam Lee, Bloomberg", "Bloomberg")).toBe("By Sam Lee");
+  });
+  it("does not touch a name that merely shares a word with the outlet", () => {
+    // No delimiter and no exact match → left alone; "Bill Hill" is not The Hill.
+    expect(cleanAuthor("Bill Hill", "The Hill")).toBe("Bill Hill");
+    expect(cleanAuthor("BBC News Staff", "BBC News")).toBe("BBC News Staff");
+  });
+  it("leaves a surname-first byline intact (no segment is the outlet)", () => {
+    expect(cleanAuthor("Fawzi, Alhussein", "Nature")).toBe("Fawzi, Alhussein");
   });
   it("does not over-match a short/empty publication", () => {
     expect(cleanAuthor("Ed Wong", "")).toBe("Ed Wong");
     expect(cleanAuthor("Al Gore", "AP")).toBe("Al Gore"); // pub too short to match loosely
+  });
+});
+
+describe("cleanAuthor + parseByline (end to end)", () => {
+  it("cites the reporter, not the website, for an outlet-in-byline", () => {
+    expect(citeName(parseByline(cleanAuthor("Jane Smith | The Guardian", "The Guardian")).authors)).toBe(
+      "Smith",
+    );
+  });
+  it("still falls back to the website when only the outlet wrote it", () => {
+    // cleanAuthor keeps "BBC News Staff"; parseByline drops it as an org, so the
+    // cite has no human and the caller falls back to the publication.
+    expect(parseByline(cleanAuthor("BBC News Staff", "BBC News")).authors).toEqual([]);
+    expect(parseByline(cleanAuthor("Reuters", "Reuters")).authors).toEqual([]);
   });
 });
 
