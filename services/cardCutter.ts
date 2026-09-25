@@ -335,6 +335,9 @@ const GATE_REASK_UNREADABLE =
 const GATE_REASK_UNQUOTED =
   'Your previous keyQuote was not found in the text. Answer again in exactly the same JSON shape, copying keyQuote EXACTLY — 5-8 consecutive words from one sentence of the text, character for character. If no sentence carries support, the verdict is "none".';
 
+// Longest one relevance-check attempt may take before the next model answers.
+const GATE_ATTEMPT_MS = 15000;
+
 /** Clamp a proposed [start, end] to real paragraph indices, or null if absent. */
 function validRange(start: unknown, end: unknown, count: number): [number, number] | null {
   if (typeof start !== "number" || typeof end !== "number") return null;
@@ -1122,6 +1125,9 @@ export async function runGate(
         system: GATE_SYSTEM,
         prompt: reask ? `${prompt}\n\n${reask}` : prompt,
         maxOutputTokens: 1024,
+        // A verdict takes a few seconds; past this the model is stalled and the
+        // next one in the chain should answer instead.
+        attemptTimeoutMs: GATE_ATTEMPT_MS,
       });
     } catch (err) {
       if (err instanceof RateLimitedError) {

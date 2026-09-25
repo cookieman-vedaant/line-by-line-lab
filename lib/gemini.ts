@@ -12,6 +12,7 @@ import {
   markModelAvailable,
   markModelExhausted,
 } from "@/lib/modelAvailability";
+import { modelChain, thinkingConfigFor } from "@/lib/models";
 
 // NOTE: per-task, per-tier model selection now lives in lib/models.ts
 // (`modelFor(task, tier)`). The two constants below remain the DEFAULTS used
@@ -72,6 +73,52 @@ function releaseSlot(): void {
   const next = slotQueue.shift();
   if (next) next(); // hand the slot straight to a waiter — active count unchanged
   else activeCalls -= 1;
+}
+
+/*
+ * How long ONE attempt may take before it's abandoned for the next model.
+ * Without a limit a stalled call simply hung — one measured at 72s for a
+ * two-word answer — holding a concurrency slot the whole time, so the calls
+ * queued behind it (a cut's other sections, the next search's ranker) waited
+ * too. Callers with a tighter budget pass `attemptTimeoutMs`.
+ */
+const JSON_ATTEMPT_TIMEOUT_MS = 30_000;
+const RAW_ATTEMPT_TIMEOUT_MS = 60_000;
+
+/**
+ * A model gave no answer within the attempt's time limit. The message names
+ * ETIMEDOUT so the breaker counts it (see isTransient): a model that stalls is
+ * as unhealthy as one that says 503.
+ */
+class AttemptTimeoutError extends Error {
+  constructor(model: string, ms: number) {
+    super(`ETIMEDOUT: ${model} gave no answer within ${ms}ms`);
+    this.name = "AttemptTimeoutError";
+  }
+}
+
+/**
+ * Run one call with a time limit. The SDK gets an abort signal so the request
+ * is actually cancelled, and the race makes the limit hold even if it isn't.
+ */
+async function withAttemptTimeout<T>(
+  model: string,
+  ms: number,
+  call: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new AttemptTimeoutError(model, ms));
+    }, ms);
+  });
+  try {
+    return await Promise.race([call(controller.signal), timedOut]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Run one Gemini API call while holding a concurrency slot. */
@@ -229,27 +276,39 @@ interface GenerateJsonOptions {
   /** Model to retry on when the preferred one is rate-limited or out of quota.
    *  Prefer `fallbackFor(task, tier)` from lib/models.ts over a literal. */
   fallbackModel?: string;
+  /** Longest one attempt may take before moving on (default 30s). */
+  attemptTimeoutMs?: number;
 }
 
 /**
  * One Gemini call that must produce JSON. Returns the parsed value, or null
  * if the model's output wasn't parseable — callers decide how to fail honestly.
  *
- * When `fallbackModel` is set, a rate limit or exhausted daily quota on the
- * preferred model drops to the fallback rather than failing the request. That is
- * what keeps the app working on a free key where the premium model is capped at
- * 20 requests/day: quality degrades for the rest of the day, the feature does not
- * disappear. Availability is re-probed periodically (lib/modelAvailability), so
- * the premium model returns on its own once the cap is lifted.
+ * A model that is rate-limited, overloaded, stalled or out of daily quota hands
+ * the call to the next model in its failover chain (lib/models modelChain),
+ * AT ONCE: waiting out a backoff on a model answering "high demand" is how a
+ * cut took minutes while a healthy model sat unused. Only the last model in the
+ * chain gets the retry ladder. Quality degrades for as long as the preferred
+ * model is unwell; the feature does not disappear. Availability is re-probed
+ * periodically (lib/modelAvailability), so a capped model returns on its own.
  */
 export async function generateJson(opts: GenerateJsonOptions): Promise<unknown> {
-  const primary = opts.model ?? GEMINI_MODEL;
-  try {
-    return await generateJsonOn(primary, opts);
-  } catch (err) {
-    if (!shouldFailOver(err, primary, opts.fallbackModel)) throw err;
-    console.warn(`gemini: ${primary} unavailable (${describe(err)}); using ${opts.fallbackModel}`);
-    return await generateJsonOn(opts.fallbackModel as string, withFallbackRetries(opts));
+  const chain = modelChain(opts.model ?? GEMINI_MODEL, opts.fallbackModel);
+  return walkChain(chain, (model, i) =>
+    generateJsonOn(model, chain.length === 1 ? opts : i === chain.length - 1 ? withFallbackRetries(opts) : { ...opts, retries: 0 }),
+  );
+}
+
+/** Try each model in turn, moving on only when one is unavailable right now. */
+async function walkChain<T>(chain: string[], run: (model: string, index: number) => Promise<T>): Promise<T> {
+  for (let i = 0; ; i++) {
+    try {
+      return await run(chain[i], i);
+    } catch (err) {
+      const next = chain[i + 1];
+      if (!next || !(err instanceof RateLimitedError)) throw err;
+      console.warn(`gemini: ${chain[i]} unavailable (${describe(err)}); using ${next}`);
+    }
   }
 }
 
@@ -269,14 +328,10 @@ function withFallbackRetries<T extends { retries?: number }>(opts: T): T {
   return { ...opts, retries: undefined };
 }
 
-/** True when `err` is worth retrying on a different model. */
-function shouldFailOver(err: unknown, primary: string, fallback?: string): boolean {
-  return !!fallback && fallback !== primary && err instanceof RateLimitedError;
-}
-
 /** Short reason string for the fallback log line. */
 function describe(err: unknown): string {
-  return err instanceof ModelUnavailableError ? "daily quota spent" : "rate limited";
+  if (err instanceof ModelUnavailableError) return "daily quota spent";
+  return err instanceof Error && err.cause instanceof AttemptTimeoutError ? "no answer in time" : "busy";
 }
 
 /** One JSON call against ONE specific model, with the retry ladder. */
@@ -294,25 +349,28 @@ async function generateJsonOn(model: string, opts: GenerateJsonOptions): Promise
       await throttleGemini();
       const response = await withGeminiBreaker(model, () =>
         withSlot(() =>
-          ai.models.generateContent({
-            model,
-            contents: opts.prompt,
-            config: {
-              systemInstruction: opts.system,
-              responseMimeType: "application/json",
-              temperature: 0.2,
-              maxOutputTokens: opts.maxOutputTokens ?? 8192,
-              // Default 0: these calls are structured extraction/selection, not
-              // open reasoning, and a thinking model with a small output cap
-              // spends the budget reasoning and truncates the JSON (this is what
-              // silently broke the card-length selector once). Callers doing real
-              // reasoning can opt in.
-              thinkingConfig: { thinkingBudget: opts.thinkingBudget ?? 0 },
-            },
-          }),
+          withAttemptTimeout(model, opts.attemptTimeoutMs ?? JSON_ATTEMPT_TIMEOUT_MS, (abortSignal) =>
+            ai.models.generateContent({
+              model,
+              contents: opts.prompt,
+              config: {
+                systemInstruction: opts.system,
+                responseMimeType: "application/json",
+                temperature: 0.2,
+                maxOutputTokens: opts.maxOutputTokens ?? 8192,
+                // Default 0: these calls are structured extraction/selection, not
+                // open reasoning, and a thinking model with a small output cap
+                // spends the budget reasoning and truncates the JSON (this is what
+                // silently broke the card-length selector once). Callers doing real
+                // reasoning can opt in.
+                thinkingConfig: thinkingConfigFor(model, opts.thinkingBudget ?? 0),
+                abortSignal,
+              },
+            }),
+          ),
         ),
       );
-      markModelAvailable(model);      return extractJson(response.text ?? "");
+      markModelAvailable(model);      return extractJson(response.text ?? "");
     } catch (err) {
       // Out of daily allowance: park the model and give up on it immediately.
       // Retrying buys nothing — the window resets tomorrow, not in 3 seconds.
@@ -326,6 +384,8 @@ async function generateJsonOn(model: string, opts: GenerateJsonOptions): Promise
       // An open circuit means this model is already known-down; retrying here
       // would just re-throw instantly in a loop. Surface the message now.
       if (err instanceof CircuitOpenError) throw new RateLimitedError();
+      // A model that stalled once will likely stall again — never wait on it twice.
+      if (err instanceof AttemptTimeoutError) throw new RateLimitedError(err);
       if (!isTransient(err)) throw err;
       if (attempt >= maxRetries) throw new RateLimitedError(err);
       await sleep(withJitter(RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)]));
@@ -349,6 +409,8 @@ interface GenerateContentRawOptions {
   retries?: number;
   /** Model to retry on when the preferred one is rate-limited or out of quota. */
   fallbackModel?: string;
+  /** Longest one attempt may take before moving on (default 60s). */
+  attemptTimeoutMs?: number;
 }
 
 /**
@@ -360,22 +422,21 @@ interface GenerateContentRawOptions {
 export async function generateContentRaw(
   opts: GenerateContentRawOptions,
 ): Promise<GenerateContentResponse> {
-  const primary = opts.model ?? GEMINI_MODEL;
-  try {
-    return await generateContentRawOn(primary, opts.thinkingBudget ?? 0, opts);
-  } catch (err) {
-    if (!shouldFailOver(err, primary, opts.fallbackModel)) throw err;
-    console.warn(`gemini: ${primary} unavailable (${describe(err)}); using ${opts.fallbackModel}`);
-    /*
-     * Thinking is dropped on the fallback. The fallback is always the cheap
-     * model (see fallbackFor), whose value here is that it ANSWERS — and
-     * `thinkingBudget: 0` is the only configuration this project has actually
-     * verified working on it (npm run check:models probes exactly that shape).
-     * Carrying a 2048-token budget over from the Coach's premium config risks
-     * turning a graceful degradation into a 400.
-     */
-    return await generateContentRawOn(opts.fallbackModel as string, 0, withFallbackRetries(opts));
-  }
+  const chain = modelChain(opts.model ?? GEMINI_MODEL, opts.fallbackModel);
+  /*
+   * Thinking is dropped after the first model. A fallback's value here is that
+   * it ANSWERS — and thinking off is the only configuration this project has
+   * verified on every model in the chain (npm run check:models probes exactly
+   * that shape). Carrying a 2048-token budget over from the Coach's premium
+   * config risks turning a graceful degradation into a 400.
+   */
+  return walkChain(chain, (model, i) =>
+    generateContentRawOn(
+      model,
+      i === 0 ? (opts.thinkingBudget ?? 0) : 0,
+      chain.length === 1 ? opts : i === chain.length - 1 ? withFallbackRetries(opts) : { ...opts, retries: 0 },
+    ),
+  );
 }
 
 /** One raw call against ONE specific model, with the retry ladder. */
@@ -392,20 +453,23 @@ async function generateContentRawOn(
       await throttleGemini();
       const response = await withGeminiBreaker(model, () =>
         withSlot(() =>
-          ai.models.generateContent({
-            model,
-            contents: opts.contents,
-            config: {
-              systemInstruction: opts.system,
-              temperature: opts.temperature ?? 0.3,
-              maxOutputTokens: opts.maxOutputTokens ?? 4096,
-              thinkingConfig: { thinkingBudget },
-              ...(opts.tools ? { tools: opts.tools } : {}),
-            },
-          }),
+          withAttemptTimeout(model, opts.attemptTimeoutMs ?? RAW_ATTEMPT_TIMEOUT_MS, (abortSignal) =>
+            ai.models.generateContent({
+              model,
+              contents: opts.contents,
+              config: {
+                systemInstruction: opts.system,
+                temperature: opts.temperature ?? 0.3,
+                maxOutputTokens: opts.maxOutputTokens ?? 4096,
+                thinkingConfig: thinkingConfigFor(model, thinkingBudget),
+                ...(opts.tools ? { tools: opts.tools } : {}),
+                abortSignal,
+              },
+            }),
+          ),
         ),
       );
-      markModelAvailable(model);      return response;
+      markModelAvailable(model);      return response;
     } catch (err) {
       if (isDailyQuotaExhausted(err)) {
         markModelExhausted(model);
@@ -413,6 +477,7 @@ async function generateContentRawOn(
       }
       markModelAvailable(model);
       if (err instanceof CircuitOpenError) throw new RateLimitedError();
+      if (err instanceof AttemptTimeoutError) throw new RateLimitedError(err);
       if (!isTransient(err)) throw err;
       if (attempt >= maxRetries) throw new RateLimitedError(err);
       await sleep(withJitter(RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)]));

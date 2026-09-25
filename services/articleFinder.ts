@@ -76,6 +76,10 @@ const DEEPEN_START_BY_MS = 24000;
 const EARLY_MS = 18000;
 const DEEPEN_RETRIEVE_MS = 6000;
 const DEEPEN_RANK_MS = 8000;
+// Longest one ranking attempt may take before the next model gets the job. A
+// healthy ranking takes ~3-6s; a stalled model was measured at 72s.
+const RANK_ATTEMPT_MS = 10000;
+const DEEPEN_RANK_ATTEMPT_MS = 6000;
 // When too little of round 2 would fit, don't start it.
 const DEEPEN_MIN_POOL = 15;
 
@@ -189,6 +193,8 @@ async function expandQueries(params: SearchParams, tier: Tier): Promise<string[]
         model: modelFor("expand", tier).model,
         maxOutputTokens: 256,
         retries: 0,
+        // Cancel it rather than let it run on unseen behind the race below.
+        attemptTimeoutMs: EXPAND_TIMEOUT_MS,
       }),
       EXPAND_TIMEOUT_MS,
     );
@@ -600,6 +606,11 @@ async function rankCandidates(
         model: opts.round === 1 ? modelFor("rank", tier).model : modelFor("expand", tier).model,
         fallbackModel: opts.round === 1 ? (fallbackFor("rank", tier) ?? undefined) : undefined,
         retries: opts.round === 1 && tier === "free" ? 1 : 0,
+        // A model that hasn't answered by then is stalled, not thinking — hand
+        // the ranking to the next model while the deadline still has room for
+        // it. Without this one stalled call ran out the whole deadline and the
+        // debater got keyword ordering.
+        attemptTimeoutMs: opts.round === 1 ? RANK_ATTEMPT_MS : DEEPEN_RANK_ATTEMPT_MS,
       }),
       opts.deadlineAt - Date.now(),
     );

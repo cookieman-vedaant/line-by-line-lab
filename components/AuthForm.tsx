@@ -7,6 +7,7 @@ import { CAPTCHA_FAILED_MESSAGE, useCaptcha } from "@/components/useCaptcha";
 import { checkAuthAttempt } from "@/lib/apiClient";
 import { MIN_PASSWORD, PASSWORD_HINT } from "@/lib/passwordPolicy";
 import { safeNext } from "@/lib/safeNext";
+import { looksLikeSchoolEmail, SCHOOL_EMAIL_HINT } from "@/lib/schoolEmail";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 const inputClasses =
@@ -69,6 +70,14 @@ export default function AuthForm({ next }: { next?: string }) {
    */
   const captcha = useCaptcha();
 
+  // School mail filters silently drop our confirmation email (see lib/schoolEmail),
+  // so every "check your email" message says so for a school address.
+  const schoolEmail = looksLikeSchoolEmail(email);
+  const withSchoolAdvice = (message: string) =>
+    schoolEmail
+      ? `${message} School email often blocks it — if it hasn't arrived in a few minutes, check spam or quarantine, or sign up with a personal email instead.`
+      : message;
+
   function switchMode(m: Mode) {
     setMode(m);
     setError(null);
@@ -115,7 +124,7 @@ export default function AuthForm({ next }: { next?: string }) {
         options: { emailRedirectTo: confirmRedirect(), captchaToken },
       });
       if (error) return setError(error.message);
-      setNotice("New confirmation link sent — you can open it on any device.");
+      setNotice(withSchoolAdvice("New confirmation link sent — you can open it on any device."));
     } finally {
       setResending(false);
       // The token is spent either way — force a fresh solve before the next try.
@@ -212,7 +221,7 @@ export default function AuthForm({ next }: { next?: string }) {
         if (!data.session) {
           setMode("signin");
           setCanResend(true);
-          setNotice("Account created. Check your email for the confirmation link, then sign in.");
+          setNotice(withSchoolAdvice("Account created. Check your email for the confirmation link, then sign in."));
           return;
         }
         router.push(dest);
@@ -228,7 +237,7 @@ export default function AuthForm({ next }: { next?: string }) {
           // and offer the fix, rather than leaving the user to guess.
           if (error.code === "email_not_confirmed") {
             setCanResend(true);
-            return setError("This email hasn't been confirmed yet — resend the link below.");
+            return setError(withSchoolAdvice("This email hasn't been confirmed yet — resend the link below."));
           }
           return setError(error.message);
         }
@@ -282,9 +291,17 @@ export default function AuthForm({ next }: { next?: string }) {
             autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@school.edu"
+            // Not a school address: those are the ones whose filters drop the
+            // confirmation email.
+            placeholder="you@gmail.com"
+            aria-describedby={mode === "signup" && schoolEmail ? "auth-school-email" : undefined}
             className={inputClasses}
           />
+          {mode === "signup" && schoolEmail && (
+            <p id="auth-school-email" role="note" className="frame mt-2 bg-yellow px-3 py-2 text-xs font-medium text-black">
+              {SCHOOL_EMAIL_HINT}
+            </p>
+          )}
         </div>
 
         {mode !== "reset" && (

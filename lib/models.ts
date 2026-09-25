@@ -1,3 +1,4 @@
+import { ThinkingLevel, type ThinkingConfig } from "@google/genai";
 import type { Tier } from "@/lib/tier";
 
 /**
@@ -137,4 +138,63 @@ export function modelFor(task: AiTask, tier: Tier = "free"): ModelChoice {
 export function fallbackFor(task: AiTask, tier: Tier = "free"): string | null {
   const primary = modelFor(task, tier).model;
   return primary === LITE ? null : LITE;
+}
+
+/*
+ * ── FAILOVER ORDER ──────────────────────────────────────────────────────────
+ * Every model below answered with this app's config on this key (npm run
+ * check:models, 2026-09-25). A call whose model is busy, stalled or out of
+ * quota moves down its list (lib/gemini), so one overloaded model can't take a
+ * feature down. Measured that day: 3.1-flash-lite 503'd on 2 of 6 calls and
+ * once took 72s, 3.5-flash 503'd on 4 of 6, while 3.6-flash and 3.5-flash-lite
+ * answered every call in ~1s. Falling back only between the first two is how
+ * the finder showed "ranked by keyword match" and cards were marked by the
+ * weakest model.
+ *
+ * A strong task stays on strong models first (quality is the point), then the
+ * better lite model. A lite task stays on lite models first (cost), then the
+ * strong model with the cheaper output. Retune without a deploy through
+ * GEMINI_FAILOVER_FROM_STRONG / GEMINI_FAILOVER_FROM_LITE (comma-separated).
+ */
+const FROM_STRONG = [STRONG, "gemini-3.6-flash", "gemini-3.5-flash-lite", LITE];
+const FROM_LITE = [LITE, "gemini-3.5-flash-lite", "gemini-3.6-flash", STRONG];
+
+function failoverList(name: "STRONG" | "LITE", fallback: string[]): string[] {
+  const raw = process.env[`GEMINI_FAILOVER_FROM_${name}`];
+  const list = raw?.split(",").map((s) => s.trim()).filter(Boolean);
+  return list && list.length > 0 ? list : fallback;
+}
+
+/**
+ * The models to try, in order, for a call that asked for `primary`: the
+ * primary, the rest of its list, then the caller's own fallback if the list
+ * doesn't hold it. A model the lists don't know (an env override) gets only the
+ * caller's fallback — never an unverified guess.
+ */
+export function modelChain(primary: string, fallback?: string | null): string[] {
+  const fromStrong = failoverList("STRONG", FROM_STRONG);
+  const fromLite = failoverList("LITE", FROM_LITE);
+  // A model on both lists belongs to the list that STARTS with it.
+  const list =
+    fromLite[0] === primary
+      ? fromLite
+      : fromStrong.includes(primary)
+        ? fromStrong
+        : fromLite.includes(primary)
+          ? fromLite
+          : [];
+  return [...new Set([primary, ...list, ...(fallback ? [fallback] : [])])];
+}
+
+/**
+ * Models that reject `thinkingBudget` (400 INVALID_ARGUMENT) and take a
+ * `thinkingLevel` instead. Measured 2026-09-25: gemini-3.5-flash-lite answers
+ * with MINIMAL (0 thought tokens) and 400s on `thinkingBudget: 0`.
+ */
+const LEVEL_THINKING = new Set(["gemini-3.5-flash-lite"]);
+
+/** The thinking config `model` accepts for a given budget (0 = off). */
+export function thinkingConfigFor(model: string, budget: number): ThinkingConfig {
+  if (!LEVEL_THINKING.has(model)) return { thinkingBudget: budget };
+  return { thinkingLevel: budget > 0 ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL };
 }
