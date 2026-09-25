@@ -35,10 +35,13 @@ export interface FindOptions {
   budgetMs?: number;
 }
 
-// Results the debater sees, and the full-text floor below which the honest
-// abstract-only fallback (and the deepen round) kick in.
-const RETURN_LIMIT = 10;
+// Results the debater sees, and the full-text floor below which the deepen
+// round keeps looking.
+const RETURN_LIMIT = 12;
 const MIN_RESULTS = 3;
+// The score the results list labels "High credibility" (components/ArticleResults).
+// Only papers at or above it are shown when their full text can't be opened.
+const HIGH_CREDIBILITY = 70;
 // Full-text count below which an EARLY search keeps looking.
 const DEEPEN_BELOW = 5;
 // Candidates shown to the ranker per round.
@@ -209,15 +212,20 @@ Rules:
 - Ranking factors in order: relevance to the exact claim, debate usefulness for the evidence type, source credibility, author/institution expertise, recency.
 - For each candidate, work out from its abstract/snippet what the article itself FINDS or ARGUES — not which words it shares with the claim. Classify it:
   • STRONG — argues or evidences the claim's core proposition (same subject, same direction), including a narrower version of it or a more general proposition the claim is plainly an instance of.
-  • PARTIAL — establishes a real piece: one step of the claim's causal chain, the mechanism, the same direction at a smaller magnitude, or the same effect in a closely neighbouring case.
-  • DROP — a different subject that shares keywords; the topic appears only as background, context or a passing mention; the article argues AGAINST the claim or finds no or mixed effect; the only matching content is a view the article rejects.
-- An abstract that states only aims or methods ("examines the relationship between X and Y"): keep it only if the studied relationship is exactly the claim's, and say in the explanation that the abstract doesn't state the finding. Otherwise DROP.
-- A web snippet is a fragment of the page. Keep it only if the snippet shows the page's own argument on the claim, not merely the topic.
-- A SPECIFIC claim is not a reason to return less. Debaters write narrow claims ("manufacturing contracted because credit tightened for small firms"), and the literature is usually broader than the sentence they typed. An article that establishes PART of the claim, the general mechanism behind it, or the same effect in a neighbouring case is real evidence a debater can use — rank it and say in the explanation exactly which part it carries and which part it does not. Do NOT require an article to argue the whole claim word for word. Before returning few or no picks, re-check that you haven't classed a narrower, more general or one-step article as DROP.
-- Keep STRONG and PARTIAL; omit DROP. Order STRONG before PARTIAL, then by evidence-type fit, credibility and recency.
-- explanation: 1-2 concrete sentences stating what the article finds (at its own scope) and why it fits this evidence type. For PARTIAL, name the part of the claim it does NOT establish. Never describe an article as supporting more than its abstract/snippet says.
-- credibilityScore: 0-100 from venue quality, citation count and author expertise.
-- Pick 6-12 when that many STRONG/PARTIAL candidates exist. Never pad with DROP candidates to reach a count. Returning fewer, or {"selections": []}, is correct when the pool doesn't support the claim — the app tells the debater honestly.
+  • PARTIAL — on the claim's subject and useful to a debater arguing it: establishes one step of the causal chain, the mechanism, a smaller magnitude or a neighbouring case; OR reports mixed or qualified findings that include support for the claim; OR studies exactly the claim's relationship without stating the finding in its abstract; OR gives the context, trend or background this evidence type needs.
+  • DROP — ONLY a different subject that merely shares keywords, a passing mention of the topic, or an article whose conclusion is the OPPOSITE of the claim (it finds the effect absent or reversed).
+- ERR TOWARD INCLUSION: a debater can skim a marginal article, but can't read one you hid, and every card is checked against the claim again before it is cut. When unsure between PARTIAL and DROP, choose PARTIAL.
+- Scholarly abstracts hedge and report mixed results; web pages argue one side. Don't prefer a web page merely because its snippet states the claim more bluntly than a paper's abstract.
+- A web snippet is a fragment of the page. Keep a web page only if the snippet shows the page's own position or evidence on the claim's subject, not merely its keywords.
+- A SPECIFIC claim is not a reason to return less. Debaters write narrow claims ("manufacturing contracted because credit tightened for small firms"), and the literature is usually broader than the sentence they typed. An article that establishes PART of the claim, the general mechanism behind it, or the same effect in a neighbouring case is real evidence a debater can use — rank it and say in the explanation exactly which part it carries and which part it does not. Do NOT require an article to argue the whole claim word for word.
+- Keep STRONG and PARTIAL; omit DROP. Order STRONG before PARTIAL, then by credibility, evidence-type fit and recency.
+- explanation: 1-2 concrete sentences stating what the article finds (at its own scope) and why it fits this evidence type. For PARTIAL, name the part of the claim it does NOT establish (or that its findings are mixed, or that the abstract doesn't state the finding). Never describe an article as supporting more than its abstract/snippet says.
+- credibilityScore: 0-100 — how much weight a judge would give this SOURCE, from what kind of publisher it is and the author's expertise. Score the source, not how well it fits the claim. A web page has no citation count; that is not a mark against it.
+  • 85-100: peer-reviewed journals and academic presses; working papers from NBER, central banks and major research institutions; official reports and statistics from national governments, central banks and international bodies (e.g. a Federal Reserve bank, CBO, CRS, EIA, HHS, the World Bank, the IMF, NATO); leading think tanks (e.g. Brookings, RAND, CFR, CSIS, Cato, Heritage).
+  • 70-84: other established think tanks and research institutes, university centers and faculty writing, major news outlets and reputable magazines, professional and scientific associations.
+  • 50-69: advocacy campaigns, industry associations and trade press, general-audience explainers, student-run outlets, opinion blogs by credentialed authors.
+  • below 50: commercial or marketing pages, content farms, anonymous or personal blogs, sites selling something related to the claim.
+- Pick 8-12 whenever that many on-subject candidates exist (fewer only if the pool is genuinely thin). Return {"selections": []} ONLY when the candidates are about an entirely different subject.
 
 Return ONLY JSON: {"selections": [{"index": 2, "explanation": "...", "fit": "strong"|"partial", "credibilityScore": 87}, ...]} ordered best-first.`;
 
@@ -507,23 +515,46 @@ function uniqueByUrl(articles: Article[]): Article[] {
   return articles.filter((a) => !seen.has(a.url) && Boolean(seen.add(a.url)));
 }
 
+/** The credibility band the results list shows: High / Medium / Low. */
+const credibilityBand = (score: number): number => (score >= HIGH_CREDIBILITY ? 2 : score >= 50 ? 1 : 0);
+
 /**
- * What the debater sees: FULL TEXT ONLY when there is enough of it. When there
- * isn't, the list is topped up to MIN_RESULTS with abstract-only picks the
- * cutter would actually accept — ones the ranker judged STRONG, with a real
- * abstract — labelled `accessible: false` so the UI says so. Never padded with
- * anything else.
+ * What the debater sees: full text, plus the HIGH-credibility papers whose full
+ * text couldn't be opened, labelled `accessible: false` so the UI says so.
+ *
+ * Showing full text only hid the best sources: publishers refuse automated
+ * readers, so about half the journal papers the ranker picked failed the check
+ * while ordinary web pages passed, and results came back mostly medium
+ * credibility. An abstract-only pick is still one the cutter could use — judged
+ * relevant, with a real abstract — and the cutter only cuts it when that
+ * abstract directly supports the claim.
+ *
+ * Order: high credibility first; within a band, full text before abstract-only;
+ * otherwise the ranker's order.
  */
 export function selectResults(
   fullText: Article[],
   abstractOnly: Array<{ article: Article; fit?: Fit }>,
 ): Article[] {
-  const full = uniqueByUrl(fullText.map((a) => ({ ...a, accessible: true }))).slice(0, RETURN_LIMIT);
-  if (full.length >= MIN_RESULTS) return full;
-  const fallback = abstractOnly
-    .filter((p) => p.fit === "strong" && (p.article.abstract?.length ?? 0) >= MIN_ABSTRACT_RESULT_CHARS)
+  const full = fullText.map((a) => ({ ...a, accessible: true }));
+  const papers = abstractOnly
+    .filter(
+      (p) =>
+        p.fit !== undefined &&
+        p.article.credibilityScore >= HIGH_CREDIBILITY &&
+        (p.article.abstract?.length ?? 0) >= MIN_ABSTRACT_RESULT_CHARS,
+    )
     .map((p) => ({ ...p.article, accessible: false }));
-  return uniqueByUrl([...full, ...fallback]).slice(0, MIN_RESULTS);
+  const ordered = [...full, ...papers]
+    .map((a, i) => ({ a, i }))
+    .sort(
+      (x, y) =>
+        credibilityBand(y.a.credibilityScore) - credibilityBand(x.a.credibilityScore) ||
+        Number(y.a.accessible) - Number(x.a.accessible) ||
+        x.i - y.i,
+    )
+    .map(({ a }) => a);
+  return uniqueByUrl(ordered).slice(0, RETURN_LIMIT);
 }
 
 /**
@@ -626,7 +657,7 @@ export function emptyResultMessage(
     // Keyword picks were never judged relevant — don't call them that.
     return `Found ${picked} possible sources while the AI ranker was busy, but none had full text we could read. Try again in a minute.`;
   }
-  return `Found ${picked} relevant sources, but none had full text we could read and none of their abstracts directly support the claim. Open one yourself and paste its full text into Cut a Card.`;
+  return `Found ${picked} relevant sources, but none had full text we could read and none of the rest were high-credibility papers with a usable abstract. Open one yourself and paste its full text into Cut a Card.`;
 }
 
 /**
@@ -656,10 +687,12 @@ const REMEMBER_TIMEOUT_MS = 1500;
 
 // Repeat searches (same params) reuse the result for 30 min — zero AI cost.
 // Shared across instances/users via Redis when configured (in-memory otherwise).
-// "search2": results from before full-text-only filtering must not be served.
+// Bumped whenever cached results go wrong: "search2" for full-text-only
+// filtering, "search3" for the looser ranker and high-credibility papers shown
+// abstract-only.
 const searchCache = createSharedCache<Article[]>({
   ttlMs: 30 * 60 * 1000,
-  namespace: "search2",
+  namespace: "search3",
 });
 
 // Tier is part of the key: free ranks on the lite model and pro/admin on the
@@ -752,7 +785,7 @@ async function runSearch(
   let anyJudged = round1.judged;
   let picksMade = round1.picks.length;
 
-  // 3. VERIFY: only full text a debater can open and cut from.
+  // 3. VERIFY: which picks have full text a debater can open and cut from.
   const hosts = newHostState();
   let fullText: Pick[] = [];
   let abstractOnly: Pick[] = [];

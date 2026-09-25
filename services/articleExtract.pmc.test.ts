@@ -74,6 +74,20 @@ describe("articleFromJats", () => {
     expect(text.split("\n\n")).toHaveLength(3);
   });
 
+  it("reads authors when the group, not each contrib, says they are authors (PNAS)", () => {
+    // Measured on PMC8812534: <contrib-group content-type="author"><contrib>…,
+    // no contrib-type on each person — the card cited the journal.
+    const xml = JATS.replace(
+      /<contrib-group>[\s\S]*?<\/contrib-group>/,
+      `<contrib-group content-type="author">
+        <contrib><name name-style="western"><surname>Troller-Renfree</surname><given-names initials="SV">Sonya V</given-names></name></contrib>
+        <contrib><name><surname>Costanzo</surname><given-names>Molly A</given-names></name></contrib>
+        <contrib contrib-type="editor"><name><surname>Editor</surname><given-names>Not</given-names></name></contrib>
+      </contrib-group>`,
+    );
+    expect(articleFromJats(xml, "8812534")?.authors).toEqual(["Sonya V Troller-Renfree", "Molly A Costanzo"]);
+  });
+
   it("returns null when the XML holds no real text", () => {
     expect(articleFromJats("<article><front></front></article>", "1")).toBeNull();
   });

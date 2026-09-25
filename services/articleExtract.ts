@@ -1,6 +1,6 @@
 import { Readability } from "@mozilla/readability";
 import { DOMParser, parseHTML } from "linkedom";
-import { mostRecentDate, parseByline } from "@/lib/cite";
+import { mostRecentDate, parseByline, soleName } from "@/lib/cite";
 import { createLimiter } from "@/lib/concurrency";
 import { hasPaywallPhrase, hasStructuredPaywallSignal } from "@/lib/paywall";
 import { createSharedCache } from "@/lib/sharedCache";
@@ -23,7 +23,10 @@ export function articleFromFields(fields: {
   text: string;
   url?: string;
 }): ExtractedArticle {
-  const { authors, etAl } = parseByline(fields.author ?? "");
+  const parsed = parseByline(fields.author ?? "");
+  // A name the debater typed is a person even when it is one word.
+  const sole = parsed.authors.length === 0 ? soleName(fields.author ?? "", [fields.publication ?? ""]) : "";
+  const { authors, etAl } = sole ? { authors: [sole], etAl: parsed.etAl } : parsed;
   return {
     title: fields.title ?? "",
     author: authors.join(", ") || (fields.author ?? ""),
@@ -451,7 +454,12 @@ export function articleFromJats(xml: string, pmcId: string): ExtractedArticle | 
   const body = paragraphs.join("\n\n");
   if (body.length < MIN_ARTICLE_CHARS) return null;
 
-  const authors = [...doc.querySelectorAll('contrib[contrib-type="author"]')]
+  // Authors are marked per person, or once on the whole group (PNAS, PMC8812534).
+  const authors = [
+    ...doc.querySelectorAll(
+      'contrib[contrib-type="author"], contrib-group[content-type="author"] > contrib:not([contrib-type])',
+    ),
+  ]
     .map((c) => unshout([text(c.querySelector("given-names")), text(c.querySelector("surname"))].filter(Boolean).join(" ")))
     .filter(Boolean);
   // The electronic publication date when stated (the version a debater reads),
@@ -612,17 +620,14 @@ export async function extractArticleFromUrl(
 
   const publication =
     meta.publication || parsed.siteName || new URL(url).hostname.replace(/^www\./, "");
-  // Prefer structured metadata over Readability's byline (often null); fall back
-  // to a visible byline in the article text. Then drop a "byline" that is really
-  // the site/publisher name, so the cite never prints the website as the author.
-  const rawAuthor = cleanAuthor(
-    meta.author || parsed.byline || findBylineInText(text) || "",
+  const { raw: rawAuthor, authors, etAl } = resolvePageAuthors({
+    structured: meta.author,
+    byline: parsed.byline ?? "",
+    text,
     publication,
-  );
-  // Resolve the byline into actual people. An organisation resolves to nobody,
-  // which is the signal the cite needs — "no human wrote this" is not the same
-  // as "the outlet is the author".
-  const { authors, etAl } = parseByline(rawAuthor);
+    url,
+    profiles: meta.profileAuthors,
+  });
 
   return {
     title: meta.title || parsed.title || "",
@@ -638,6 +643,61 @@ export async function extractArticleFromUrl(
     publisherQualification: meta.publisherQualification,
     canonicalUrl: meta.canonicalUrl || url,
   };
+}
+
+/**
+ * The people who wrote a page, most trustworthy source first:
+ *   1. the page's declared author (author tags, JSON-LD) — including a ONE-WORD
+ *      name, which counts only here (see soleName): Medium credits writers by
+ *      display name alone;
+ *   2. Readability's byline, then a visible "By …" line in the text;
+ *   3. bylines given only as links to the authors' profile pages
+ *      (profileLinkAuthors) — last, so a page that already resolved keeps
+ *      exactly the author it had.
+ * Each step drops a "byline" that is really the site's name, and an
+ * organisation resolves to nobody — "no human wrote this" is not the same as
+ * "the outlet is the author". A declared author that names nobody ("Anonymous",
+ * the institution) no longer stops the search: the page may still name people.
+ */
+export function resolvePageAuthors(input: {
+  structured: string;
+  byline: string;
+  text: string;
+  publication: string;
+  url: string;
+  profiles?: string[];
+}): { raw: string; authors: string[]; etAl: boolean } {
+  const found = findPageAuthors(input);
+  // "IWAO HIROSE" → "Iwao Hirose": some journals print bylines in capitals.
+  return { ...found, authors: found.authors.map(unshout) };
+}
+
+function findPageAuthors(input: Parameters<typeof resolvePageAuthors>[0]): {
+  raw: string;
+  authors: string[];
+  etAl: boolean;
+} {
+  const declared = cleanAuthor(input.structured, input.publication);
+  const fromDeclared = parseByline(declared);
+  if (fromDeclared.authors.length > 0) return { raw: declared, ...fromDeclared };
+  const sole = declared ? soleName(declared, [input.publication, hostnameOf(input.url)]) : "";
+  if (sole) return { raw: declared, authors: [sole], etAl: fromDeclared.etAl };
+
+  const guessed = cleanAuthor(input.byline || findBylineInText(input.text) || "", input.publication);
+  const fromGuess = parseByline(guessed);
+  if (fromGuess.authors.length > 0) return { raw: guessed, ...fromGuess };
+
+  const profiles = input.profiles ?? [];
+  if (profiles.length > 0) return { raw: profiles.join(", "), authors: profiles, etAl: false };
+  return { raw: declared || guessed, authors: [], etAl: fromDeclared.etAl || fromGuess.etAl };
+}
+
+function hostnameOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -751,6 +811,107 @@ interface PageMetadata {
   authorQualification: string;
   publisherQualification: string;
   canonicalUrl: string;
+  /** Bylines given only as links to the authors' profile pages (profileLinkAuthors). */
+  profileAuthors: string[];
+}
+
+// The address of a person's profile page: brookings.edu/people/steven-pifer,
+// aier.org/people/peter-c-earle, nytimes.com/by/jane-doe.
+const PROFILE_PATH =
+  /\/(?:people|person|experts?|authors?|staff|scholars?|profiles?|contributors?|by|bios?|fellows?)\/([a-z0-9%-]+)\/?$/i;
+// More profile links than this above an article is a staff listing, not a byline.
+const MAX_PROFILE_AUTHORS = 6;
+// The first paragraph at least this long is where the article starts.
+const BODY_PARAGRAPH_CHARS = 200;
+
+const nameLetters = (s: string): string => s.normalize("NFD").toLowerCase().replace(/[^a-z]/g, "");
+
+/**
+ * The name a link's text starts with, if it is the person the link's address
+ * names ("/people/michael-e-ohanlon" ↔ "Michael E. O’Hanlon"). Anything else —
+ * "Read more", "Experts", a photo caption — is not a byline.
+ */
+function nameMatchingSlug(text: string, slug: string): string {
+  const want = nameLetters(slug.replace(/-\d+$/, ""));
+  const t = text.replace(/\s+/g, " ").trim();
+  if (want.length < 4 || !nameLetters(t).startsWith(want)) return "";
+  let seen = 0;
+  let end = 0;
+  while (end < t.length && seen < want.length) {
+    if (nameLetters(t[end])) seen++;
+    end++;
+  }
+  return t.slice(0, end).trim();
+}
+
+// Containers that hold OTHER people's profile links: menus, sidebars, footers,
+// "related experts" and promo boxes.
+const NOT_BYLINE_TAGS = new Set(["nav", "aside", "footer"]);
+const NOT_BYLINE_CLASS = /related|sidebar|menu|\bnav|footer|widget|promo|recommend|trending|popular|newsletter/i;
+
+function insideNonByline(el: Element): boolean {
+  // Stops below <body>: a page-wide class ("has-sidebar") says nothing about one link.
+  for (let node = el.parentElement; node && node.tagName.toLowerCase() !== "body"; node = node.parentElement) {
+    if (NOT_BYLINE_TAGS.has(node.tagName.toLowerCase())) return true;
+    const role = node.getAttribute("role") ?? "";
+    if (role === "navigation" || role === "complementary") return true;
+    if (NOT_BYLINE_CLASS.test(`${node.getAttribute("class") ?? ""} ${node.id}`)) return true;
+  }
+  return false;
+}
+
+/**
+ * Bylines a page gives only as links to its authors' profile pages. Think tanks
+ * do this: brookings.edu states its four authors nowhere else, and aier.org's
+ * author tag says "Anonymous" while the page links Peter C. Earle — both cards
+ * cited the outlet.
+ *
+ * Deliberately narrow, because a wrong author is worse than the outlet. Only
+ * links where a byline sits: between the article's title and its first real
+ * paragraph, or beside the title in the title's own header (aier.org credits
+ * the author above the title). Never a link below the text (author cards,
+ * contacts, related articles — which can't be told apart), above the title's
+ * header (menus, featured experts), or inside a menu, sidebar, footer or
+ * "related" box. Only when the link's text is the person its address names, and
+ * nothing when there are more people than a byline holds.
+ */
+export function profileLinkAuthors(doc: Document): string[] {
+  const title = doc.querySelector("h1");
+  const body = [...doc.querySelectorAll("p")].find(
+    (p) => (p.textContent ?? "").trim().length >= BODY_PARAGRAPH_CHARS,
+  );
+  if (!title || !body) return [];
+  // The title's header: its largest container that stops short of the text.
+  // A sidebar never shares it — the layout that holds both also holds the text.
+  let header: Element = title;
+  while (header.parentElement && !header.parentElement.contains(body)) header = header.parentElement;
+
+  const names = new Map<string, string>();
+  let pastTitle = false;
+  // Document order; a link inside the body paragraph comes after it.
+  for (const el of doc.querySelectorAll("h1, a[href], p")) {
+    if (el === body) break;
+    if (el === title) {
+      pastTitle = true;
+      continue;
+    }
+    if (el.tagName.toLowerCase() !== "a") continue;
+    if (!pastTitle && !header.contains(el)) continue;
+    if (insideNonByline(el)) continue;
+    let slug: string;
+    try {
+      const m = new URL(el.getAttribute("href") ?? "", "https://x.invalid").pathname.match(PROFILE_PATH);
+      if (!m) continue;
+      slug = decodeURIComponent(m[1]);
+    } catch {
+      continue;
+    }
+    const name = nameMatchingSlug(el.textContent ?? "", slug);
+    const person = name ? parseByline(name).authors[0] : undefined;
+    if (person && !names.has(slug)) names.set(slug, person);
+  }
+  if (names.size > MAX_PROFILE_AUTHORS) return [];
+  return [...names.values()];
 }
 
 /**
@@ -767,6 +928,7 @@ export function extractPageMetadata(doc: Document): PageMetadata {
     authorQualification: "",
     publisherQualification: "",
     canonicalUrl: "",
+    profileAuthors: [],
   };
 
   const attr = (selector: string, attribute = "content"): string => {
@@ -779,7 +941,14 @@ export function extractPageMetadata(doc: Document): PageMetadata {
 
   meta.title =
     attr('meta[property="og:title"]') || attr('meta[name="twitter:title"]') || "";
+  // citation_author is the scholarly standard (journals, repositories, csis.org):
+  // one tag per person, in byline order, often "Surname, Given". Semicolons keep
+  // those commas from splitting one person in two (see parseByline).
+  const citationAuthors = [...doc.querySelectorAll('meta[name="citation_author"]')]
+    .map((m) => m.getAttribute("content")?.trim() ?? "")
+    .filter(Boolean);
   meta.author =
+    citationAuthors.join("; ") ||
     attr('meta[name="author"]') ||
     attr('meta[property="article:author"]') ||
     attr('meta[property="og:article:author"]') ||
@@ -833,6 +1002,12 @@ export function extractPageMetadata(doc: Document): PageMetadata {
     }
   } catch {
     // ignore malformed JSON-LD
+  }
+
+  try {
+    meta.profileAuthors = profileLinkAuthors(doc);
+  } catch {
+    // a byline we can't read is just a byline we don't use
   }
 
   return meta;

@@ -1200,9 +1200,10 @@ export function tagNumbersMissingFromBody(tag: string, body: string): string[] {
 
 // Re-cutting the same source at the same length/claim (common while iterating)
 // reuses the card for 30 min — zero AI cost. Shared across instances/users via
-// Redis when configured (in-memory otherwise). "cut2": cards cut before the
-// relevance gate existed must not be served from the old namespace.
-const cutCache = createSharedCache<Card>({ ttlMs: 30 * 60 * 1000, namespace: "cut2", maxLocal: 30 });
+// Redis when configured (in-memory otherwise). Bumped whenever cached cards go
+// wrong: "cut2" for the relevance gate, "cut3" for one-word authors cited as
+// the outlet ("Medium 25").
+const cutCache = createSharedCache<Card>({ ttlMs: 30 * 60 * 1000, namespace: "cut3", maxLocal: 30 });
 
 /** Stable, compact key for a cut request (hashes long pasted text). */
 function cutCacheKey(req: CutRequest): string {

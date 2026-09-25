@@ -79,26 +79,40 @@ describe("verifyOrder", () => {
 
 describe("selectResults", () => {
   const full = (n: number) => Array.from({ length: n }, (_, i) => article(`https://full.org/${i}`));
-  const abstractPick = (url: string, fit: Pick["fit"], abstractChars = 600): { article: Article; fit: Pick["fit"] } => ({
-    article: article(url, { abstract: "a".repeat(abstractChars) }),
+  const abstractPick = (
+    url: string,
+    fit: Pick["fit"],
+    abstractChars = 600,
+    credibilityScore = 90,
+  ): { article: Article; fit: Pick["fit"] } => ({
+    article: article(url, { abstract: "a".repeat(abstractChars), credibilityScore }),
     fit,
   });
 
-  it("returns full text only when there is enough of it", () => {
-    const out = selectResults(full(4), [abstractPick("https://abs.org/1", "strong")]);
-    expect(out).toHaveLength(4);
-    expect(out.every((a) => a.accessible)).toBe(true);
+  it("shows high-credibility papers it couldn't open alongside full text, labelled", () => {
+    const out = selectResults(full(4), [abstractPick("https://abs.org/nber", "strong", 600, 92)]);
+    expect(out).toHaveLength(5);
+    const paper = out.find((a) => a.url === "https://abs.org/nber");
+    expect(paper?.accessible).toBe(false);
+    expect(out.filter((a) => a.accessible)).toHaveLength(4);
   });
 
-  it("tops up a thin result with abstract-only picks the cutter would accept, labelled", () => {
+  it("puts high credibility first, and full text first within the same credibility", () => {
+    const out = selectResults(
+      [article("https://blog.org/medium", { credibilityScore: 62 }), article("https://nber.org/full", { credibilityScore: 85 })],
+      [abstractPick("https://aer.org/abs", "partial", 600, 90)],
+    );
+    expect(out.map((a) => a.url)).toEqual(["https://nber.org/full", "https://aer.org/abs", "https://blog.org/medium"]);
+  });
+
+  it("offers only abstracts the cutter could use: high credibility, judged relevant, long enough", () => {
     const out = selectResults(full(1), [
-      abstractPick("https://abs.org/partial", "partial"),
-      abstractPick("https://abs.org/strong", "strong"),
-      abstractPick("https://abs.org/short", "strong", 120),
-      abstractPick("https://abs.org/unjudged", undefined),
+      abstractPick("https://abs.org/medium-cred", "strong", 600, 65),
+      abstractPick("https://abs.org/unjudged", undefined, 600, 90),
+      abstractPick("https://abs.org/short", "strong", 120, 90),
+      abstractPick("https://abs.org/partial", "partial", 600, 88),
     ]);
-    expect(out.map((a) => a.url)).toEqual(["https://full.org/0", "https://abs.org/strong"]);
-    expect(out[1].accessible).toBe(false);
+    expect(out.map((a) => a.url)).toEqual(["https://full.org/0", "https://abs.org/partial"]);
   });
 
   it("never lets two results share a URL (a swap can land two on one PDF)", () => {
@@ -111,7 +125,7 @@ describe("selectResults", () => {
   });
 
   it("caps the list", () => {
-    expect(selectResults(full(25), []).length).toBeLessThanOrEqual(10);
+    expect(selectResults(full(25), []).length).toBeLessThanOrEqual(12);
   });
 });
 

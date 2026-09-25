@@ -37,8 +37,8 @@ export default function ArticleResults({
   onDiscuss,
 }: ArticleResultsProps) {
   const busy = cuttingUrl !== null;
-  // The finder returns full text only, topping up with abstract-only results
-  // (accessible === false) when too little full text exists for the claim.
+  // Full text, plus high-credibility papers whose full text couldn't be opened
+  // (accessible === false).
   const abstractOnly = articles.filter((a) => a.accessible === false).length;
 
   return (
@@ -80,11 +80,11 @@ export default function ArticleResults({
 
       {abstractOnly > 0 && (
         <p role="note" className="frame bg-yellow px-3 py-2 text-xs font-medium leading-relaxed text-black">
-          Only {articles.length - abstractOnly} full-text{" "}
-          {articles.length - abstractOnly === 1 ? "article" : "articles"} turned up for this claim, so{" "}
-          {abstractOnly === 1 ? "one result is" : `${abstractOnly} results are`} abstract-only. A card is
-          cut from an abstract only when it directly supports your claim — for anything more, open
-          the article and paste its full text into Cut a Card.
+          {abstractOnly === 1
+            ? "One high-credibility paper couldn't be opened in full here, so it's"
+            : `${abstractOnly} high-credibility papers couldn't be opened in full here, so they're`}{" "}
+          marked Abstract only. A card is cut from an abstract only when it directly supports your
+          claim — for anything more, open the article and paste its full text into Cut a Card.
         </p>
       )}
 

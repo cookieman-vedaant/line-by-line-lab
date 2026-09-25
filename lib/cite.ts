@@ -237,6 +237,39 @@ export function parseByline(raw: string): { authors: string[]; etAl: boolean } {
   return { authors: out, etAl };
 }
 
+/** What sites put in an author field when no person is named. */
+const NOT_A_PERSON = [
+  "anonymous", "unknown", "admin", "administrator", "webmaster", "editor", "editors",
+  "staff", "guest", "writer", "blog", "user", "none", "null", "undefined",
+];
+
+/**
+ * A ONE-WORD byline that is a person: a pen name, a mononym, a platform display
+ * name. Medium labels every article with the writer's display name ("Ameya") in
+ * its author tag and as a schema.org Person, and parseByline — which drops lone
+ * tokens because they are usually an outlet ("Nature", "Reuters") — threw it
+ * away, so the card cited "Medium 25".
+ *
+ * Only for a name the page's own author field gives, or the debater typed; a
+ * one-word guess scraped from page text stays dropped. `outlets` (publication,
+ * hostname) are what the word must NOT be. Returns "" when it isn't a person.
+ */
+export function soleName(raw: string, outlets: string[] = []): string {
+  const name = stripTitles(stripByline(raw.replace(/\s*,?\s*\bet\.?\s+al\.?\s*/gi, " ")));
+  if (!/^\p{Lu}[\p{L}'’.-]{1,40}$/u.test(name)) return "";
+  const letters = name.replace(/[^\p{L}]/gu, "");
+  // Acronyms are outlets ("NPR", "BBC"), and so are initials alone ("J.").
+  if (letters.length < 2 || letters === letters.toUpperCase()) return "";
+  const low = letters.toLowerCase();
+  if (NOT_A_PERSON.includes(low) || looksLikeOrganization(name) || looksLikeRole(name)) return "";
+  // The outlet's own name, whole or as one of its words: "Medium", "Axios" on
+  // axios.com, "Brookings" for the Brookings Institution.
+  const outletWords = outlets.flatMap((o) => o.toLowerCase().split(/[^\p{L}]+/u)).filter(Boolean);
+  const outletWhole = outlets.map((o) => o.toLowerCase().replace(/[^\p{L}]/gu, ""));
+  if (outletWords.includes(low) || outletWhole.includes(low)) return "";
+  return name;
+}
+
 /** Nobiliary particles that belong to the surname they precede. */
 const PARTICLE = /^(?:van|von|de|del|della|di|da|dos|das|du|la|le|el|al|bin|ibn|mac|mc|st\.?|ter|ten|op|af|av)$/i;
 

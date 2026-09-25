@@ -5,6 +5,7 @@ import {
   looksLikeOrganization,
   mostRecentDate,
   parseByline,
+  soleName,
   splitAuthors,
   surnameOf,
 } from "@/lib/cite";
@@ -219,5 +220,43 @@ describe("surname-first bylines with trailing initials", () => {
     expect(surnameOf("Kaiming He")).toBe("He");
     expect(surnameOf("Daron Acemoglu")).toBe("Acemoglu");
     expect(surnameOf("Y. Bengio")).toBe("Bengio");
+  });
+});
+
+/**
+ * One-word bylines. Medium labels every article with the writer's display name
+ * ("Ameya", "Ersinesen") in its author tag AND as a schema.org Person, and the
+ * lone-token rule threw it away, so the card cited "Medium 25". These are only
+ * ever passed in when the page (or the debater) says a person wrote it.
+ */
+describe("soleName", () => {
+  it("keeps a one-word name the page gives as its author", () => {
+    expect(soleName("Ameya", ["Medium", "medium.com"])).toBe("Ameya");
+    expect(soleName("Ersinesen", ["Medium", "medium.com"])).toBe("Ersinesen");
+    expect(soleName("O'Neil", ["The Atlantic"])).toBe("O'Neil");
+    expect(soleName("By Jefferson", ["example.medium.com"])).toBe("Jefferson");
+  });
+
+  it("still refuses the outlet's own name", () => {
+    expect(soleName("Medium", ["Medium", "medium.com"])).toBe("");
+    expect(soleName("Axios", ["", "axios.com"])).toBe("");
+    expect(soleName("Brookings", ["Brookings Institution"])).toBe("");
+    expect(soleName("Heritage", ["The Heritage Foundation", "heritage.org"])).toBe("");
+  });
+
+  it("refuses wires, acronyms and generic labels", () => {
+    for (const raw of ["Reuters", "NPR", "BBC", "AFP", "Admin", "Staff", "Anonymous", "Editor", "Guest", "Unknown"]) {
+      expect(soleName(raw, ["example.com"]), raw).toBe("");
+    }
+  });
+
+  it("refuses anything that is not a single name-shaped word", () => {
+    for (const raw of ["", "https://medium.com/@ersinesen", "ameyab014", "@ersinesen2020", "jane", "Jane Smith", "J."]) {
+      expect(soleName(raw, ["Medium"]), raw).toBe("");
+    }
+  });
+
+  it("gives a cite name like any other author", () => {
+    expect(citeName([soleName("Ameya", ["Medium"])])).toBe("Ameya");
   });
 });

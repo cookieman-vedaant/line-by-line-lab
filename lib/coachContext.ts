@@ -17,8 +17,8 @@ export function articlesToContext(articles: Article[]): string {
         a.publication || "unknown publication",
         a.date || "n.d.",
       ].join(", ");
-      // The finder returns abstract-only results only as a labelled fallback;
-      // the Coach must know it can't cut those from their URL.
+      // High-credibility papers whose full text couldn't be opened come back
+      // labelled; the Coach must know it can't cut those from their URL.
       const flag = a.accessible
         ? " [full text confirmed]"
         : a.accessible === false

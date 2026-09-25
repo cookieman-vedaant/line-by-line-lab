@@ -2,6 +2,7 @@ import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 import { citeName, parseByline } from "@/lib/cite";
 import {
+  articleFromFields,
   cleanAuthor,
   decodeHtml,
   extractArticleCached,
@@ -11,6 +12,8 @@ import {
   isPdfResponse,
   normalizeDate,
   pdfToParagraphs,
+  profileLinkAuthors,
+  resolvePageAuthors,
 } from "./articleExtract";
 
 const bytesOf = (s: string): ArrayBuffer => new TextEncoder().encode(s).buffer;
@@ -29,6 +32,23 @@ describe("extractPageMetadata", () => {
     expect(meta.author).toBe("Jane Smith");
     expect(meta.publication).toBe("Foreign Policy Review");
     expect(meta.date).toBe("2026-03-12");
+  });
+
+  it("reads every citation_author tag, in order (csis.org, journal pages)", () => {
+    // Measured on csis.org: two citation_author tags and no other author field;
+    // the card cited "Center for Strategic and International Studies".
+    const doc = docFrom(`
+      <meta name="citation_author" content="Astrid Chevreuil">
+      <meta name="citation_author" content="Jim Stokes">
+    `);
+    const { authors } = parseByline(extractPageMetadata(doc).author);
+    expect(authors).toEqual(["Astrid Chevreuil", "Jim Stokes"]);
+    expect(citeName(authors)).toBe("Chevreuil et al.");
+  });
+
+  it("reads a surname-first citation_author as one person", () => {
+    const doc = docFrom(`<meta name="citation_author" content="Fawzi, Alhussein">`);
+    expect(citeName(parseByline(extractPageMetadata(doc).author).authors)).toBe("Fawzi");
   });
 
   it("falls back to JSON-LD for the author and date", () => {
@@ -93,6 +113,7 @@ describe("extractPageMetadata", () => {
       authorQualification: "",
       publisherQualification: "",
       canonicalUrl: "",
+      profileAuthors: [],
     });
   });
 
@@ -172,6 +193,162 @@ describe("cleanAuthor + parseByline (end to end)", () => {
     // cite has no human and the caller falls back to the publication.
     expect(parseByline(cleanAuthor("BBC News Staff", "BBC News")).authors).toEqual([]);
     expect(parseByline(cleanAuthor("Reuters", "Reuters")).authors).toEqual([]);
+  });
+});
+
+describe("resolvePageAuthors", () => {
+  // Measured on medium.com: <meta name="author" content="Ameya"> and a
+  // schema.org Person named "Ameya" — and the card cited "Medium 25".
+  const medium = { publication: "Medium", url: "https://medium.com/@ameyabalange014/ubi-63259c896448", byline: "", text: "" };
+
+  it("cites a one-word author the page's own author field names", () => {
+    const r = resolvePageAuthors({ ...medium, structured: "Ameya" });
+    expect(r.authors).toEqual(["Ameya"]);
+    expect(citeName(r.authors, r.etAl)).toBe("Ameya");
+  });
+
+  it("works on a publication subdomain too", () => {
+    const r = resolvePageAuthors({ ...medium, url: "https://example.medium.com/post-1", structured: "Jefferson" });
+    expect(citeName(r.authors)).toBe("Jefferson");
+  });
+
+  it("never turns the site's own name into the author", () => {
+    expect(resolvePageAuthors({ ...medium, structured: "Medium" }).authors).toEqual([]);
+    expect(
+      resolvePageAuthors({ publication: "", url: "https://www.axios.com/a", structured: "Axios", byline: "", text: "" }).authors,
+    ).toEqual([]);
+  });
+
+  it("does not trust a one-word guess that did not come from the author field", () => {
+    // Readability's byline is a guess from page chrome ("Advertisement",
+    // "Share"); only the page's declared author gets the one-word allowance.
+    expect(resolvePageAuthors({ ...medium, structured: "", byline: "Share" }).authors).toEqual([]);
+  });
+
+  it("un-shouts a name the page prints in capitals (cambridge.org)", () => {
+    const r = resolvePageAuthors({ ...medium, publication: "Utilitas", url: "https://www.cambridge.org/x", structured: "IWAO HIROSE" });
+    expect(r.authors).toEqual(["Iwao Hirose"]);
+    expect(citeName(r.authors)).toBe("Hirose");
+  });
+
+  it("leaves ordinary bylines exactly as before", () => {
+    const r = resolvePageAuthors({ ...medium, structured: "Jane Smith | Medium" });
+    expect(r.authors).toEqual(["Jane Smith"]);
+  });
+});
+
+/**
+ * Think tanks credit authors only as links to their profile pages — measured on
+ * brookings.edu (four authors, no author tag) and aier.org (author tag says
+ * "Anonymous", page links Peter C. Earle). Both cards cited the outlet.
+ */
+describe("profileLinkAuthors", () => {
+  const BODY = `<p>${"The article body runs long enough to be the article itself. ".repeat(6)}</p>`;
+  const page = (html: string): Document =>
+    new JSDOM(`<!doctype html><html><body>${html}</body></html>`).window.document;
+
+  it("reads the byline links above the article", () => {
+    const doc = page(`
+      <nav><a href="/experts/">Experts</a><a href="/about/leadership/">Leadership</a></nav>
+      <h1>U.S. Nuclear and Extended Deterrence</h1>
+      <div class="byline">
+        <a href="https://www.brookings.edu/people/richard-c-bush/">Richard C. Bush</a>,
+        <a href="/people/michael-e-ohanlon/">Michael E. O’Hanlon</a>
+      </div>${BODY}`);
+    expect(profileLinkAuthors(doc)).toEqual(["Richard C. Bush", "Michael E. O’Hanlon"]);
+  });
+
+  it("takes only the name when the link carries more text", () => {
+    const doc = page(`<h1>Title</h1><a href="/people/alex-alfirraz-scheers"><span>Alex Alfirraz Scheers</span><span>View profile</span></a>${BODY}`);
+    expect(profileLinkAuthors(doc)).toEqual(["Alex Alfirraz Scheers"]);
+  });
+
+  it("ignores profile links below or inside the article (author cards, contacts, citations)", () => {
+    const doc = page(`<h1>Title</h1><p>${"Body text. ".repeat(30)}<a href="/people/jane-doe">Jane Doe</a></p><div><a href="/people/john-roe">John Roe</a></div>`);
+    expect(profileLinkAuthors(doc)).toEqual([]);
+  });
+
+  it("ignores a link whose text is not the person its address names", () => {
+    const doc = page(`<h1>Title</h1><a href="/people/jane-doe">Read more</a><a href="/staff/institute-staff">People</a>${BODY}`);
+    expect(profileLinkAuthors(doc)).toEqual([]);
+  });
+
+  it("treats a long list of people as a staff listing, not a byline", () => {
+    const people = Array.from({ length: 7 }, (_, i) => `<a href="/people/person-${"abcdefg"[i]}name">Person ${"ABCDEFG"[i]}name</a>`).join("");
+    expect(profileLinkAuthors(page(`<h1>Title</h1>${people}${BODY}`))).toEqual([]);
+  });
+
+  it("ignores related-expert and sidebar boxes, even above the article", () => {
+    const doc = page(`
+      <aside><a href="/people/jane-doe">Jane Doe</a></aside>
+      <div class="related-experts"><a href="/experts/john-roe">John Roe</a></div>
+      <h1>The Title</h1>${BODY}`);
+    expect(profileLinkAuthors(doc)).toEqual([]);
+  });
+
+  it("ignores an unlabelled box of expert links that doesn't share the title's header", () => {
+    // No class or tag hints at all — the layout alone has to rule it out.
+    const doc = page(`
+      <div><div><a href="/people/jane-doe">Jane Doe</a><a href="/people/john-roe">John Roe</a></div></div>
+      <main><div><h1>The Title</h1></div>${BODY}</main>`);
+    expect(profileLinkAuthors(doc)).toEqual([]);
+  });
+
+  it("ignores profile links above the article's title (menus, featured experts)", () => {
+    const doc = page(`
+      <div class="mega"><a href="/people/jane-doe">Jane Doe</a></div>
+      <h1>The Title</h1>
+      <div><a href="/people/steven-pifer">Steven Pifer</a></div>${BODY}`);
+    expect(profileLinkAuthors(doc)).toEqual(["Steven Pifer"]);
+  });
+
+  it("reads an author credited above the title inside the title's header (aier.org)", () => {
+    const doc = page(`
+      <nav><a href="/people/">People</a></nav>
+      <div class="papers-header"><div class="person"><a href="https://aier.org/people/peter-c-earle/">Peter C. Earle</a></div><h1>The Economics of the Minimum Wage</h1></div>
+      <div class="content">${BODY}</div>`);
+    expect(profileLinkAuthors(doc)).toEqual(["Peter C. Earle"]);
+  });
+
+  it("finds nothing without a title and a body to locate the byline between", () => {
+    expect(profileLinkAuthors(page(`<h1>Title</h1><a href="/people/jane-doe">Jane Doe</a><p>Short.</p>`))).toEqual([]);
+    expect(profileLinkAuthors(page(`<a href="/people/jane-doe">Jane Doe</a>${BODY}`))).toEqual([]);
+  });
+});
+
+describe("resolvePageAuthors with profile links", () => {
+  const base = { byline: "", text: "", publication: "AIER", url: "https://aier.org/article/x" };
+
+  it("uses the profile links when the author tag names nobody", () => {
+    const r = resolvePageAuthors({ ...base, structured: "Anonymous", profiles: ["Peter C. Earle"] });
+    expect(citeName(r.authors, r.etAl)).toBe("Earle");
+  });
+
+  it("uses them when the author tag is the organisation", () => {
+    const r = resolvePageAuthors({ ...base, publication: "Brookings", structured: "Brookings Institution", profiles: ["Richard C. Bush", "Steven Pifer"] });
+    expect(citeName(r.authors, r.etAl)).toBe("Bush et al.");
+  });
+
+  it("never overrides a byline found in the page text", () => {
+    const r = resolvePageAuthors({ ...base, structured: "", byline: "Jane Smith", profiles: ["Peter C. Earle"] });
+    expect(r.authors).toEqual(["Jane Smith"]);
+  });
+
+  it("never overrides a person the author tag names", () => {
+    const r = resolvePageAuthors({ ...base, structured: "Jane Smith", profiles: ["Peter C. Earle"] });
+    expect(r.authors).toEqual(["Jane Smith"]);
+  });
+});
+
+describe("articleFromFields", () => {
+  it("keeps a one-word author the debater typed", () => {
+    const a = articleFromFields({ author: "Jefferson", publication: "Medium", text: "Body." });
+    expect(a.authors).toEqual(["Jefferson"]);
+    expect(citeName(a.authors)).toBe("Jefferson");
+  });
+
+  it("does not treat a typed outlet name as a person", () => {
+    expect(articleFromFields({ author: "Medium", publication: "Medium", text: "Body." }).authors).toEqual([]);
   });
 });
 
