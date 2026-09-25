@@ -60,12 +60,16 @@ export interface SearchParams {
  * `services/articleFinder.ts`. Each is emitted as it BEGINS, so the UI reports
  * what the server is actually doing rather than animating a guess.
  *
- * Query building deliberately isn't a stage: `heuristicQueries` is synchronous
- * string work that finishes in well under a millisecond, so showing it would be
- * theatre. A cached search emits nothing at all and returns immediately.
+ * Query building isn't a separate stage: the AI's keyword expansion runs
+ * alongside retrieval, inside "retrieve". "deepen" is OPTIONAL — emitted only
+ * when the first round found too little full text and the search keeps looking.
+ * A cached search emits nothing at all and returns immediately.
  */
-export const SEARCH_STAGES = ["retrieve", "rank", "verify"] as const;
+export const SEARCH_STAGES = ["retrieve", "rank", "verify", "deepen"] as const;
 export type SearchStage = (typeof SEARCH_STAGES)[number];
+
+/** Stages a search may skip entirely; the progress UI shows them only once reached. */
+export const OPTIONAL_SEARCH_STAGES: readonly SearchStage[] = ["deepen"];
 
 /** A ranked article returned by the Article Finder. Shape from the Tech Design. */
 export interface Article {
@@ -139,7 +143,33 @@ export interface Card {
   citeDetails: string;
   /** Verbatim extracted evidence with emphasis + omission markers. */
   body: string;
+  /**
+   * What the card was cut FROM. Optional because saved cards and wiki cards
+   * predate it. The card view says so when it is "abstract_only", so a debater
+   * never mistakes a card cut from an abstract for one cut from the article.
+   */
+  sourceKind?: CardSourceKind;
 }
+
+/**
+ * What text a card was cut from, judged by its content (services/articleExtract
+ * classifyText), not by whether a fetch worked:
+ *   full_text     — the article itself, read from its URL
+ *   abstract_only — only the abstract: the URL couldn't be read, or the page
+ *                   held nothing but it
+ *   short_text    — a page read from its URL that is too short to be sure it's
+ *                   the article (a news brief, or a landing page) — held to the
+ *                   abstract's bar, but not labelled an abstract
+ *   pasted        — text the debater pasted, long enough to be the article
+ *   pasted_short  — pasted text too short to be the article; held to the same
+ *                   bar as an abstract
+ */
+export type CardSourceKind =
+  | "full_text"
+  | "abstract_only"
+  | "short_text"
+  | "pasted"
+  | "pasted_short";
 
 /** Where the article to cut comes from — a URL to fetch, or pasted text. */
 export interface CutSource {

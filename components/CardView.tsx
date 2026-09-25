@@ -190,6 +190,17 @@ export default function CardView({ card, sourceUrl, sourceName, kicker = "✂ Cu
           </span>
         </div>
 
+        {card.sourceKind === "abstract_only" && (
+          <p
+            role="note"
+            className="label-mono mb-4 border-[3px] border-black bg-yellow px-2 py-1.5 text-[10px] normal-case text-black"
+          >
+            Cut from the abstract only — the full article couldn&apos;t be opened. It was cut
+            because the abstract directly supports your claim; read the full article before you
+            rely on it.
+          </p>
+        )}
+
         <div
           key={cardKey}
           ref={attachSheet}

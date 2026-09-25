@@ -37,6 +37,9 @@ export default function ArticleResults({
   onDiscuss,
 }: ArticleResultsProps) {
   const busy = cuttingUrl !== null;
+  // The finder returns full text only, topping up with abstract-only results
+  // (accessible === false) when too little full text exists for the claim.
+  const abstractOnly = articles.filter((a) => a.accessible === false).length;
 
   return (
     <section aria-label="Search results" className="flex flex-col gap-5">
@@ -75,9 +78,20 @@ export default function ArticleResults({
         </div>
       </div>
 
+      {abstractOnly > 0 && (
+        <p role="note" className="frame bg-yellow px-3 py-2 text-xs font-medium leading-relaxed text-black">
+          Only {articles.length - abstractOnly} full-text{" "}
+          {articles.length - abstractOnly === 1 ? "article" : "articles"} turned up for this claim, so{" "}
+          {abstractOnly === 1 ? "one result is" : `${abstractOnly} results are`} abstract-only. A card is
+          cut from an abstract only when it directly supports your claim — for anything more, open
+          the article and paste its full text into Cut a Card.
+        </p>
+      )}
+
       <ol className="flex flex-col gap-5">
         {articles.map((article) => {
           const isCutting = cuttingUrl === article.url;
+          const fromAbstract = article.accessible === false;
           return (
             <li
               key={article.url}
@@ -108,6 +122,14 @@ export default function ArticleResults({
                       ✓ Full text
                     </span>
                   )}
+                  {fromAbstract && (
+                    <span
+                      title="The full text couldn't be read — only the abstract. It's cut only if the abstract directly supports your claim."
+                      className="label-mono frame bg-paper px-2 py-1 text-[10px] font-medium text-ink"
+                    >
+                      Abstract only
+                    </span>
+                  )}
                   <span
                     title={`Credibility score: ${article.credibilityScore}/100`}
                     className={`label-mono frame px-2 py-1 text-[10px] font-medium
@@ -127,10 +149,19 @@ export default function ArticleResults({
                   type="button"
                   onClick={() => onCut(article)}
                   disabled={busy}
+                  title={
+                    fromAbstract
+                      ? "Only cuts if the abstract directly supports your claim."
+                      : undefined
+                  }
                   className={`btn-press frame px-4 py-2 font-display text-xs
                     font-bold uppercase tracking-wide text-paper ${isCutting ? "bg-accent" : "bg-ink"}`}
                 >
-                  {isCutting ? `Cutting ${cutLength.toLowerCase()} card…` : "✂ Cut Card"}
+                  {isCutting
+                    ? `Cutting ${cutLength.toLowerCase()} card…`
+                    : fromAbstract
+                      ? "✂ Cut from abstract"
+                      : "✂ Cut Card"}
                 </button>
                 {onDiscuss && (
                   <button

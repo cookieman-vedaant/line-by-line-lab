@@ -242,6 +242,14 @@ export default function CoachPanel({ context, seed }: CoachPanelProps) {
                             ✓ full text
                           </span>
                         )}
+                        {a.accessible === false && (
+                          <span
+                            title="Only the abstract could be read"
+                            className="label-mono frame shrink-0 bg-paper px-1.5 py-0.5 text-[9px] text-ink"
+                          >
+                            abstract only
+                          </span>
+                        )}
                       </div>
                       <p className="label-mono mt-1 text-[10px] text-ink/60">
                         {a.author} · {a.publication} · {a.date}

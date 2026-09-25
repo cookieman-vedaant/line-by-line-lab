@@ -1,6 +1,6 @@
 "use client";
 
-import { SEARCH_STAGES, type SearchStage } from "@/types";
+import { OPTIONAL_SEARCH_STAGES, SEARCH_STAGES, type SearchStage } from "@/types";
 
 /**
  * What each phase of `runSearch` is actually doing, in the debater's terms.
@@ -10,7 +10,8 @@ import { SEARCH_STAGES, type SearchStage } from "@/types";
 const STAGE_LABELS: Record<SearchStage, string> = {
   retrieve: "Searching scholarly databases + web",
   rank: "Ranking for debate usefulness",
-  verify: "Checking each source opens",
+  verify: "Checking each source has full text",
+  deepen: "Searching further for full-text sources",
 };
 
 /**
@@ -22,6 +23,11 @@ const STAGE_LABELS: Record<SearchStage, string> = {
  */
 export default function SearchProgress({ stage }: { stage: SearchStage | null }) {
   const active = stage ? SEARCH_STAGES.indexOf(stage) : -1;
+  // An optional stage appears only once the search reaches it — listing a step
+  // most searches never take would promise work that isn't happening.
+  const shown = SEARCH_STAGES.filter(
+    (s, index) => !OPTIONAL_SEARCH_STAGES.includes(s) || index <= active,
+  );
 
   return (
     <div className="frame bg-paper-2 px-4 py-4 sm:px-5">
@@ -35,7 +41,8 @@ export default function SearchProgress({ stage }: { stage: SearchStage | null })
       </p>
 
       <ol aria-hidden className="flex flex-col gap-3">
-        {SEARCH_STAGES.map((s, index) => {
+        {shown.map((s) => {
+          const index = SEARCH_STAGES.indexOf(s);
           const done = index < active;
           const current = index === active;
 

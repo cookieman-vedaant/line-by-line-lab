@@ -53,7 +53,55 @@ export function createSharedCache<V>(opts: {
   const redisKey = (key: string) => `cache:${opts.namespace}:${key}`;
   const shared = opts.shareAcrossInstances !== false;
 
+  /**
+   * Store locally, and in Redis when it fits. Returns the Redis write's promise
+   * (never rejecting) so a caller that HANDS a value to another function can
+   * wait for it; a caller that is merely caching doesn't need to.
+   */
+  const write = (key: string, value: V): Promise<void> => {
+    local.set(key, value);
+    const redis = shared ? getRedis() : null;
+    if (!redis) return Promise.resolve();
+    const bytes = jsonBytes(value);
+    if (bytes > MAX_REDIS_BYTES) {
+      // Kept locally, never shipped. Logged so an unexpectedly huge payload
+      // is visible rather than silently costing bandwidth forever.
+      console.info(
+        `sharedCache[${opts.namespace}] skipping Redis write: ${bytes} bytes > ${MAX_REDIS_BYTES} limit`,
+      );
+      return Promise.resolve();
+    }
+    return redis
+      .set(redisKey(key), value, { ex: ttlSeconds })
+      .then(() => undefined)
+      .catch((err: unknown) => console.warn(`sharedCache[${opts.namespace}] set failed`, String(err)));
+  };
+
+  const read = async (key: string): Promise<V | undefined> => {
+    const localHit = local.get(key);
+    if (localHit !== undefined) return localHit;
+    const redis = shared ? getRedis() : null;
+    if (!redis) return undefined;
+    try {
+      const hit = await redis.get<V>(redisKey(key));
+      if (hit !== null && hit !== undefined) {
+        local.set(key, hit);
+        return hit;
+      }
+    } catch (err) {
+      console.warn(`sharedCache[${opts.namespace}] get failed`, String(err));
+    }
+    return undefined;
+  };
+
   return {
+    /**
+     * A plain lookup, for values one part of the app writes and another reads
+     * (the Article Finder records a source's metadata; the Card Cutter reads it).
+     */
+    get: read,
+    /** Store a value (same Redis size rules as `wrap`). */
+    set: write,
     /**
      * `shouldCache` lets a caller refuse to memoize a particular result. The
      * wiki search uses it to never cache an EMPTY result: the index grows in the
@@ -67,41 +115,11 @@ export function createSharedCache<V>(opts: {
       compute: () => Promise<V>,
       shouldCache: (value: V) => boolean = () => true,
     ): Promise<V> {
-      const localHit = local.get(key);
-      if (localHit !== undefined) return localHit;
-
-      const redis = shared ? getRedis() : null;
-      if (redis) {
-        try {
-          const hit = await redis.get<V>(redisKey(key));
-          if (hit !== null && hit !== undefined) {
-            local.set(key, hit);
-            return hit;
-          }
-        } catch (err) {
-          console.warn(`sharedCache[${opts.namespace}] get failed`, String(err));
-        }
-      }
-
+      const hit = await read(key);
+      if (hit !== undefined) return hit;
       const value = await compute();
-      if (!shouldCache(value)) return value;
-      local.set(key, value);
-
-      if (redis) {
-        const bytes = jsonBytes(value);
-        if (bytes > MAX_REDIS_BYTES) {
-          // Kept locally, never shipped. Logged so an unexpectedly huge payload
-          // is visible rather than silently costing bandwidth forever.
-          console.info(
-            `sharedCache[${opts.namespace}] skipping Redis write: ${bytes} bytes > ${MAX_REDIS_BYTES} limit`,
-          );
-        } else {
-          // Fire-and-forget: don't make the user wait on the cache write.
-          void redis
-            .set(redisKey(key), value, { ex: ttlSeconds })
-            .catch((err) => console.warn(`sharedCache[${opts.namespace}] set failed`, String(err)));
-        }
-      }
+      // Fire-and-forget: don't make the user wait on a cache write.
+      if (shouldCache(value)) void write(key, value);
       return value;
     },
   };

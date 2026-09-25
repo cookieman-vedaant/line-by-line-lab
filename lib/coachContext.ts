@@ -17,7 +17,13 @@ export function articlesToContext(articles: Article[]): string {
         a.publication || "unknown publication",
         a.date || "n.d.",
       ].join(", ");
-      const flag = a.accessible ? " [full text confirmed]" : "";
+      // The finder returns abstract-only results only as a labelled fallback;
+      // the Coach must know it can't cut those from their URL.
+      const flag = a.accessible
+        ? " [full text confirmed]"
+        : a.accessible === false
+          ? " [abstract only — full text couldn't be opened]"
+          : "";
       return `${i + 1}. "${a.title}" — ${meta}${flag}\n   ${a.url}`;
     })
     .join("\n");

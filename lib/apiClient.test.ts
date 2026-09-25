@@ -53,6 +53,21 @@ describe("requestSearch (NDJSON stream)", () => {
     if (outcome.ok) expect(outcome.articles).toHaveLength(1);
   });
 
+  it("passes the optional deepen stage through when the search keeps looking", async () => {
+    mockFetch(
+      streamed([
+        '{"type":"stage","stage":"retrieve"}\n{"type":"stage","stage":"rank"}\n',
+        '{"type":"stage","stage":"verify"}\n{"type":"stage","stage":"deepen"}\n',
+        `{"type":"result","articles":[${JSON.stringify(ARTICLE)}]}\n`,
+      ]),
+    );
+
+    const stages: string[] = [];
+    await requestSearch(PARAMS, (s) => stages.push(s));
+
+    expect(stages).toEqual(["retrieve", "rank", "verify", "deepen"]);
+  });
+
   // The whole reason this test file exists: TCP does not respect our newlines.
   it("reassembles an event split across chunk boundaries", async () => {
     mockFetch(

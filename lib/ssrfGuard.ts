@@ -110,7 +110,15 @@ export async function assertPublicUrl(rawUrl: string): Promise<URL> {
 
 interface SafeFetchOptions {
   headers?: Record<string, string>;
+  /**
+   * TOTAL budget for the request, across every redirect hop. It used to restart
+   * on each hop, so a DOI bouncing through five redirects could take six times
+   * the stated timeout — and the Article Finder, which now checks many URLs per
+   * search, has a hard deadline of its own to meet.
+   */
   timeoutMs?: number;
+  /** Aborts the request early (a caller-wide deadline). Combined with timeoutMs. */
+  signal?: AbortSignal;
   maxRedirects?: number;
 }
 
@@ -118,9 +126,14 @@ interface SafeFetchOptions {
  * fetch() for user-supplied URLs, hardened against SSRF: validates the target
  * (and every redirect hop) with assertPublicUrl before making the request, and
  * follows redirects manually so a 3xx can't bounce us to an internal address.
+ *
+ * The returned Response's body is still bound to the same signal, so reading it
+ * is covered by the same deadline.
  */
 export async function safeFetch(rawUrl: string, opts: SafeFetchOptions = {}): Promise<Response> {
   const maxRedirects = opts.maxRedirects ?? 5;
+  const timeout = AbortSignal.timeout(opts.timeoutMs ?? 15000);
+  const signal = opts.signal ? AbortSignal.any([timeout, opts.signal]) : timeout;
   let current = rawUrl;
 
   for (let hop = 0; hop <= maxRedirects; hop++) {
@@ -128,7 +141,7 @@ export async function safeFetch(rawUrl: string, opts: SafeFetchOptions = {}): Pr
     const res = await fetch(url, {
       headers: opts.headers,
       redirect: "manual",
-      signal: AbortSignal.timeout(opts.timeoutMs ?? 15000),
+      signal,
     });
 
     const location = res.headers.get("location");

@@ -1,6 +1,7 @@
 import { Readability } from "@mozilla/readability";
-import { parseHTML } from "linkedom";
+import { DOMParser, parseHTML } from "linkedom";
 import { mostRecentDate, parseByline } from "@/lib/cite";
+import { createLimiter } from "@/lib/concurrency";
 import { hasPaywallPhrase, hasStructuredPaywallSignal } from "@/lib/paywall";
 import { createSharedCache } from "@/lib/sharedCache";
 import { BlockedUrlError, safeFetch } from "@/lib/ssrfGuard";
@@ -37,14 +38,31 @@ export function articleFromFields(fields: {
   };
 }
 
+/**
+ * WHY a page couldn't be read. The Article Finder uses it to stop hammering a
+ * host that is refusing us (a 403 from one ScienceDirect link means the next one
+ * will 403 too) without giving up on hosts that merely had one bad page.
+ */
+export type UnreadableReason =
+  | "blocked" // 401/403/429/451 — the host refuses automated readers
+  | "paywall" // readable, but only a teaser or abstract is free
+  | "not_found" // 404/410
+  | "http_error" // any other non-2xx
+  | "blocked_url" // SSRF guard: private/internal address
+  | "timeout" // timeout or network failure
+  | "too_large"
+  | "no_text"; // nothing extractable (JS-only page, scanned PDF)
+
 /** Honest failure — the article couldn't be fetched or parsed. */
 export class ArticleUnreadableError extends Error {
-  constructor(detail?: string) {
+  readonly reason?: UnreadableReason;
+  constructor(detail?: string, reason?: UnreadableReason) {
     super(
       detail ??
         "This article couldn't be read (it may be paywalled or blocked). Try pasting the article text instead.",
     );
     this.name = "ArticleUnreadableError";
+    this.reason = reason;
   }
 }
 
@@ -80,10 +98,131 @@ const MIN_ARTICLE_CHARS = 400;
 // A page with a hard paywall marker but LESS than this much extracted text is a
 // locked teaser/abstract, not a readable article — reject it.
 const PAYWALL_TEASER_CHARS = 1500;
-// Bar for `verifyAccessible` to call a page "cuttable full text". Well above a
-// typical abstract (~1,000–1,800 chars) so abstract-only landing pages — the
-// Article Finder's old blind spot — stop being marked accessible.
-const MIN_ACCESSIBLE_CHARS = 2200;
+
+/**
+ * Prose a text must carry — NOT counting the abstract, a reference list or page
+ * furniture — to count as full text. Well above a typical abstract (~1,000–1,800
+ * chars), so an abstract-only landing page is never treated as the article.
+ */
+export const MIN_FULL_TEXT_CHARS = 2200;
+
+/** What a piece of article text actually is, judged from its content. */
+export type TextKind = "full_text" | "abstract_only";
+
+// A paragraph shorter than this is a heading, nav item, caption or button.
+const MIN_PROSE_WORDS = 12;
+// A citation entry is short. Real prose paragraphs that cite heavily are longer.
+const REFERENCE_MAX_WORDS = 60;
+const REFERENCE_SIGNALS: readonly RegExp[] = [
+  /\b(1[89]|20)\d{2}[a-z]?\b/, // a year
+  /\bet al\b/i,
+  /\bdoi\b|https?:\/\//i,
+  /\b\d+\s*\(\d+\)/, // volume(issue)
+  /\b\d+\s*[-–]\s*\d+\b/, // page range
+  /\b(?:pp?|vol|no)\.\s*\d/i,
+];
+// Word n-gram size and share of a paragraph's n-grams found in the abstract for
+// the paragraph to count as "the abstract again".
+const SHINGLE_WORDS = 6;
+const ABSTRACT_OVERLAP = 0.5;
+
+function normalizeWords(s: string): string[] {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter(Boolean);
+}
+
+function shingles(s: string): Set<string> {
+  const words = normalizeWords(s);
+  const out = new Set<string>();
+  for (let i = 0; i + SHINGLE_WORDS <= words.length; i++) {
+    out.add(words.slice(i, i + SHINGLE_WORDS).join(" "));
+  }
+  return out;
+}
+
+// Citation marks, counted: years, "et al", DOIs/links, volume(issue), page ranges.
+const CITATION_MARKS =
+  /\b(?:1[89]|20)\d{2}[a-z]?\b|\bet al\b|\bdoi\b|https?:\/\/|\b\d+\s*\(\d+\)|\b\d+\s*[-–]\s*\d+\b/gi;
+// Citation marks per 100 characters above which a long block is a reference
+// list run together rather than prose. Prose that cites heavily — "(Smith et
+// al., 2019; Jones, 2021, pp. 44-46)" every few sentences — stays well under.
+const REFERENCE_MARK_DENSITY = 1;
+
+function looksLikeReference(paragraph: string, words: number): boolean {
+  if (words < REFERENCE_MAX_WORDS) {
+    return REFERENCE_SIGNALS.filter((re) => re.test(paragraph)).length >= 3;
+  }
+  // A page without paragraph markup can arrive as ONE block: the abstract and
+  // the entire reference list run together. Judge a long block by density.
+  const marks = paragraph.match(CITATION_MARKS)?.length ?? 0;
+  return marks / (paragraph.length / 100) >= REFERENCE_MARK_DENSITY;
+}
+
+/**
+ * The text as paragraphs, whatever its line breaks. Blank-line-separated blocks
+ * (what HTML and PDF extraction produce) are paragraphs. Text with only single
+ * line breaks may be hard-wrapped — pasted from a PDF — so it is reflowed the
+ * way PDF text is, or every wrapped line would count as a too-short
+ * "paragraph" and a whole pasted article would read as a snippet.
+ */
+function proseBlocks(text: string): string[] {
+  const body = text.replace(/\r/g, "").trim();
+  const blocks = /\n[ \t]*\n/.test(body) ? body.split(/\n[ \t]*\n/) : pdfToParagraphs(body).split("\n\n");
+  return blocks.map((b) => b.replace(/\s*\n\s*/g, " ").trim()).filter(Boolean);
+}
+
+/**
+ * Characters of real prose: paragraphs long enough to be writing, that aren't
+ * citation entries, and (when `callerAbstract` is given) aren't that abstract
+ * repeated. Stops counting once it passes `stopAt`.
+ */
+function proseChars(text: string, callerAbstract?: string, stopAt = Infinity): number {
+  const abstractShingles =
+    callerAbstract && callerAbstract.trim().length >= 200 ? shingles(callerAbstract) : null;
+  let total = 0;
+  for (const paragraph of proseBlocks(text)) {
+    const words = paragraph.split(/\s+/).filter(Boolean).length;
+    if (words < MIN_PROSE_WORDS || looksLikeReference(paragraph, words)) continue;
+    if (abstractShingles) {
+      const own = shingles(paragraph);
+      let shared = 0;
+      for (const sh of own) if (abstractShingles.has(sh)) shared++;
+      if (own.size > 0 && shared / own.size >= ABSTRACT_OVERLAP) continue;
+    }
+    total += paragraph.length;
+    if (total >= stopAt) break;
+  }
+  return total;
+}
+
+/**
+ * Is this text mostly the caller's abstract? Distinguishes an abstract-only
+ * landing page from a short but complete page (a news brief): both fall short
+ * of full text, but only one of them is "just the abstract".
+ */
+export function isMostlyAbstract(text: string, callerAbstract: string | undefined): boolean {
+  if (!callerAbstract || callerAbstract.trim().length < 200) return false;
+  const all = proseChars(text);
+  return all === 0 || proseChars(text, callerAbstract) < all / 2;
+}
+
+/**
+ * Is this the article, or only its abstract?
+ *
+ * "Full text" used to mean "the fetch worked and came back long enough". A
+ * publisher landing page showing the abstract — often followed by the entire
+ * reference list — cleared that bar, and a card cut from it is the thin,
+ * power-tagged card users reported: the cutter thought it had the article.
+ *
+ * So count only PROSE: paragraphs long enough to be writing, that aren't
+ * citation entries, and that aren't the caller's abstract repeated. Headings,
+ * nav, buttons and references don't count toward the bar.
+ */
+export function classifyText(text: string, callerAbstract?: string): TextKind {
+  if (text.trim().length < MIN_FULL_TEXT_CHARS) return "abstract_only";
+  return proseChars(text, callerAbstract, MIN_FULL_TEXT_CHARS) >= MIN_FULL_TEXT_CHARS
+    ? "full_text"
+    : "abstract_only";
+}
 
 /**
  * Fetch a URL and extract clean article text with Mozilla Readability —
@@ -91,6 +230,74 @@ const MIN_ACCESSIBLE_CHARS = 2200;
  */
 /** Largest PDF we'll pull fully into memory to extract. Beyond this, reject. */
 const MAX_PDF_BYTES = 25 * 1024 * 1024;
+
+/** How an extraction should behave beyond the defaults a cut uses. */
+export interface ExtractOptions {
+  /** Abort early — a caller-wide deadline. */
+  signal?: AbortSignal;
+  /** Largest body to download at all, in bytes. Defaults to MAX_PDF_BYTES. */
+  maxBytes?: number;
+  /**
+   * Read only the first N pages of a PDF. For a quick "is this real full text?"
+   * check, never for a cut — the result is deliberately incomplete, so it must
+   * never be cached as the article.
+   */
+  pdfMaxPages?: number;
+}
+
+/**
+ * pdf.js parses on the main thread and peaks at several times the file's size
+ * in memory. Unbounded, a search checking a dozen PDFs at once stalls every
+ * other request on the instance — so at most two parse at a time.
+ */
+const pdfParseSlot = createLimiter(2);
+
+const tooLarge = () =>
+  new ArticleUnreadableError(
+    "That document is too large to read here. Download it and paste the text instead.",
+    "too_large",
+  );
+
+/**
+ * Read a response body, refusing to hold more than `maxBytes`. The old
+ * `arrayBuffer()` read the ENTIRE body into memory before the size check ran,
+ * so the 25 MB cap only applied after a much bigger file had already landed.
+ */
+async function readBodyCapped(res: Response, maxBytes: number): Promise<ArrayBuffer> {
+  const declared = Number(res.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    void res.body?.cancel().catch(() => {});
+    throw tooLarge();
+  }
+  if (!res.body) return new ArrayBuffer(0);
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      void reader.cancel().catch(() => {});
+      throw tooLarge();
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out.buffer;
+}
+
+/** Map an HTTP failure status to the reason the Article Finder acts on. */
+function reasonForStatus(status: number): UnreadableReason {
+  if (status === 401 || status === 403 || status === 429 || status === 451) return "blocked";
+  if (status === 404 || status === 410) return "not_found";
+  return "http_error";
+}
 
 /**
  * Is this response a PDF? Checks the declared type, the URL, and — because
@@ -155,27 +362,49 @@ export function pdfToParagraphs(raw: string): string {
  * resolved from the search result's metadata by mergeCiteFacts. A scanned,
  * image-only PDF yields no text and is rejected rather than cut empty.
  */
-async function articleFromPdf(bytes: Uint8Array, url: string): Promise<ExtractedArticle> {
-  if (bytes.byteLength > MAX_PDF_BYTES) {
-    throw new ArticleUnreadableError(
-      "That PDF is too large to read here. Download it and paste the text instead.",
-    );
-  }
+async function articleFromPdf(
+  bytes: Uint8Array,
+  url: string,
+  maxPages?: number,
+): Promise<ExtractedArticle> {
+  if (bytes.byteLength > MAX_PDF_BYTES) throw tooLarge();
   const { extractText, getDocumentProxy } = await import("unpdf");
   let raw: string;
   try {
-    const pdf = await getDocumentProxy(bytes);
-    const result = await extractText(pdf, { mergePages: true });
-    raw = Array.isArray(result.text) ? result.text.join("\n\n") : result.text;
+    raw = await pdfParseSlot(async () => {
+      const pdf = await getDocumentProxy(bytes);
+      if (maxPages && pdf.numPages > maxPages) {
+        // Just enough pages to tell an article from an abstract, without paying
+        // to parse a 60-page report during a search.
+        // Built exactly as unpdf's extractText builds a page (a line break only
+        // where pdf.js marks one), so pdfToParagraphs reflows it the same way
+        // it reflows a full cut — otherwise every text run became a line and
+        // real PDFs were undercounted as abstract-only.
+        const pages: string[] = [];
+        for (let n = 1; n <= maxPages; n++) {
+          const content = await (await pdf.getPage(n)).getTextContent();
+          pages.push(
+            content.items
+              .map((item) => ("str" in item ? item.str + (item.hasEOL ? "\n" : "") : ""))
+              .join(""),
+          );
+        }
+        return pages.join("\n");
+      }
+      const result = await extractText(pdf, { mergePages: true });
+      return Array.isArray(result.text) ? result.text.join("\n\n") : result.text;
+    });
   } catch {
     throw new ArticleUnreadableError(
       "That PDF couldn't be read — it may be scanned images or corrupted. Paste the text instead.",
+      "no_text",
     );
   }
   const text = pdfToParagraphs(raw ?? "");
   if (text.trim().length < MIN_ARTICLE_CHARS) {
     throw new ArticleUnreadableError(
       "That PDF had no extractable text (it may be scanned images). Paste the text instead.",
+      "no_text",
     );
   }
   return {
@@ -192,10 +421,103 @@ async function articleFromPdf(bytes: Uint8Array, url: string): Promise<Extracted
   };
 }
 
+/** A PubMed Central article's numeric id, from any of its link forms, or null. */
+export function pmcIdFromUrl(url: string): string | null {
+  const m =
+    /^https?:\/\/(?:www\.)?(?:ncbi\.nlm\.nih\.gov\/pmc\/articles|pmc\.ncbi\.nlm\.nih\.gov\/articles|europepmc\.org\/(?:article\/PMC|articles))\/(?:PMC)?(\d+)/i.exec(
+      url,
+    );
+  return m ? m[1] : null;
+}
+
+/** "H. LUKE SHAEFER" → "H. Luke Shaefer"; names already in mixed case are left alone. */
+const unshout = (name: string) =>
+  name === name.toUpperCase() ? name.toLowerCase().replace(/(^|[\s.'-])([a-z])/g, (_, p: string, c: string) => p + c.toUpperCase()) : name;
+
+/**
+ * An article from Europe PMC's JATS full-text XML: the abstract and body
+ * prose (never figure captions, tables or the reference list), plus the
+ * metadata the XML states. Pure; null when there is no real text.
+ */
+export function articleFromJats(xml: string, pmcId: string): ExtractedArticle | null {
+  const doc = new DOMParser().parseFromString(xml, "text/xml") as unknown as Document;
+  const text = (el: Element | null | undefined) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+  const paragraphs = [
+    ...doc.querySelectorAll("abstract p"),
+    ...[...doc.querySelectorAll("body p")].filter((p) => !p.closest("fig, table-wrap, fn-group, ref-list")),
+  ]
+    .map(text)
+    .filter(Boolean);
+  const body = paragraphs.join("\n\n");
+  if (body.length < MIN_ARTICLE_CHARS) return null;
+
+  const authors = [...doc.querySelectorAll('contrib[contrib-type="author"]')]
+    .map((c) => unshout([text(c.querySelector("given-names")), text(c.querySelector("surname"))].filter(Boolean).join(" ")))
+    .filter(Boolean);
+  // The electronic publication date when stated (the version a debater reads),
+  // else the first one. A day-less date stays a year — never an invented day.
+  const dates = [...doc.querySelectorAll("article-meta pub-date")];
+  const pub =
+    dates.find((d) => /epub/i.test(`${d.getAttribute("pub-type")} ${d.getAttribute("date-type")}`)) ?? dates[0];
+  const [y, m, d] = ["year", "month", "day"].map((f) => text(pub?.querySelector(f)));
+  const date = y && m && d ? `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}` : y;
+
+  return {
+    title: text(doc.querySelector("article-meta article-title")),
+    author: authors.join(", "),
+    etAl: false,
+    publication: text(doc.querySelector("journal-title")),
+    date,
+    text: body,
+    authors,
+    authorQualification: "",
+    publisherQualification: "",
+    canonicalUrl: `https://pmc.ncbi.nlm.nih.gov/articles/PMC${pmcId}/`,
+  };
+}
+
+// Europe PMC's official full-text API. NCBI asks automated readers to use its
+// APIs rather than the website — which now answers servers with a reCAPTCHA.
+const EUROPE_PMC_FULLTEXT = "https://www.ebi.ac.uk/europepmc/webservices/rest";
+const EUROPE_PMC_TIMEOUT_MS = 8000;
+
+/**
+ * A PubMed Central article through Europe PMC, or null to fall through to the
+ * ordinary fetch. Only the open-access subset is served this way; for the rest
+ * the API answers "not found", and the article stays abstract-only — correctly.
+ */
+async function articleFromEuropePmc(
+  pmcId: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<ExtractedArticle | null> {
+  try {
+    const res = await safeFetch(`${EUROPE_PMC_FULLTEXT}/PMC${pmcId}/fullTextXML`, {
+      headers: { Accept: "application/xml" },
+      timeoutMs: Math.min(timeoutMs, EUROPE_PMC_TIMEOUT_MS),
+      signal,
+    });
+    if (!res.ok) {
+      void res.body?.cancel().catch(() => {});
+      return null;
+    }
+    const xml = decodeHtml(await readBodyCapped(res, MAX_PDF_BYTES), "charset=utf-8");
+    return articleFromJats(xml, pmcId);
+  } catch {
+    return null;
+  }
+}
+
 export async function extractArticleFromUrl(
   url: string,
   timeoutMs: number = FETCH_TIMEOUT_MS,
+  opts: ExtractOptions = {},
 ): Promise<ExtractedArticle> {
+  const pmcId = pmcIdFromUrl(url);
+  if (pmcId) {
+    const viaApi = await articleFromEuropePmc(pmcId, timeoutMs, opts.signal);
+    if (viaApi) return viaApi;
+  }
   let html = "";
   try {
     // safeFetch validates the URL (and every redirect hop) against the SSRF guard
@@ -220,19 +542,22 @@ export async function extractArticleFromUrl(
         "Sec-Fetch-User": "?1",
       },
       timeoutMs,
+      signal: opts.signal,
     });
     if (!res.ok) {
+      void res.body?.cancel().catch(() => {});
       throw new ArticleUnreadableError(
         `The site responded with error ${res.status}. It may be paywalled or blocking readers — try pasting the article text instead.`,
+        reasonForStatus(res.status),
       );
     }
     // Read the raw bytes ONCE, then decide what they are. A URL that serves a
     // PDF (arXiv, NBER, gov reports — prime debate evidence) was being decoded
     // as text, which put the PDF's binary streams straight into the card body.
     const contentType = (res.headers.get("content-type") ?? "").toLowerCase();
-    const buffer = await res.arrayBuffer();
+    const buffer = await readBodyCapped(res, opts.maxBytes ?? MAX_PDF_BYTES);
     if (isPdfResponse(contentType, url, buffer)) {
-      return await articleFromPdf(new Uint8Array(buffer), url);
+      return await articleFromPdf(new Uint8Array(buffer), url, opts.pdfMaxPages);
     }
     html = decodeHtml(buffer, contentType);
   } catch (err) {
@@ -240,10 +565,12 @@ export async function extractArticleFromUrl(
     if (err instanceof BlockedUrlError) {
       throw new ArticleUnreadableError(
         "That URL can't be fetched (it points to a private or blocked address). Paste the article text instead.",
+        "blocked_url",
       );
     }
     throw new ArticleUnreadableError(
       "The article couldn't be fetched (timeout or network error). Try pasting the article text instead.",
+      "timeout",
     );
   }
 
@@ -261,6 +588,7 @@ export async function extractArticleFromUrl(
   if (!parsed || !parsed.textContent || parsed.textContent.trim().length < MIN_ARTICLE_CHARS) {
     throw new ArticleUnreadableError(
       "No readable article text was found on that page. Try pasting the article text instead.",
+      "no_text",
     );
   }
 
@@ -276,6 +604,7 @@ export async function extractArticleFromUrl(
   ) {
     throw new ArticleUnreadableError(
       "This article is behind a paywall — only a teaser or abstract is free to read. Try pasting the full text instead.",
+      "paywall",
     );
   }
 
@@ -313,12 +642,15 @@ export async function extractArticleFromUrl(
 
 /**
  * Extracted-article cache. An article's readable text is public and stable, so a
- * recent extraction is reused across the whole app instead of downloading and
- * re-parsing the same URL. This is what removes the "double fetch": the Article
- * Finder's accessibility check (verifyAccessible) WARMS this cache, so the
- * follow-up Cut / Re-Highlight of that result skips the fetch + parse entirely
- * and goes straight to the AI step. Shared across users + instances when Redis is
- * configured, in-memory otherwise.
+ * recent extraction is reused instead of downloading and re-parsing the same URL
+ * — a cut followed by a re-highlight of the same source, or a re-cut at another
+ * length.
+ *
+ * It is IN-PROCESS only (see below), so it does not carry the Article Finder's
+ * checks over to a later cut in production: on Vercel the search and cut routes
+ * are separate functions that never share memory. The finder's check therefore
+ * doesn't use this cache at all (see verifyAccessible), and a cut plans on a
+ * fresh download.
  *
  * Only SUCCESSFUL extractions are cached: createSharedCache.wrap never stores a
  * rejection, so a paywalled/timed-out URL is not negatively cached and a later
@@ -362,25 +694,50 @@ export async function extractArticleCached(
   return articleCache.wrap(url.trim(), () => extractor(url, timeoutMs));
 }
 
+// The Article Finder's per-URL check: one total budget across redirects, and
+// only the opening pages of a PDF. The download cap matches the cut's — a
+// smaller one meant a readable 10-25 MB PDF could never be shown as full text.
+const VERIFY_TIMEOUT_MS = 6500;
+const VERIFY_MAX_BYTES = MAX_PDF_BYTES;
+const VERIFY_PDF_PAGES = 4;
+
+/** Outcome of checking one URL for readable full text. */
+export interface AccessCheck {
+  ok: boolean;
+  chars: number;
+  /** "ok", "abstract_only" when the page read but held only the abstract, else why it failed. */
+  reason: "ok" | "abstract_only" | UnreadableReason | "error";
+}
+
 /**
  * Quick, quiet check that a URL is actually readable full text a debater could
- * cut from — used by the Article Finder to only show accessible sources. Uses a
- * shorter timeout than a real cut and never throws (a failure just means "not
- * accessible"). Goes through the shared cache so the extraction it pays for is
- * reused by a follow-up cut of the same result (no second download).
+ * cut from — used by the Article Finder to only show full-text sources. Never
+ * throws: a failure just means "not full text", with the reason attached so the
+ * finder can stop retrying a host that is refusing it.
+ *
+ * `abstract` is the database's abstract for this work, so a landing page that
+ * merely repeats it is recognized as abstract-only (see classifyText).
+ *
+ * Deliberately NOT cached: a PDF is only read to its first pages here, which is
+ * enough to tell an article from an abstract but is not the article.
  */
 export async function verifyAccessible(
   url: string,
-  timeoutMs = 6500,
-): Promise<{ ok: boolean; chars: number }> {
+  opts: { timeoutMs?: number; signal?: AbortSignal; abstract?: string } = {},
+): Promise<AccessCheck> {
   try {
-    const article = await extractArticleCached(url, timeoutMs);
+    const article = await extractArticleFromUrl(url, opts.timeoutMs ?? VERIFY_TIMEOUT_MS, {
+      signal: opts.signal,
+      maxBytes: VERIFY_MAX_BYTES,
+      pdfMaxPages: VERIFY_PDF_PAGES,
+    });
     const chars = article.text.trim().length;
-    // "Accessible" means genuinely cuttable full text — not just an abstract.
-    // extractArticleFromUrl already rejected paywalled/teaser pages by throwing.
-    return { ok: chars >= MIN_ACCESSIBLE_CHARS, chars };
-  } catch {
-    return { ok: false, chars: 0 };
+    return classifyText(article.text, opts.abstract) === "full_text"
+      ? { ok: true, chars, reason: "ok" }
+      : { ok: false, chars, reason: "abstract_only" };
+  } catch (err) {
+    const reason = err instanceof ArticleUnreadableError && err.reason ? err.reason : "error";
+    return { ok: false, chars: 0, reason };
   }
 }
 

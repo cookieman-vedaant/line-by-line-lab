@@ -15,9 +15,12 @@ import { type CandidateArticle } from "@/services/academicSearch";
 
 const ENDPOINT = "https://api.tavily.com/search";
 const FETCH_TIMEOUT_MS = 9000;
-const RESULTS_PER_QUERY = 10;
+// Tavily's ceiling. A basic search costs 1 credit whether it returns 10 results
+// or 20, so asking for the full 20 doubles the open-web pool the ranker and the
+// full-text check get to choose from at no extra cost.
+const RESULTS_PER_QUERY = 20;
 // ONE query per app-search = 1 Tavily credit, doubling how far the free
-// 1,000/month tier stretches. A single query still returns 10 web results.
+// 1,000/month tier stretches. A single query still returns 20 web results.
 const MAX_QUERIES = 1;
 
 interface TavilyResult {

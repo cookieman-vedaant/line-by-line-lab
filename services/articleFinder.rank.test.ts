@@ -3,14 +3,22 @@ import { articlesFromRanking } from "./articleFinder";
 import type { CandidateArticle } from "./academicSearch";
 
 /**
- * The bug this file exists to prevent:
+ * History this file carries:
  *
- * The ranker is allowed to answer "none of these relate to the claim", and on a
- * narrowly worded claim it regularly did — retrieval had found forty real
- * articles about the subject, none arguing that exact sentence. The pipeline
- * turned that opinion into NoSourcesFoundError, so the app told debaters no
- * reputable sources existed while forty of them sat in the shortlist. The more
- * precise the claim, the more reliably it happened.
+ * 1. The ranker is allowed to answer "none of these relate to the claim", and on
+ *    a narrowly worded claim it regularly did while forty on-subject articles
+ *    sat in the shortlist. The fix then was to show those articles anyway,
+ *    ordered by citations.
+ *
+ * 2. That fallback is exactly how debaters were handed articles with nothing to
+ *    do with their claim — and cut power-tagged cards from them. So a JUDGED
+ *    empty ranking now means what it says, and returns nothing. Narrow claims
+ *    are protected where the problem actually was: the ranker prompt now counts
+ *    a narrower, more general or one-step article as support, and the finder
+ *    searches further before it gives up (see runSearch).
+ *
+ * A MALFORMED answer (every pick out of range) is still not a judgement about
+ * relevance, and still falls back to non-AI ordering.
  */
 function candidate(i: number, over: Partial<CandidateArticle> = {}): CandidateArticle {
   return {
@@ -42,12 +50,10 @@ describe("articlesFromRanking", () => {
     expect(out[0].credibilityScore).toBe(90);
   });
 
-  it("still returns real articles when the ranker selects NONE", () => {
-    // The regression. Retrieval found these; an empty ranking must not be
-    // reported to the debater as "no reputable sources were found".
-    const out = articlesFromRanking([], shortlist);
-    expect(out.length).toBeGreaterThan(0);
-    expect(out.map((a) => a.url).sort()).toEqual(shortlist.map((c) => c.url).sort());
+  it("returns nothing when the ranker judges that NONE of the candidates support the claim", () => {
+    // Showing them anyway, by citation count, is how off-topic articles reached
+    // the cutter. The caller searches further, then reports honestly.
+    expect(articlesFromRanking([], shortlist)).toEqual([]);
   });
 
   it("falls back when every selected index is out of range", () => {
@@ -73,10 +79,22 @@ describe("articlesFromRanking", () => {
 
   it("never invents an article that wasn't retrieved", () => {
     const urls = new Set(shortlist.map((c) => c.url));
-    for (const selections of [[], [{ index: 0, explanation: "x", credibilityScore: 1 }]]) {
+    for (const selections of [
+      [],
+      [{ index: 0, explanation: "x", credibilityScore: 1 }],
+      [{ index: 7, explanation: "hallucinated", credibilityScore: 1 }],
+    ]) {
       for (const article of articlesFromRanking(selections, shortlist)) {
         expect(urls.has(article.url)).toBe(true);
       }
     }
+  });
+
+  it("does not hand web snippets to the cutter as abstracts", () => {
+    // A search engine's snippet is stitched fragments, not the author's
+    // abstract; the cutter must never cut a card from it.
+    const web = candidate(9, { source: "web", abstract: "snippet … from a page" });
+    const [out] = articlesFromRanking([{ index: 0, explanation: "x", credibilityScore: 50 }], [web]);
+    expect(out.abstract).toBeUndefined();
   });
 });
