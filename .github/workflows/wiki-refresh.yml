@@ -1,0 +1,58 @@
+name: Wiki refresh
+
+# Keeps the shared wiki card index current: ingests every current-season
+# opencaselist weekly archive not yet recorded as finished (newest week first),
+# then exits. Runs here rather than as a Vercel cron because a busy week is
+# thousands of cards per division and saving runs at ~4 cards/s — hours of work,
+# where a Vercel function gets 300s. See scripts/wiki-refresh.ts.
+#
+# Needs these repository secrets (Settings → Secrets and variables → Actions):
+#   NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+#   CASELIST_INGEST_USERNAME, CASELIST_INGEST_PASSWORD
+
+on:
+  schedule:
+    # Daily at 09:00 UTC (3-4am US Central), when nobody is using the app.
+    # opencaselist publishes new weekly archives on Tuesdays; most days this
+    # finds nothing new and finishes in a couple of minutes.
+    - cron: "0 9 * * *"
+  workflow_dispatch: {}
+
+# Never two at once: a long catch-up must not overlap the next day's run.
+concurrency:
+  group: wiki-refresh
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    name: Ingest new wiki archives
+    runs-on: ubuntu-latest
+    # GitHub's ceiling is 360. The script stops STARTING archives at its budget
+    # (WIKI_REFRESH_BUDGET_MIN) and the last one in flight gets the rest.
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Ingest new archives
+        run: npx --yes tsx@4.20.6 --conditions=react-server scripts/wiki-refresh.ts
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CASELIST_INGEST_USERNAME: ${{ secrets.CASELIST_INGEST_USERNAME }}
+          CASELIST_INGEST_PASSWORD: ${{ secrets.CASELIST_INGEST_PASSWORD }}
+          WIKI_REFRESH_BUDGET_MIN: "300"
+          # A short breath between 50-card writes keeps a long fill under the
+          # database's sustained disk-IO budget, so the live app stays responsive.
+          WIKI_UPSERT_PACE_MS: "500"
+          NODE_OPTIONS: "--max-old-space-size=4096"

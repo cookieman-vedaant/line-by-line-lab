@@ -158,11 +158,10 @@ export interface IngestOptions {
   /** Reuse one login across many caselists (see `ingestAll`/`ingestActiveSeason`). */
   token?: string;
   /**
-   * Process only the newest N weekly archives instead of all of them. The weekly
-   * refresh cron passes a small number: a current-season caselist gains only a
-   * couple of archives a week, so pulling just the newest one or two keeps each
-   * scheduled run tiny and inside a function's time budget. Omit to ingest every
-   * weekly (the one-time whole-history backfill).
+   * Process only the newest N weekly archives instead of all of them. Omit to
+   * ingest every weekly (the one-time whole-history backfill). The scheduled
+   * refresh no longer uses a window like this — a run that didn't finish let
+   * weeks slide out of it for good; see ingestActiveSeason.
    */
   maxArchives?: number;
 }
@@ -178,7 +177,17 @@ export interface IngestOptions {
  * deleting the OLDEST cards first, so current-topic prep always wins. Override
  * with WIKI_MAX_CARDS.
  */
-const MAX_INDEXED_CARDS = Number(process.env.WIKI_MAX_CARDS ?? 400_000);
+const MAX_INDEXED_CARDS = parseCardCap(process.env.WIKI_MAX_CARDS);
+
+/**
+ * WIKI_MAX_CARDS as a number. Separators are allowed because people write them:
+ * `.env.local` held "600,000", which Number() reads as NaN — and a NaN cap
+ * silently disabled both the safety ceiling and eviction.
+ */
+export function parseCardCap(raw: string | undefined): number {
+  const n = Number((raw ?? "").replace(/[,_\s]/g, ""));
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 400_000;
+}
 
 /**
  * A hard stop DURING ingestion, above the target, before eviction trims back
@@ -273,6 +282,29 @@ function buildSourceUrl(caselist: string, school: string | null, team: string | 
 
 type WikiAdminClient = ReturnType<typeof createSupabaseAdminClient>;
 
+// Hashes per lookup. 200 × 64 hex chars keeps the request URL ~13 KB.
+const KNOWN_LOOKUP_BATCH = 200;
+
+/** Which of `hashes` the index already holds. */
+async function knownHashes(admin: WikiAdminClient, hashes: string[]): Promise<Set<string>> {
+  const known = new Set<string>();
+  for (let i = 0; i < hashes.length; i += KNOWN_LOOKUP_BATCH) {
+    const { data, error } = await admin
+      .from("wiki_cards")
+      .select("content_hash")
+      .in("content_hash", hashes.slice(i, i + KNOWN_LOOKUP_BATCH));
+    // A failed lookup only costs speed: ON CONFLICT still dedupes the write.
+    if (error) return known;
+    for (const row of data ?? []) known.add((row as { content_hash: string }).content_hash);
+  }
+  return known;
+}
+
+/** The rows whose card the index doesn't already hold. */
+export function dropKnown<T extends { content_hash: string }>(rows: T[], known: Set<string>): T[] {
+  return rows.filter((r) => !known.has(r.content_hash));
+}
+
 /** Outcome of ingesting ONE weekly archive. */
 export interface ArchiveIngestResult {
   /** .docx files seen in this archive. */
@@ -354,12 +386,16 @@ export async function ingestArchive(
     }
   }
 
-  const batch = [...rows.values()];
   try {
-    // ignoreDuplicates → INSERT ... ON CONFLICT DO NOTHING. A card's content is
-    // immutable (the hash IS the content), so an already-indexed card needs no
-    // update — skipping it avoids re-generating its tsvector, which is what made
-    // re-ingests and dup-heavy caselists crawl. New cards still get inserted.
+    // Saving is the bottleneck (~4 cards/s: every row builds two tsvectors and
+    // two GIN entries), so cards the index already holds are dropped BEFORE the
+    // write. A lookup is ~1.7ms a card; ON CONFLICT DO NOTHING still pays to
+    // build the row first. That is what makes re-running an interrupted archive
+    // cheap.
+    const batch = dropKnown([...rows.values()], await knownHashes(admin, [...rows.keys()]));
+    // ignoreDuplicates → INSERT ... ON CONFLICT DO NOTHING still guards a card
+    // that landed from elsewhere in between. A card's content is immutable (the
+    // hash IS the content), so an already-indexed card needs no update.
     const cards = await upsertInChunks(batch, async (chunk) => {
       const { error } = await admin
         .from("wiki_cards")
@@ -558,15 +594,6 @@ export async function ingestAll(): Promise<IngestSummary[]> {
 }
 
 /**
- * How many of each active caselist's newest archives the weekly refresh pulls.
- * Weeklies are incremental, so at a weekly cadence one would suffice; four gives
- * a month of slack so a missed run (or a newly-created caselist) still catches
- * up without a manual backfill. Re-pulling an already-indexed archive is a
- * no-op (upsert), so the only cost of a wider window is a little bandwidth.
- */
-const REFRESH_ARCHIVES_PER_CASELIST = 4;
-
-/**
  * Divisions too heavy to refresh against the LIVE instance. College-policy
  * (`ndtceda`) cards are enormous, so even a few archives of writes spike the
  * shared DB's disk IO and can slow the live app — sign-in and search included. A
@@ -587,17 +614,120 @@ export function isHeavyRefreshCaselist(slug: string): boolean {
   return HEAVY_REFRESH_DIVISIONS.some((d) => s.startsWith(d));
 }
 
+/** A weekly archive waiting to be ingested. */
+export interface PendingArchive {
+  caselist: string;
+  name: string;
+  url: string;
+}
+
+const weekOf = (name: string): string => name.match(/(\d{4}-\d{2}-\d{2})/)?.[1] ?? "";
+
 /**
- * Refresh only the CURRENT season's caselists, newest archives first.
+ * The weekly archives still to ingest, in the order to ingest them: the newest
+ * week of EVERY caselist before any older week, so one division with huge
+ * archives can't starve the rest (hspolicy26 starved hsld26/hspf26/nfald26 for
+ * weeks), and this week's tournaments always land first. Finished archives are
+ * skipped however old they are — there is no window to slide out of. Pure.
+ */
+export function planRefresh(
+  listing: Array<{ caselist: string; archives: Array<{ name: string; url: string }> }>,
+  done: Set<string>,
+): PendingArchive[] {
+  const pending = listing.flatMap(({ caselist, archives }, order) =>
+    archives
+      .filter((a) => /-weekly-/i.test(a.name) && !done.has(a.name))
+      .map((a) => ({ caselist, name: a.name, url: a.url, order })),
+  );
+  pending.sort((a, b) => {
+    const wa = weekOf(a.name);
+    const wb = weekOf(b.name);
+    return wa === wb ? a.order - b.order : wa < wb ? 1 : -1;
+  });
+  return pending.map(({ caselist, name, url }) => ({ caselist, name, url }));
+}
+
+/**
+ * Archives of these caselists already fully ingested (see the
+ * wiki_ingest_archives migration). Scoped to the caselists at hand: a season is
+ * ~250 archives, while the whole table outgrows PostgREST's 1,000-row page.
+ */
+async function finishedArchives(admin: WikiAdminClient, caselists: string[]): Promise<Set<string>> {
+  if (caselists.length === 0) return new Set();
+  const { data, error } = await admin
+    .from("wiki_ingest_archives")
+    .select("archive")
+    .in("caselist", caselists)
+    .limit(5000);
+  if (error) throw new Error(`wikiIngest: can't read finished archives: ${error.message}`);
+  return new Set((data ?? []).map((r) => (r as { archive: string }).archive));
+}
+
+async function markArchiveFinished(
+  admin: WikiAdminClient,
+  row: { archive: string; caselist: string; files: number; cards: number },
+): Promise<void> {
+  const { error } = await admin
+    .from("wiki_ingest_archives")
+    .upsert({ ...row, ingested_at: new Date().toISOString() }, { onConflict: "archive" });
+  // Not fatal: the next run re-checks this archive, and every card it holds is
+  // already indexed, so the redo is lookups only.
+  if (error) console.warn(`wikiIngest: couldn't record "${row.archive}" as finished`, error.message);
+}
+
+/** How slow a trivial query may be before ingestion pauses (see waitForHealthyDb). */
+const SLOW_DB_MS = 3000;
+const SLOW_DB_PAUSE_MS = 60_000;
+const SLOW_DB_MAX_PAUSES = 30;
+
+/**
+ * Wait until the database answers a trivial query quickly. Ingestion shares the
+ * instance with the live app, and a sustained fill has slowed sign-in before
+ * (see db-capacity notes in wikiIngest's history), so the refresh steps aside
+ * while the database is struggling instead of piling on. Gives up waiting after
+ * ~30 minutes and lets the run continue.
+ */
+export async function waitForHealthyDb(): Promise<void> {
+  const admin = createSupabaseAdminClient();
+  for (let i = 0; i < SLOW_DB_MAX_PAUSES; i++) {
+    const started = Date.now();
+    const { error } = await admin.from("wiki_cards").select("id", { head: true, count: "estimated" }).limit(1);
+    const ms = Date.now() - started;
+    if (!error && ms < SLOW_DB_MS) return;
+    console.warn(`wikiRefresh: database slow (${ms}ms${error ? `, ${error.message}` : ""}); pausing`);
+    await sleep(SLOW_DB_PAUSE_MS);
+  }
+}
+
+export interface RefreshOptions {
+  /** Stop starting new archives after this time (ms since epoch). */
+  deadlineAt?: number;
+  /** Run before each archive — e.g. waitForHealthyDb. */
+  beforeArchive?: () => Promise<void>;
+}
+
+export interface RefreshResult {
+  summaries: IngestSummary[];
+  /** Archives still waiting when the run stopped (0 = caught up). */
+  pending: number;
+}
+
+/**
+ * Bring the CURRENT season's caselists up to date: ingest every weekly archive
+ * not yet recorded as finished, newest week first across caselists (see
+ * planRefresh), recording each one as it completes.
  *
  * Past seasons are frozen — a 2024 wiki never gains new archives — so the full
  * backfill (`ingestAll`, run once from the ingest script) covers them forever.
- * Only the active season keeps disclosing, so the recurring cron re-ingests
- * just those, and only their newest weekly archives. That keeps a scheduled run
- * small enough to finish inside one function invocation, unlike a full crawl.
+ * Only the active season keeps disclosing. Saving is slow (~4 cards/s on this
+ * instance) and a busy week is thousands of cards per division, so this runs
+ * where it can work for hours (scripts/wiki-refresh.ts, on GitHub Actions) and
+ * picks up where it stopped: a run cut off mid-archive just redoes that archive,
+ * whose already-saved cards are skipped before writing.
  */
-export async function ingestActiveSeason(): Promise<IngestSummary[]> {
+export async function ingestActiveSeason(opts: RefreshOptions = {}): Promise<RefreshResult> {
   const token = await ingestToken();
+  const admin = createSupabaseAdminClient();
   const season = currentSeasonYear();
   const slugs = (await ingestableCaselists(token)).filter((slug) => {
     const y = yearFromSlug(slug);
@@ -605,23 +735,67 @@ export async function ingestActiveSeason(): Promise<IngestSummary[]> {
     // must not run against the live instance. See HEAVY_REFRESH_DIVISIONS.
     return y !== null && y >= season && !isHeavyRefreshCaselist(slug);
   });
-  const summaries: IngestSummary[] = [];
-  for (const slug of slugs) {
+  const listing = [];
+  for (const caselist of slugs) {
     try {
-      const summary = await ingestCaselist(slug, {
-        token,
-        maxArchives: REFRESH_ARCHIVES_PER_CASELIST,
-      });
-      console.info(`wikiRefresh: ${slug} → ${summary.cards} cards from ${summary.files} files`);
-      summaries.push(summary);
+      listing.push({ caselist, archives: await listBulkArchives(token, caselist) });
     } catch (err) {
-      console.error(`wikiRefresh: caselist "${slug}" failed`, err);
+      console.error(`wikiRefresh: couldn't list "${caselist}"`, err);
     }
   }
-  // Appended this week's disclosures; now trim back to the storage budget by
-  // dropping the OLDEST cards first (never user data).
+  const plan = planRefresh(listing, await finishedArchives(admin, slugs));
+  console.info(`wikiRefresh: ${plan.length} archive(s) to ingest across ${listing.length} caselist(s)`);
+
+  const byCaselist = new Map<string, IngestSummary>();
+  let next = 0;
+  for (; next < plan.length; next++) {
+    if (opts.deadlineAt != null && Date.now() >= opts.deadlineAt) break;
+    const archive = plan[next];
+    const { count } = await admin.from("wiki_cards").select("*", { count: "estimated", head: true });
+    if ((count ?? 0) >= SAFETY_CEILING) {
+      console.warn(`wikiRefresh: hit the ${SAFETY_CEILING}-card safety ceiling; stopping.`);
+      break;
+    }
+    await opts.beforeArchive?.();
+    const started = Date.now();
+    const result = await ingestArchive(
+      archive.caselist,
+      archive,
+      admin,
+      yearFromSlug(archive.caselist),
+      new Date().toISOString(),
+    );
+    console.info(
+      `wikiRefresh: ${archive.name} → ${result.cards} new cards from ${result.files} files in ${Math.round((Date.now() - started) / 1000)}s${result.failed ? " (FAILED — retried next run)" : ""}`,
+    );
+    if (!result.failed) {
+      await markArchiveFinished(admin, {
+        archive: archive.name,
+        caselist: archive.caselist,
+        files: result.files,
+        cards: result.cards,
+      });
+    }
+    const s = byCaselist.get(archive.caselist) ?? {
+      caselist: archive.caselist,
+      archives: 0,
+      files: 0,
+      cards: 0,
+      skipped: 0,
+      failedArchives: 0,
+    };
+    s.archives++;
+    s.files += result.files;
+    s.cards += result.cards;
+    s.skipped += result.skipped;
+    if (result.failed) s.failedArchives = (s.failedArchives ?? 0) + 1;
+    byCaselist.set(archive.caselist, s);
+  }
+
+  // Appended new disclosures; now trim back to the storage budget by dropping
+  // the OLDEST cards first (never user data).
   await enforceWikiCap();
-  return summaries;
+  return { summaries: [...byCaselist.values()], pending: plan.length - next };
 }
 
 /**

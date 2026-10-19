@@ -2,20 +2,24 @@ import { NextResponse } from "next/server";
 import { ingestActiveSeason } from "@/services/wikiIngest";
 
 /**
- * Scheduled wiki refresh — keep the CURRENT season's disclosures current.
+ * Manual wiki refresh — a short slice of the current season's catch-up.
  *
- * The whole-history backfill is a one-time job (past seasons never change), run
- * from scripts/ingest-wiki.mjs. This cron only tops up the active season: it
- * re-ingests just the newest archives of this year's caselists, which is small
- * enough to finish inside the function budget — a full crawl never would.
- * Users never ingest anything; they search the shared index this keeps fresh.
+ * The scheduled refresh runs on GitHub Actions (scripts/wiki-refresh.ts), NOT
+ * here: saving is ~4 cards/s on this database and a busy week is thousands of
+ * cards per division, which a 300s function can never finish. As the weekly
+ * Vercel cron it died inside the first caselist every week, so later caselists
+ * starved. It stays as a manual trigger: it ingests archives until its deadline
+ * and records each one it finishes, so the scheduled job picks up after it.
  *
- * Wired to a weekly Vercel Cron in vercel.json and signed with CRON_SECRET,
- * exactly like /api/cron/purge — it runs a Tabroom login and writes the shared
- * corpus with the service-role key, so a stranger must not be able to trigger it.
+ * Signed with CRON_SECRET, exactly like /api/cron/purge — it runs a Tabroom
+ * login and writes the shared corpus with the service-role key, so a stranger
+ * must not be able to trigger it.
  */
 
 export const maxDuration = 300;
+
+// Stop STARTING archives with time left for the one in flight.
+const DEADLINE_MS = 150_000;
 
 export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET;
@@ -31,9 +35,9 @@ export async function GET(req: Request) {
   }
 
   try {
-    const summaries = await ingestActiveSeason();
+    const { summaries, pending } = await ingestActiveSeason({ deadlineAt: Date.now() + DEADLINE_MS });
     const cards = summaries.reduce((total, s) => total + s.cards, 0);
-    const result = { ok: true, caselists: summaries.length, cards };
+    const result = { ok: true, caselists: summaries.length, cards, pending };
     console.info("cron/wiki-refresh complete", result);
     return NextResponse.json(result);
   } catch (err) {

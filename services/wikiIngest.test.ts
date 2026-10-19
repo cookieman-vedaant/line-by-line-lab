@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   currentSeasonYear,
+  dropKnown,
   isRetryableWriteError,
+  parseCardCap,
+  planRefresh,
   provenanceFromPath,
   upsertInChunks,
   yearFromSlug,
@@ -160,5 +163,71 @@ describe("currentSeasonYear", () => {
   it("uses the prior year before August (that season runs into spring)", () => {
     expect(currentSeasonYear(new Date("2026-07-31T00:00:00Z"))).toBe(2025);
     expect(currentSeasonYear(new Date("2026-01-15T00:00:00Z"))).toBe(2025);
+  });
+});
+
+/*
+ * Measured 2026-10-18: the weekly refresh pulled the newest 4 archives of every
+ * current-season caselist inside ONE 300s function, in API order. Mid-season
+ * archives are 100-760 MB and the database saves ~4 cards/s, so each run died
+ * inside the first caselist (hspolicy26): hsld26 got nothing after Sep 14,
+ * hspf26 after Aug 17, nfald26 never — and every week a run didn't finish slid
+ * out of the newest-4 window for good. The refresh now works from a record of
+ * finished archives instead of a window.
+ */
+describe("planRefresh", () => {
+  const listing = [
+    { caselist: "hspolicy26", archives: ["hspolicy26-weekly-2026-10-06.zip", "hspolicy26-weekly-2026-10-13.zip", "hspolicy26-all-2026-10-13.zip"] },
+    { caselist: "hsld26", archives: ["hsld26-weekly-2026-10-13.zip", "hsld26-weekly-2026-10-06.zip", "hsld26-weekly-2026-07-07.zip"] },
+    { caselist: "nfald26", archives: ["nfald26-weekly-2026-10-13.zip"] },
+  ].map((c) => ({ caselist: c.caselist, archives: c.archives.map((name) => ({ name, url: `https://s3/${name}` })) }));
+
+  it("takes the newest week of EVERY caselist before any older week", () => {
+    expect(planRefresh(listing, new Set()).map((a) => a.name)).toEqual([
+      "hspolicy26-weekly-2026-10-13.zip",
+      "hsld26-weekly-2026-10-13.zip",
+      "nfald26-weekly-2026-10-13.zip",
+      "hspolicy26-weekly-2026-10-06.zip",
+      "hsld26-weekly-2026-10-06.zip",
+      "hsld26-weekly-2026-07-07.zip",
+    ]);
+  });
+
+  it("skips archives already finished — however old — and never the cumulative -all- file", () => {
+    const done = new Set(["hspolicy26-weekly-2026-10-13.zip", "hsld26-weekly-2026-07-07.zip"]);
+    const names = planRefresh(listing, done).map((a) => a.name);
+    expect(names).not.toContain("hspolicy26-weekly-2026-10-13.zip");
+    expect(names).not.toContain("hsld26-weekly-2026-07-07.zip");
+    expect(names.some((n) => n.includes("-all-"))).toBe(false);
+    expect(names).toContain("hsld26-weekly-2026-10-06.zip");
+  });
+
+  it("carries the caselist and download url with each archive", () => {
+    expect(planRefresh(listing, new Set())[1]).toEqual({
+      caselist: "hsld26",
+      name: "hsld26-weekly-2026-10-13.zip",
+      url: "https://s3/hsld26-weekly-2026-10-13.zip",
+    });
+  });
+});
+
+describe("parseCardCap", () => {
+  it("reads a cap written with thousands separators", () => {
+    // .env.local had WIKI_MAX_CARDS="600,000", which Number() reads as NaN —
+    // silently turning the storage cap off.
+    expect(parseCardCap("600,000")).toBe(600_000);
+    expect(parseCardCap("1_500_000")).toBe(1_500_000);
+    expect(parseCardCap(" 250000 ")).toBe(250_000);
+  });
+
+  it("falls back to the default for anything that isn't a positive number", () => {
+    for (const raw of [undefined, "", "lots", "-5", "0"]) expect(parseCardCap(raw), String(raw)).toBe(400_000);
+  });
+});
+
+describe("dropKnown", () => {
+  it("keeps only cards the index doesn't already hold", () => {
+    const batch = [{ content_hash: "a" }, { content_hash: "b" }, { content_hash: "c" }];
+    expect(dropKnown(batch, new Set(["b"])).map((r) => r.content_hash)).toEqual(["a", "c"]);
   });
 });

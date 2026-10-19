@@ -588,21 +588,25 @@ export async function listBulkArchives(token: string, caselist: string): Promise
 }
 
 /**
- * Per-archive size cap. The WEEKLY archives we ingest run up to ~450MB; the
- * cumulative `-all-` snapshot (multiple GB) is deliberately never fetched — it
- * can't be buffered and is just the union of the weeklies anyway. This ceiling
- * lets every real weekly through while refusing anything pathological.
+ * Per-archive size cap. WEEKLY archives reach ~760MB in a big Public Forum week
+ * (hspf26-weekly-2026-09-15, measured 2026-10-18) — the old 600MB cap refused
+ * them outright, so those weeks could never be indexed. The cumulative `-all-`
+ * snapshot (multiple GB) is deliberately never fetched — it can't be buffered
+ * and is just the union of the weeklies anyway. The refresh runs on GitHub
+ * Actions runners (7GB RAM), so 1.2GB leaves room for one archive in memory.
+ * Override with WIKI_MAX_ARCHIVE_MB.
  */
-const MAX_ARCHIVE_BYTES = 600 * 1024 * 1024;
+const MAX_ARCHIVE_BYTES =
+  (Number(process.env.WIKI_MAX_ARCHIVE_MB) > 0 ? Number(process.env.WIKI_MAX_ARCHIVE_MB) : 1200) * 1024 * 1024;
 
 /**
  * Overall wall-clock BACKSTOP for one archive download. Sized for the largest
- * archive (~450MB) on a slow-but-moving link; the real defence against a wedged
+ * archive (~760MB) on a slow-but-moving link; the real defence against a wedged
  * connection is STALL_TIMEOUT_MS below, so this only has to catch the rare
- * slow-trickle case (bytes arriving, but far too slowly to ever finish). 6
- * minutes clears ~450MB at ~1.25MB/s.
+ * slow-trickle case (bytes arriving, but far too slowly to ever finish). 12
+ * minutes clears ~760MB at ~1.1MB/s.
  */
-const ARCHIVE_TIMEOUT_MS = 6 * 60 * 1000;
+const ARCHIVE_TIMEOUT_MS = 12 * 60 * 1000;
 
 /**
  * Abort a download that goes SILENT — the failure that actually stalled the

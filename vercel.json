@@ -4,10 +4,6 @@
     {
       "path": "/api/cron/purge",
       "schedule": "0 4 * * *"
-    },
-    {
-      "path": "/api/cron/wiki-refresh",
-      "schedule": "0 5 * * 1"
     }
   ]
 }
